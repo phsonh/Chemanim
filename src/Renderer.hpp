@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.hpp"
+#include "core/Depiction.hpp"
 
 #include <string>
 #include <filesystem>
@@ -10,6 +11,15 @@
 #include <raylib.h>
 
 namespace chem {
+
+struct RendererProfile {
+    double svgGenerationMs = 0.0;
+    double svgParsingMs = 0.0;
+    double svgRasterizationMs = 0.0;
+    double textureUploadMs = 0.0;
+    std::uint64_t moleculeCacheHits = 0;
+    std::uint64_t moleculeCacheMisses = 0;
+};
 
 class Renderer {
 public:
@@ -23,6 +33,7 @@ public:
     void renderScene(int frame);
     void savePng(const std::filesystem::path& path);
     [[nodiscard]] std::vector<unsigned char> captureRgba();
+    [[nodiscard]] const RendererProfile& profile() const { return profile_; }
 
 private:
     Engine& engine_;
@@ -33,10 +44,15 @@ private:
         Texture2D texture{};
         std::string svg;
         float rasterScale = 0.0f;
+        core::Viewport viewport;
+        bool hasViewport = false;
+        std::string geometryKey;
     };
     std::unordered_map<int, SvgCacheEntry> moleculeSvgs_;
     bool initialized_ = false;
     int currentFrame_ = 0;
+    core::DepictionCore depictionCore_;
+    RendererProfile profile_;
     static constexpr int supersample_ = 2;
 
     void loadAssets();

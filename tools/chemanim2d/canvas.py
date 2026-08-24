@@ -1,114 +1,145 @@
 from __future__ import annotations
 
-import math
-
-from PyQt6.QtCore import QByteArray, QPoint, QPointF, QRect, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen, QWheelEvent
+from PyQt6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPolygonF, QWheelEvent
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QWidget
 
-from .depiction import AcsDepiction, render_acs1996
-from .model import Molecule
+from .core import CoreSession
 
 
 class StructureCanvas(QWidget):
-    selectionChanged = pyqtSignal(object)
-    coordinatesChanged = pyqtSignal()
-    dragCommitted = pyqtSignal(object, object)
+    selectionChanged = pyqtSignal(list, list)
+    transactionCommitted = pyqtSignal()
+    hoverChanged = pyqtSignal(dict)
 
-    def __init__(self, parent=None):
-        super().__init__(parent); self.setMinimumSize(620, 420); self.setMouseTracking(True); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.molecule: Molecule | None = None; self.selected: set[str] = set(); self.zoom = 3.0; self.pan = QPointF()
-        self._depiction: AcsDepiction | None = None; self._positions: dict[str,QPointF] = {}
-        self._drag_start: QPoint | None = None; self._original: dict[str,tuple[float,float]] = {}
-        self._box_start: QPoint | None = None; self._box_end: QPoint | None = None
+    def __init__(self, session: CoreSession, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
+        self.setMinimumSize(640, 420)
+        self.pixels_per_unit = 48.0
+        self.center_x = 0.0
+        self.center_y = 0.0
+        self.final_effect = False
+        self._depiction = None
+        self._svg = None
+        self._raster = None
+        self._selected_atoms = []
+        self._selected_bonds = []
+        self._preview = {"active": False}
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._refresh_now)
 
-    def set_molecule(self, molecule: Molecule | None):
-        self.molecule=molecule; self.selected.clear(); self.invalidate(); self.fit(); self.selectionChanged.emit(set()); self.update()
+    def _sync_viewport(self):
+        self.session.set_viewport(max(1, self.width()), max(1, self.height()),
+                                  self.pixels_per_unit, self.center_x, self.center_y)
 
-    def invalidate(self):
-        self._depiction = render_acs1996(self.molecule) if self.molecule else None
+    def request_refresh(self):
+        if not self._timer.isActive(): self._timer.start(16)
 
-    def _canvas_rect(self): return self.rect().adjusted(28,28,-28,-28)
-    def _svg_rect(self):
-        if not self._depiction: return QRectF()
-        center=QPointF(self.width()/2,self.height()/2)+self.pan
-        size=QPointF(self._depiction.width*self.zoom,self._depiction.height*self.zoom)
-        return QRectF(center.x()-size.x()/2,center.y()-size.y()/2,size.x(),size.y())
+    def _refresh_now(self):
+        self._sync_viewport()
+        try: data = self.session.depict(self.final_effect)
+        except RuntimeError:
+            self._depiction = self._svg = self._raster = None
+            self.update(); return
+        self._depiction = data
+        if self.final_effect:
+            image = QImage(data["rgba"], data["width"], data["height"], QImage.Format.Format_RGBA8888)
+            self._raster = image.copy(); self._svg = None
+        else:
+            self._svg = QSvgRenderer(QByteArray(data["svg"].encode("utf-8"))); self._raster = None
+        self.update()
+
+    def set_final_effect(self, enabled: bool):
+        self.final_effect = enabled; self.request_refresh()
+
+    @property
+    def selected_atoms(self): return list(self._selected_atoms)
 
     def fit(self):
-        self.pan=QPointF()
-        if self.molecule:
-            self.invalidate()
-            if self._depiction:
-                canvas=self._canvas_rect(); self.zoom=max(.5,min(12,min(canvas.width()*.62/self._depiction.width,canvas.height()*.62/self._depiction.height)))
-        self.update()
-
-    def paintEvent(self, event: QPaintEvent):
-        painter=QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(),QColor(35,39,45))
-        canvas=self._canvas_rect(); painter.fillRect(canvas,QColor(255,255,255)); painter.setClipRect(canvas)
-        painter.setPen(QPen(QColor(237,239,241),1))
-        for x in range(canvas.left(),canvas.right(),64): painter.drawLine(x,canvas.top(),x,canvas.bottom())
-        for y in range(canvas.top(),canvas.bottom(),64): painter.drawLine(canvas.left(),y,canvas.right(),y)
-        self._positions={}
-        if self._depiction:
-            target=self._svg_rect(); QSvgRenderer(QByteArray(self._depiction.svg.encode("utf-8"))).render(painter,target)
-            self._positions={atom_id:target.topLeft()+QPointF(x*self.zoom,y*self.zoom) for atom_id,(x,y) in self._depiction.atom_points.items()}
-        painter.setBrush(QColor(0,120,215,38)); painter.setPen(QPen(QColor(0,120,215),2))
-        for atom_id in self.selected:
-            if atom_id in self._positions: painter.drawEllipse(self._positions[atom_id],9,9)
-        if self._box_start and self._box_end:
-            box=QRect(self._box_start,self._box_end).normalized(); painter.setPen(QPen(QColor(0,120,215),1,Qt.PenStyle.DashLine)); painter.setBrush(QColor(0,120,215,24)); painter.drawRect(box)
-
-    def _hit(self, point: QPoint) -> str | None:
-        nearest=None; distance=1e9
-        for atom_id,p in self._positions.items():
-            d=math.hypot(p.x()-point.x(),p.y()-point.y())
-            if d<13 and d<distance: nearest,distance=atom_id,d
-        return nearest
-
-    def _pixels_per_model_unit(self) -> float:
-        if not self.molecule or not self._depiction: return self.zoom
-        atoms={a.id:a for a in self.molecule.atoms}; ratios=[]
-        for bond in self.molecule.bonds:
-            if bond.a in atoms and bond.b in atoms and bond.a in self._depiction.atom_points and bond.b in self._depiction.atom_points:
-                a,b=atoms[bond.a],atoms[bond.b]; model=math.hypot(a.x-b.x,a.y-b.y)
-                pa,pb=self._depiction.atom_points[bond.a],self._depiction.atom_points[bond.b]; drawn=math.hypot(pa[0]-pb[0],pa[1]-pb[1])
-                if model>.001: ratios.append(drawn/model)
-        return (sum(ratios)/len(ratios) if ratios else 1.0)*self.zoom
-
-    def mousePressEvent(self,event:QMouseEvent):
-        if event.button()!=Qt.MouseButton.LeftButton or not self.molecule: return
-        atom_id=self._hit(event.position().toPoint())
-        if atom_id:
-            if event.modifiers()&Qt.KeyboardModifier.ControlModifier: self.selected.symmetric_difference_update({atom_id})
-            elif atom_id not in self.selected: self.selected={atom_id}
-            self.selectionChanged.emit(set(self.selected)); self._drag_start=event.position().toPoint()
-            self._original={a.id:(a.x,a.y) for a in self.molecule.atoms if a.id in self.selected}; self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        project = self.session.project(); active = self.session.active_molecule
+        molecule = next((item for item in project.get("molecules", []) if item["id"] == active), None)
+        if not molecule or not molecule["atoms"]:
+            self.center_x = self.center_y = 0.0; self.pixels_per_unit = 48.0
         else:
-            if not event.modifiers()&Qt.KeyboardModifier.ControlModifier: self.selected.clear(); self.selectionChanged.emit(set())
-            self._box_start=event.position().toPoint(); self._box_end=self._box_start
-        self.update()
+            xs = [atom["x"] for atom in molecule["atoms"]]; ys = [atom["y"] for atom in molecule["atoms"]]
+            self.center_x = (min(xs) + max(xs)) * .5; self.center_y = (min(ys) + max(ys)) * .5
+            span_x = max(max(xs) - min(xs), 2.0); span_y = max(max(ys) - min(ys), 2.0)
+            self.pixels_per_unit = max(12.0, min(110.0, min(self.width() * .72 / span_x, self.height() * .72 / span_y)))
+        self.request_refresh()
 
-    def mouseMoveEvent(self,event:QMouseEvent):
-        if not self.molecule: return
-        point=event.position().toPoint()
-        if self._drag_start and self._original:
-            factor=self._pixels_per_model_unit(); dx=(point.x()-self._drag_start.x())/factor; dy=-(point.y()-self._drag_start.y())/factor
-            for atom in self.molecule.atoms:
-                if atom.id in self._original:
-                    ox,oy=self._original[atom.id]; atom.x=round(ox+dx,4); atom.y=round(oy+dy,4)
-            self.invalidate(); self.coordinatesChanged.emit(); self.update()
-        elif self._box_start: self._box_end=point; self.update()
-        else: self.setCursor(Qt.CursorShape.OpenHandCursor if self._hit(point) else Qt.CursorShape.ArrowCursor)
+    def resizeEvent(self, event):
+        super().resizeEvent(event); self.request_refresh()
 
-    def mouseReleaseEvent(self,event:QMouseEvent):
-        if not self.molecule: return
-        if self._drag_start and self._original:
-            after={a.id:(a.x,a.y) for a in self.molecule.atoms if a.id in self._original}; self.dragCommitted.emit(dict(self._original),after)
-        elif self._box_start and self._box_end:
-            box=QRect(self._box_start,self._box_end).normalized(); self.selected={atom_id for atom_id,p in self._positions.items() if box.contains(p.toPoint())}; self.selectionChanged.emit(set(self.selected))
-        self._drag_start=None; self._original={}; self._box_start=None; self._box_end=None; self.update()
+    def _background(self):
+        value = self.session.project().get("scene", {}).get("background", "FFFFFFFF")
+        try: return QColor(int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16), int(value[6:8], 16))
+        except (ValueError, IndexError): return QColor("white")
 
-    def wheelEvent(self,event:QWheelEvent):
-        self.zoom=max(.4,min(18,self.zoom*(1.15 if event.angleDelta().y()>0 else 1/1.15))); self.update()
+    def paintEvent(self, event):
+        painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), self._background())
+        painter.setPen(QPen(QColor(120, 135, 150, 32), 1)); spacing = max(24, int(self.pixels_per_unit))
+        ox = int(self.width() * .5 - self.center_x * self.pixels_per_unit) % spacing
+        oy = int(self.height() * .5 + self.center_y * self.pixels_per_unit) % spacing
+        for x in range(ox, self.width(), spacing): painter.drawLine(x, 0, x, self.height())
+        for y in range(oy, self.height(), spacing): painter.drawLine(0, y, self.width(), y)
+        if self._raster: painter.drawImage(QRectF(self.rect()), self._raster)
+        elif self._svg: self._svg.render(painter, QRectF(self.rect()))
+        if self._depiction:
+            points = {item["id"]: item["center"] for item in self._depiction["atoms"]}
+            painter.setPen(QPen(QColor(0, 120, 215), 2)); painter.setBrush(QColor(0, 120, 215, 34))
+            for atom_id in self._selected_atoms:
+                if atom_id in points:
+                    point = points[atom_id]; painter.drawEllipse(QPointF(point["x"], point["y"]), 10, 10)
+        if self._preview.get("active"):
+            polygon = self._preview.get("polygon", [])
+            painter.setPen(QPen(QColor(0, 120, 215, 170), 2, Qt.PenStyle.DashLine)); painter.setBrush(QColor(0, 120, 215, 28))
+            if polygon: painter.drawPolygon(QPolygonF([QPointF(item["x"], item["y"]) for item in polygon]))
+            else:
+                start, current = self._preview.get("start"), self._preview.get("current")
+                if start and current: painter.drawLine(QPointF(start["x"], start["y"]), QPointF(current["x"], current["y"]))
+
+    @staticmethod
+    def _mods(event):
+        mods = event.modifiers()
+        return bool(mods & Qt.KeyboardModifier.AltModifier), bool(mods & Qt.KeyboardModifier.ControlModifier), bool(mods & Qt.KeyboardModifier.ShiftModifier)
+
+    def _consume(self, result):
+        self._selected_atoms = list(result["selected_atoms"]); self._selected_bonds = list(result["selected_bonds"]); self._preview = result["preview"]
+        self.selectionChanged.emit(self._selected_atoms, self._selected_bonds); self.hoverChanged.emit(result["hover"]); self.update()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() != Qt.MouseButton.LeftButton: return
+        self.setFocus(); alt, control, shift = self._mods(event)
+        self._consume(self.session.pointer_down(event.position().x(), event.position().y(), alt, control, shift))
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        alt, control, shift = self._mods(event)
+        self._consume(self.session.pointer_move(event.position().x(), event.position().y(), alt, control, shift))
+        self.request_refresh()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() != Qt.MouseButton.LeftButton: return
+        alt, control, shift = self._mods(event)
+        result = self.session.pointer_up(event.position().x(), event.position().y(), alt, control, shift)
+        self._consume(result); self.request_refresh()
+        if result["changed"]: self.transactionCommitted.emit()
+
+    def wheelEvent(self, event: QWheelEvent):
+        self.pixels_per_unit = max(10.0, min(180.0, self.pixels_per_unit * (1.12 if event.angleDelta().y() > 0 else 1 / 1.12)))
+        self.request_refresh()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self.session.delete_selection():
+                self._selected_atoms.clear(); self._selected_bonds.clear(); self.selectionChanged.emit([], [])
+                self.request_refresh(); self.transactionCommitted.emit()
+            return
+        if event.key() == Qt.Key.Key_Escape:
+            self.session.cancel_gesture(); self._preview = {"active": False}; self.request_refresh(); return
+        super().keyPressEvent(event)

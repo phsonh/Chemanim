@@ -3,6 +3,8 @@
 /media/
 /.vs/
 /.venv/
+/.deps/
 __pycache__/
 .pytest_cache/
 *.mp4
+*.pyd

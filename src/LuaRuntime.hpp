@@ -88,6 +88,9 @@ private:
     static int mSetColor(lua_State* state);
     static int mLerpColor(lua_State* state);
     static int mSetWidth(lua_State* state);
+    static int mSetAtomXY(lua_State* state);
+    static int mLerpAtomXY(lua_State* state);
+    static int mLerpAtomsXY(lua_State* state);
 };
 
 } // namespace chem

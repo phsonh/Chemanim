@@ -10,8 +10,11 @@ extern "C" {
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -138,7 +141,7 @@ void Renderer::drawObject(const Object& object) {
 }
 
 void Renderer::drawAcsMolecule(int table, const Object& object) {
-    if (!object.molecule || object.molecule->acsSvg.empty()) return;
+    if (!object.molecule || object.molecule->atoms.empty()) return;
     const float renderWidth = static_cast<float>(engine_.scene.width * supersample_);
     const float renderHeight = static_cast<float>(engine_.scene.height * supersample_);
     const float canvasScaleX = renderWidth / engine_.scene.logicWidth;
@@ -148,14 +151,51 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const float rasterScale = static_cast<float>(engine_.scene.viewZoom * supersample_) *
                               std::max(std::abs(scaleX), std::abs(scaleY));
     SvgCacheEntry& cache = moleculeSvgs_[object.id];
-    if (cache.texture.id == 0 || cache.svg != object.molecule->acsSvg ||
+    if (!cache.hasViewport) {
+        double minX = object.molecule->atoms.front().position.x, maxX = minX;
+        double minY = object.molecule->atoms.front().position.y, maxY = minY;
+        for (const auto& atom : object.molecule->atoms) {
+            minX = std::min(minX, atom.position.x); maxX = std::max(maxX, atom.position.x);
+            minY = std::min(minY, atom.position.y); maxY = std::max(maxY, atom.position.y);
+        }
+        const double reference = std::max(0.01, object.molecule->referenceBondLength);
+        const double pixelsPerUnit = 14.4 / reference;
+        cache.viewport.width = std::max(64, static_cast<int>(std::ceil((maxX - minX) * pixelsPerUnit + 64.0)));
+        cache.viewport.height = std::max(64, static_cast<int>(std::ceil((maxY - minY) * pixelsPerUnit + 64.0)));
+        cache.viewport.pixelsPerUnit = pixelsPerUnit;
+        cache.viewport.center = {(minX + maxX) * .5, (minY + maxY) * .5};
+        cache.hasViewport = true;
+    }
+    core::Molecule currentMolecule = *object.molecule;
+    for (auto& atom : currentMolecule.atoms) {
+        const auto x = object.numericTracks.find("atom:" + atom.id + ":x");
+        const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
+        if (x != object.numericTracks.end()) atom.position.x = x->second.valueAt(currentFrame_);
+        if (y != object.numericTracks.end()) atom.position.y = y->second.valueAt(currentFrame_);
+    }
+    std::ostringstream geometry; geometry << std::setprecision(12);
+    for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.formalCharge << ':' << atom.position.x << ':' << atom.position.y << ';';
+    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.stereo) << ';';
+    const std::string geometryKey = geometry.str();
+    const bool geometryChanged = cache.geometryKey != geometryKey;
+    if (geometryChanged) {
+        const auto start = std::chrono::steady_clock::now(); const core::Style style;
+        cache.svg = depictionCore_.depict(currentMolecule, style, cache.viewport).svg;
+        profile_.svgGenerationMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        cache.geometryKey = geometryKey; ++profile_.moleculeCacheMisses;
+    } else ++profile_.moleculeCacheHits;
+    if (cache.texture.id == 0 || geometryChanged ||
         std::abs(cache.rasterScale - rasterScale) > 0.001f) {
         if (cache.texture.id != 0) UnloadTexture(cache.texture);
-        Image image = rasterizeSvg(object.molecule->acsSvg, rasterScale);
+        core::RasterProfile rasterProfile;
+        Image image = rasterizeSvg(cache.svg, rasterScale, &rasterProfile);
+        profile_.svgParsingMs += rasterProfile.parseMs;
+        profile_.svgRasterizationMs += rasterProfile.rasterMs;
+        const auto uploadStart = std::chrono::steady_clock::now();
         cache.texture = LoadTextureFromImage(image);
+        profile_.textureUploadMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uploadStart).count();
         UnloadImage(image);
         SetTextureFilter(cache.texture, TEXTURE_FILTER_BILINEAR);
-        cache.svg = object.molecule->acsSvg;
         cache.rasterScale = rasterScale;
     }
     const float x = renderWidth * 0.5f + static_cast<float>(number(table, "x", 0)) * canvasScaleX;

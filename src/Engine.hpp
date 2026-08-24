@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Molecule2D.hpp"
+#include "core/Document.hpp"
 
 struct lua_State;
 
@@ -114,7 +114,7 @@ struct Object {
     std::unordered_map<std::string, NumericTrack> numericTracks;
     std::unordered_map<std::string, StringTrack> stringTracks;
     std::vector<ImageTransition> imageTransitions;
-    std::unique_ptr<Molecule2D> molecule;
+    std::unique_ptr<core::Molecule> molecule;
 };
 
 struct TextureAsset {
@@ -147,6 +147,8 @@ public:
                             std::string targetTexture, Ease ease,
                             std::optional<double> targetX = std::nullopt,
                             std::optional<double> targetY = std::nullopt);
+    void addAtomTween(Object& object, const std::string& atomId, int start, int duration,
+                      double x, double y, Ease ease);
     void applyFrame(int frame);
     void registerTexture(std::string name, std::filesystem::path path,
                          double anchorX = 0.5, double anchorY = 0.5);

@@ -254,6 +254,19 @@ void Engine::addImageTransition(Object& object, int start, int duration,
     object.imageTransitions.push_back(std::move(transition));
 }
 
+void Engine::addAtomTween(Object& object, const std::string& atomId, int start, int duration,
+                          double x, double y, Ease ease) {
+    if (!object.molecule) throw std::runtime_error("Atom coordinates require a molecule object");
+    const core::Atom* atom = object.molecule->atom(atomId);
+    if (!atom) throw std::runtime_error("Unknown atom stable ID: " + atomId);
+    const std::string xKey = "atom:" + atomId + ":x";
+    const std::string yKey = "atom:" + atomId + ":y";
+    object.numericTracks.try_emplace(xKey, NumericTrack{atom->position.x, {}});
+    object.numericTracks.try_emplace(yKey, NumericTrack{atom->position.y, {}});
+    addNumericTween(object, xKey, start, duration, x, ease);
+    addNumericTween(object, yKey, start, duration, y, ease);
+}
+
 std::optional<ImageBlend> Engine::imageBlendAt(const Object& object, int frame) const {
     const ImageTransition* selected = nullptr;
     for (const auto& transition : object.imageTransitions) {

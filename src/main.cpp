@@ -4,6 +4,7 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #define CloseWindow CloseWindowWin32
 #define ShowCursor ShowCursorWin32
 #include <windows.h>
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -29,6 +31,8 @@ struct Options {
     std::optional<std::string> modName;
     bool openWhenFinished = true;
     bool still = false;
+    int stillFrame = 0;
+    bool profile = false;
 };
 
 void printHelp() {
@@ -38,6 +42,7 @@ void printHelp() {
         "  chemanim.exe aldol       Render mod/aldol/main.lua\n"
         "  chemanim.exe             Auto-select when mod/ contains exactly one mod\n"
         "  chemanim.exe native2d_demo --still --no-open\n"
+        "  chemanim.exe atom_motion --frame 30 --no-open\n"
         "  chemanim.exe aldol --no-open\n\n"
         "Output:\n"
         "  media/aldol/aldol_YYYY-MM-DD_HH-MM-SS.mp4\n"
@@ -51,6 +56,11 @@ Options parseOptions(int argc, char** argv) {
         if (argument == "--help" || argument == "-h") { printHelp(); std::exit(0); }
         if (argument == "--no-open") options.openWhenFinished = false;
         else if (argument == "--still") options.still = true;
+        else if (argument == "--profile") options.profile = true;
+        else if (argument == "--frame") {
+            if (++i >= argc) throw std::runtime_error("--frame requires a non-negative frame number");
+            options.stillFrame = std::max(0, std::stoi(argv[i])); options.still = true;
+        }
         else if (argument.starts_with('-')) throw std::runtime_error("Unknown option: " + argument);
         else if (!options.modName) options.modName = argument;
         else throw std::runtime_error("Only one mod name may be specified");
@@ -154,7 +164,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path mediaDirectory = root / "media" / modName;
         std::filesystem::create_directories(mediaDirectory);
         const std::filesystem::path output = options.still
-            ? mediaDirectory / (modName + "_preview.png")
+            ? mediaDirectory / (modName + "_frame_" + std::to_string(options.stillFrame) + ".png")
             : mediaDirectory / (modName + "_" + timestamp() + ".mp4");
 
         std::cout << "Mod:    " << modName << "\nEntry:  " << script.string()
@@ -166,7 +176,7 @@ int main(int argc, char** argv) {
         chem::Renderer renderer(engine);
         renderer.initialize(true);
         if (options.still) {
-            renderer.renderScene(0);
+            renderer.renderScene(options.stillFrame);
             renderer.savePng(output);
             std::cout << "Created: " << output.string() << "\n";
             if (options.openWhenFinished && !openWithDefaultApplication(output)) {
@@ -175,7 +185,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         chem::VideoEncoder encoder(output, engine.scene.width, engine.scene.height, engine.scene.fps);
-
+        const auto renderStart = std::chrono::steady_clock::now();
         for (int frame = 0; frame <= engine.scene.endFrame; ++frame) {
             renderer.renderScene(frame);
             encoder.writeFrame(renderer.captureRgba());
@@ -184,7 +194,24 @@ int main(int argc, char** argv) {
             }
         }
         encoder.finish();
+        const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();
         std::cout << "\nCreated: " << output.string() << "\n";
+
+        if (options.profile) {
+            const auto& profile = renderer.profile(); const int frames = engine.scene.endFrame + 1;
+            std::filesystem::path profilePath = output; profilePath.replace_extension(".profile.json");
+            std::ofstream report(profilePath, std::ios::binary | std::ios::trunc);
+            report << std::fixed << std::setprecision(3)
+                   << "{\n  \"frames\": " << frames << ",\n  \"wall_seconds\": " << elapsed
+                   << ",\n  \"frames_per_second\": " << (frames / std::max(.000001, elapsed))
+                   << ",\n  \"svg_generation_ms\": " << profile.svgGenerationMs
+                   << ",\n  \"svg_parsing_ms\": " << profile.svgParsingMs
+                   << ",\n  \"svg_rasterization_ms\": " << profile.svgRasterizationMs
+                   << ",\n  \"texture_upload_ms\": " << profile.textureUploadMs
+                   << ",\n  \"molecule_cache_hits\": " << profile.moleculeCacheHits
+                   << ",\n  \"molecule_cache_misses\": " << profile.moleculeCacheMisses << "\n}\n";
+            std::cout << "Profile: " << profilePath.string() << "\n";
+        }
 
         if (options.openWhenFinished && !openWithDefaultApplication(output)) {
             std::cerr << "The MP4 was created, but Windows could not open the default video player.\n";

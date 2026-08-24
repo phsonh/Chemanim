@@ -1,4 +1,4 @@
-"""Native 2D project model and editor for Chemanim."""
+"""Thin PyQt client for the shared Chemanim C++ core."""
 
 FORMAT = "chemanim-native-2d"
-VERSION = 2
+VERSION = 3

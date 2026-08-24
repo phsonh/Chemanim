@@ -164,9 +164,8 @@ Object& LuaRuntime::createObjectTable(const std::string& kind, int propertiesInd
 
 void LuaRuntime::readMolecule(Object& object, int tableIndex) {
     tableIndex = lua_absindex(state_, tableIndex);
-    auto molecule = std::make_unique<Molecule2D>();
+    auto molecule = std::make_unique<core::Molecule>();
     molecule->sourceSmiles = stringField(state_, tableIndex, "source_smiles", "");
-    molecule->acsSvg = stringField(state_, tableIndex, "acs_svg", "");
     molecule->referenceBondLength = numberField(state_, tableIndex, "reference_bond_length", 1.0);
 
     lua_getfield(state_, tableIndex, "atoms");
@@ -183,8 +182,8 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
             lua_pop(state_, 2);
             throw std::runtime_error("chem.NewMol: every atom must be a table");
         }
-        Atom2D atom;
-        atom.stableId = stringField(state_, -1, "id", "");
+        core::Atom atom;
+        atom.id = stringField(state_, -1, "id", "");
         atom.element = stringField(state_, -1, "element", "C");
         atom.alias = stringField(state_, -1, "alias", "");
         atom.isotope = static_cast<int>(numberField(state_, -1, "isotope", 0));
@@ -195,7 +194,7 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         atom.hidden = numberField(state_, -1, "hidden", 0) != 0;
         atom.position.x = numberField(state_, -1, "x", 0);
         atom.position.y = numberField(state_, -1, "y", 0);
-        if (atom.stableId.empty()) {
+        if (atom.id.empty()) {
             lua_pop(state_, 2);
             throw std::runtime_error("chem.NewMol: atom stable ID cannot be empty");
         }
@@ -218,15 +217,16 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
             lua_pop(state_, 2);
             throw std::runtime_error("chem.NewMol: every bond must be a table");
         }
-        Bond2D bond;
-        bond.stableId = stringField(state_, -1, "id", "");
+        core::Bond bond;
+        bond.id = stringField(state_, -1, "id", "");
         bond.atomA = stringField(state_, -1, "a", "");
         bond.atomB = stringField(state_, -1, "b", "");
-        bond.order = numberField(state_, -1, "order", 1);
-        bond.aromatic = numberField(state_, -1, "aromatic", 0) != 0;
-        bond.stereo = stringField(state_, -1, "stereo", "none");
+        const double order = numberField(state_, -1, "order", 1);
+        bond.type = numberField(state_, -1, "aromatic", 0) != 0 ? core::BondType::Aromatic :
+                    order > 2.5 ? core::BondType::Triple : order > 1.5 ? core::BondType::Double : core::BondType::Single;
+        bond.stereo = core::bondStereoFromString(stringField(state_, -1, "stereo", "none"));
         bond.visible = numberField(state_, -1, "visible", 1) != 0;
-        if (bond.stableId.empty() || bond.atomA.empty() || bond.atomB.empty()) {
+        if (bond.id.empty() || bond.atomA.empty() || bond.atomB.empty()) {
             lua_pop(state_, 2);
             throw std::runtime_error("chem.NewMol: bond ID and atom references cannot be empty");
         }
@@ -235,6 +235,7 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
     }
     lua_pop(state_, 1);
 
+    molecule->validateIds();
     object.molecule = std::move(molecule);
 }
 
@@ -258,6 +259,9 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     }
     if (object.kind == "sprite") {
         bind("SetImage", mSetImage); bind("ChangeImage", mChangeImage);
+    } else if (object.kind == "molecule") {
+        bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
+        bind("LerpAtomsXY", mLerpAtomsXY);
     } else if (object.kind == "arrow") {
         bind("SetProgress", mSetProgress); bind("LerpProgress", mLerpProgress);
         bind("SetCurve", mSetCurve);
@@ -735,6 +739,35 @@ int LuaRuntime::mLerpColor(lua_State* state) {
 int LuaRuntime::mSetWidth(lua_State* state) {
     auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
     runtime.engine_->addNumericTween(object, "thickness", runtime.cursor_, 0, luaL_checknumber(state, a), Ease::Step);
+    return returnBoundObject(state, object);
+}
+
+int LuaRuntime::mSetAtomXY(lua_State* state) {
+    auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
+    runtime.engine_->addAtomTween(object, luaL_checkstring(state, a), runtime.cursor_, 0,
+                                  luaL_checknumber(state, a + 1), luaL_checknumber(state, a + 2), Ease::Step);
+    return returnBoundObject(state, object);
+}
+
+int LuaRuntime::mLerpAtomXY(lua_State* state) {
+    auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
+    runtime.engine_->addAtomTween(object, luaL_checkstring(state, a), runtime.cursor_, durationValue(state, a + 3),
+                                  luaL_checknumber(state, a + 1), luaL_checknumber(state, a + 2), boundEase(state, a + 4));
+    return returnBoundObject(state, object);
+}
+
+int LuaRuntime::mLerpAtomsXY(lua_State* state) {
+    auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
+    luaL_checktype(state, a, LUA_TTABLE);
+    const int duration = durationValue(state, a + 1); const Ease ease = boundEase(state, a + 2);
+    lua_pushnil(state);
+    while (lua_next(state, a) != 0) {
+        const char* atomId = luaL_checkstring(state, -2); luaL_checktype(state, -1, LUA_TTABLE);
+        lua_rawgeti(state, -1, 1); const double x = luaL_checknumber(state, -1); lua_pop(state, 1);
+        lua_rawgeti(state, -1, 2); const double y = luaL_checknumber(state, -1); lua_pop(state, 1);
+        runtime.engine_->addAtomTween(object, atomId, runtime.cursor_, duration, x, y, ease);
+        lua_pop(state, 1);
+    }
     return returnBoundObject(state, object);
 }
 

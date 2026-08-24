@@ -1,44 +1,35 @@
-# `.cmm` v2 工程格式
+# `.cmm` v3
 
-原生二维编辑器使用 JSON 文本，扩展名仍为 `.cmm`。根对象必须包含：
+`.cmm` 是 UTF-8 JSON。权威数据由共享 C++ Core 读写，PyQt 不维护平行的 dataclass 模型。
 
 ```json
 {
   "format": "chemanim-native-2d",
-  "version": 2,
-  "mod": "native2d_demo",
+  "version": 3,
+  "mod": "atom_motion",
+  "next_molecule_id": 2,
+  "next_timeline_id": 4,
   "scene": {},
   "style": {},
   "molecules": [],
-  "nodes": []
+  "timeline": { "atom_tweens": [], "pose_tweens": [] }
 }
 ```
 
-编辑器不会把旧版 `chemanim-linear-nodes` v1 当作 v2 猜测读取；打开旧文件时会明确提示使用 Git 历史中的旧编辑器。
-
-## 场景和样式
-
-`scene` 保存输出尺寸、逻辑尺寸、FPS、背景、标题和二维视图缩放 `view_zoom`。坐标原点在画布中心，X 向右、Y 向上。
-
-`style.preset` 当前固定为 `acs_document_1996`，实际绘制规则来自 RDKit `SetACS1996Mode`，不是 Chemanim 对几个公开参数的自行模仿。编辑器预览可以独立缩放；保存的原子坐标不会因此改变。
+Core 仍可读取现有 v2 原生二维工程；下次保存会写成 v3。旧的 `chemanim-linear-nodes` v1 不是同一种格式。
 
 ## 分子
 
-每个 `molecules[]` 项是一个高层场景对象，包含对象变换、源 SMILES、创建时的 `reference_bond_length`、原子、键和预留的 Pose 数据。SMILES 只记录来源；生成后不会覆盖手工坐标。参考键长在创建时固定，避免动画中的键长变化触发自动缩放。
+每个 molecule 是一个场景对象。`source_smiles` 只记录导入来源；`atoms`、`bonds` 和 XY 才决定当前拓扑和画面。`next_atom_id` 与 `next_bond_id` 单调递增，因此删除后不会复用稳定 ID。
 
-原子字段：
+原子主要字段为 `id`、`element`、`x`、`y`、`isotope`、`formal_charge`、`radical_electrons`、`implicit_hydrogens`、`aromatic`、`alias` 和 `hidden`。
 
-- `id`：稳定 ID。优先使用 atom map number，否则为 `A1`、`A2`……；
-- `element`、`isotope`、`formal_charge`、`radical_electrons`；
-- `implicit_hydrogens`、`aromatic`、`chirality`、`alias`、`hidden`；
-- `x`、`y`：分子局部二维坐标。
+键主要字段为 `id`、`a`、`b`、`type`、`stereo` 和 `visible`。`type` 为 `single`、`double`、`triple` 或 `aromatic`；`stereo` 为 `none`、`wedge`、`dash` 或 `wavy`。
 
-键字段：
+Pose 存储 `atom ID → {x,y}`，不会复制拓扑。原子和键不是独立场景对象。
 
-- `id`：稳定 ID，如 `B1`；
-- `a`、`b`：两端原子的稳定 ID；
-- `order`、`aromatic`、`stereo`、`visible`。
+## 时间轴
 
-当前 `stereo` 支持 `none`、`wedge`、`dash` 和 `either` 数据值。第一阶段显示由 RDKit ACS1996 SVG 负责；手动更改显示样式的检查器会在后续补齐。
+`atom_tweens` 保存稳定节点 ID、molecule/atom ID、起始帧、帧数、目标 XY 和 easing。`pose_tweens` 指向 molecule 内部的一组 Pose 坐标。后发的同原子插值会终止仍在运行的前一个插值，并以该帧求值结果为新起点。
 
-`nodes` 在第一阶段保留为空数组。后续的 Set/Lerp、Pose 与拓扑事件会放在这里，不会把每个原子变成场景对象或 Lua table。
+画布观察缩放不写回模型。编辑基础结构时修改初始 XY；编辑 tween 或 Pose 时只修改节点目标。
