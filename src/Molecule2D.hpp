@@ -35,6 +35,8 @@ struct Bond2D {
 
 struct Molecule2D {
     std::string sourceSmiles;
+    std::string acsSvg;
+    double referenceBondLength = 1.0;
     std::vector<Atom2D> atoms;
     std::vector<Bond2D> bonds;
 };

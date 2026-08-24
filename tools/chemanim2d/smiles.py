@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
+from rdkit.Chem.Draw import rdMolDraw2D
 
 from .model import Atom, Bond, Molecule
 
@@ -38,4 +39,5 @@ def molecule_from_smiles(name: str, smiles: str, object_id: str = "molecule1") -
         bonds.append(Bond(id=f"B{index + 1}", a=atom_ids[source.GetBeginAtomIdx()],
                           b=atom_ids[source.GetEndAtomIdx()], order=float(source.GetBondTypeAsDouble()),
                           aromatic=source.GetIsAromatic(), stereo=stereo))
-    return Molecule(id=object_id, name=name, source_smiles=smiles, atoms=atoms, bonds=bonds)
+    return Molecule(id=object_id, name=name, source_smiles=smiles,
+                    reference_bond_length=float(rdMolDraw2D.MeanBondLength(mol)), atoms=atoms, bonds=bonds)

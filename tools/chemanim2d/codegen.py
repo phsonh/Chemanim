@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from .model import Project
+from .depiction import render_acs1996
 
 
 def _s(value: str) -> str:
@@ -16,7 +17,9 @@ def generate_lua(project: Project) -> str:
              f"    view_zoom = {s.view_zoom:g},",
              f"    background = {_s(s.background)},", f"    title = {_s(s.title)}", "}", ""]
     for m in project.molecules:
-        lines += [f"local {m.id} = chem.NewMol {{", f"    source_smiles = {_s(m.source_smiles)},", "    atoms = {"]
+        svg = render_acs1996(m).svg
+        lines += [f"local {m.id} = chem.NewMol {{", f"    source_smiles = {_s(m.source_smiles)},",
+                  f"    reference_bond_length = {m.reference_bond_length:.8g},", "    acs_svg = [==[" + svg + "]==],", "    atoms = {"]
         for a in m.atoms:
             fields = [f"id = {_s(a.id)}", f"element = {_s(a.element)}", f"x = {a.x:.4f}", f"y = {a.y:.4f}",
                       f"isotope = {a.isotope}", f"formal_charge = {a.formal_charge}",

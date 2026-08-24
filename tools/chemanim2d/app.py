@@ -23,7 +23,7 @@ class MoveAtomsCommand(QUndoCommand):
         if not molecule: return
         for atom in molecule.atoms:
             if atom.id in values: atom.x,atom.y=values[atom.id]
-        self.window.canvas.update(); self.window.inspector.refresh_values(); self.window.mark_dirty()
+        self.window.canvas.invalidate(); self.window.canvas.update(); self.window.inspector.refresh_values(); self.window.mark_dirty()
     def undo(self): self._apply(self.before)
     def redo(self):
         if self.first: self.first=False
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
     def _coordinates_changed(self): self.inspector.refresh_values(); self.code.setPlainText(generate_lua(self.project))
     def _commit_drag(self,before,after):
         if before!=after: self.undo_stack.push(MoveAtomsCommand(self,before,after)); self.mark_dirty()
-    def _inspector_edited(self): self.canvas.update(); self.mark_dirty()
+    def _inspector_edited(self): self.canvas.invalidate(); self.canvas.update(); self.mark_dirty()
     def toggle_code(self): self.code_dock.setVisible(not self.code_dock.isVisible())
     def generate(self):
         try: path=write_mod(self.project,self.root); self.statusBar().showMessage(f"已生成 {path}"); self.code.setPlainText(generate_lua(self.project))

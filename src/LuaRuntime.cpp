@@ -166,6 +166,8 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
     tableIndex = lua_absindex(state_, tableIndex);
     auto molecule = std::make_unique<Molecule2D>();
     molecule->sourceSmiles = stringField(state_, tableIndex, "source_smiles", "");
+    molecule->acsSvg = stringField(state_, tableIndex, "acs_svg", "");
+    molecule->referenceBondLength = numberField(state_, tableIndex, "reference_bond_length", 1.0);
 
     lua_getfield(state_, tableIndex, "atoms");
     if (!lua_istable(state_, -1)) {

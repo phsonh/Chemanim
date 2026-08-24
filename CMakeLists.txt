@@ -22,6 +22,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(raylib)
 
 FetchContent_Declare(
+    nanosvg
+    URL https://codeload.github.com/memononen/nanosvg/tar.gz/refs/heads/master
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(nanosvg)
+if(NOT nanosvg_POPULATED)
+    FetchContent_Populate(nanosvg)
+endif()
+
+FetchContent_Declare(
     lua_source
     URL https://www.lua.org/ftp/lua-5.4.7.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -54,8 +64,9 @@ add_executable(chemanim
     src/Renderer.cpp
     src/VideoEncoder.cpp
     src/Molecule2D.hpp
+    src/SvgRasterizer.cpp
 )
-target_include_directories(chemanim PRIVATE src)
+target_include_directories(chemanim PRIVATE src ${nanosvg_SOURCE_DIR}/src)
 target_link_libraries(chemanim PRIVATE raylib lua)
 if(WIN32)
     target_link_libraries(chemanim PRIVATE mfplat mfreadwrite mfuuid ole32 shell32)

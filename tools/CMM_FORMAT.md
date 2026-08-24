@@ -20,11 +20,11 @@
 
 `scene` 保存输出尺寸、逻辑尺寸、FPS、背景、标题和二维视图缩放 `view_zoom`。坐标原点在画布中心，X 向右、Y 向上。
 
-`style.preset` 当前固定为 `acs_document_1996`。默认值是 Arial 10 pt、14.4 pt 参考键长、0.6 pt 线宽及 18% 双键间距。编辑器预览可以独立缩放；保存的原子坐标不会因此改变。
+`style.preset` 当前固定为 `acs_document_1996`，实际绘制规则来自 RDKit `SetACS1996Mode`，不是 Chemanim 对几个公开参数的自行模仿。编辑器预览可以独立缩放；保存的原子坐标不会因此改变。
 
 ## 分子
 
-每个 `molecules[]` 项是一个高层场景对象，包含对象变换、源 SMILES、原子、键和预留的 Pose 数据。SMILES 只记录来源；生成后不会覆盖手工坐标。
+每个 `molecules[]` 项是一个高层场景对象，包含对象变换、源 SMILES、创建时的 `reference_bond_length`、原子、键和预留的 Pose 数据。SMILES 只记录来源；生成后不会覆盖手工坐标。参考键长在创建时固定，避免动画中的键长变化触发自动缩放。
 
 原子字段：
 
@@ -39,6 +39,6 @@
 - `a`、`b`：两端原子的稳定 ID；
 - `order`、`aromatic`、`stereo`、`visible`。
 
-当前 `stereo` 支持 `none`、`wedge`、`dash` 和 `either` 数据值；第一阶段 C++ 绘制实楔和虚楔，波浪键会在后续显示编辑中补齐。
+当前 `stereo` 支持 `none`、`wedge`、`dash` 和 `either` 数据值。第一阶段显示由 RDKit ACS1996 SVG 负责；手动更改显示样式的检查器会在后续补齐。
 
 `nodes` 在第一阶段保留为空数组。后续的 Set/Lerp、Pose 与拓扑事件会放在这里，不会把每个原子变成场景对象或 Lua table。

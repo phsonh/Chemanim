@@ -42,6 +42,7 @@ class Molecule:
     id: str
     name: str
     source_smiles: str
+    reference_bond_length: float = 1.0
     atoms: list[Atom] = field(default_factory=list)
     bonds: list[Bond] = field(default_factory=list)
     x: float = 0.0
