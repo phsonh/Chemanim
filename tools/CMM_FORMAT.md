@@ -1,97 +1,44 @@
-# Chemanim CMM v1
+# `.cmm` v2 工程格式
 
-`.cmm` 是 Chemanim 线性节点编辑器的工程文件，使用 UTF-8 JSON。它保存可编辑节点，不替代运行入口；引擎仍执行由编辑器生成的 `mod/<模组名>/main.lua`。
-
-## 顶层结构
+原生二维编辑器使用 JSON 文本，扩展名仍为 `.cmm`。根对象必须包含：
 
 ```json
 {
-  "format": "chemanim-linear-nodes",
-  "version": 1,
-  "mod": "aldol",
+  "format": "chemanim-native-2d",
+  "version": 2,
+  "mod": "native2d_demo",
+  "scene": {},
+  "style": {},
+  "molecules": [],
   "nodes": []
 }
 ```
 
-- `format`：固定为 `chemanim-linear-nodes`。
-- `version`：当前为 `1`。
-- `mod`：模组目录名，也是生成和渲染时传给引擎的名称。
-- `nodes`：节点数组；数组顺序就是 Lua 语句顺序。
+编辑器不会把旧版 `chemanim-linear-nodes` v1 当作 v2 猜测读取；打开旧文件时会明确提示使用 Git 历史中的旧编辑器。
 
-## 节点结构
+## 场景和样式
 
-```json
-{
-  "id": "n020",
-  "type": "lerp_alpha",
-  "enabled": true,
-  "params": {
-    "object": "phcome",
-    "value": 255,
-    "frames": 30,
-    "mode": 0
-  }
-}
-```
+`scene` 保存输出尺寸、逻辑尺寸、FPS、背景、标题和二维视图缩放 `view_zoom`。坐标原点在画布中心，X 向右、Y 向上。
 
-- `id`：节点的稳定唯一标识，只用于编辑器选择和排序，不进入 Lua。
-- `type`：节点种类，决定属性表单和 Lua 生成规则。
-- `enabled`：为 `false` 时不写入最终 `main.lua`，但仍保留在工程和预览注释中。
-- `params`：该节点的参数。
+`style.preset` 当前固定为 `acs_document_1996`。默认值是 Arial 10 pt、14.4 pt 参考键长、0.6 pt 线宽及 18% 双键间距。编辑器预览可以独立缩放；保存的原子坐标不会因此改变。
 
-## 生成规则
+## 分子
 
-编辑器从 `nodes[0]` 开始依次生成代码。每个启用节点贡献一条语句或一个完整语句块，各节点之间留一个空行。声明节点中的名称会转换成合法 Lua 标识符；纹理资源名和文件名始终作为 Lua 字符串原样保存。
+每个 `molecules[]` 项是一个高层场景对象，包含对象变换、源 SMILES、原子、键和预留的 Pose 数据。SMILES 只记录来源；生成后不会覆盖手工坐标。
 
-### 批量资源加载
+原子字段：
 
-`load_textures` 是编辑器复合节点，引擎不需要增加对应 API。它只登记当前 `mod/<模组名>/` 目录中已经存在的 PNG，不复制文件；生成 Lua 时，每张图展开成一条普通的 `chem.load_texture(...)`。纹理名固定取文件名去掉 `.png` 后的部分，每张图分别保存自己的归一化锚点：
+- `id`：稳定 ID。优先使用 atom map number，否则为 `A1`、`A2`……；
+- `element`、`isotope`、`formal_charge`、`radical_electrons`；
+- `implicit_hydrogens`、`aromatic`、`chirality`、`alias`、`hidden`；
+- `x`、`y`：分子局部二维坐标。
 
-```json
-{
-  "type": "load_textures",
-  "params": {
-    "files": [
-      {"file": "reactants/a.png", "anchor_x": 0.5, "anchor_y": 0.5},
-      {"file": "reactants/b.png", "anchor_x": 0.25, "anchor_y": 0.8}
-    ]
-  }
-}
-```
+键字段：
 
-文件路径相对于模组目录保存，因此可以批量选择模组根目录或其子目录中的 PNG。编辑器会拒绝模组目录外的文件。
+- `id`：稳定 ID，如 `B1`；
+- `a`、`b`：两端原子的稳定 ID；
+- `order`、`aromatic`、`stereo`、`visible`。
 
-`raw_lua` 节点可容纳尚未有专用节点类型的代码。它方便迁移和临时实验，但普通动画应优先使用类型化节点，以便编辑器校验字段并提供对象、纹理选择。
+当前 `stereo` 支持 `none`、`wedge`、`dash` 和 `either` 数据值；第一阶段 C++ 绘制实楔和虚楔，波浪键会在后续显示编辑中补齐。
 
-## 过渡更换纹理
-
-`change_image` 节点生成 `object.ChangeImage(texture, x, y, frames, mode)`。过渡期间旧纹理固定在开始帧的旧坐标淡出，新纹理在 `(x, y)` 淡入；完成后对象的纹理和坐标一并变为目标状态。两张纹理都使用对象当帧的实际 Alpha：旧纹理权重为 `1-t`，新纹理权重为 `t`。该节点不推进时间，若后续语句应在切换完成后执行，需要紧接一个相同帧数的 `wait` 节点。
-
-选中该节点时，编辑器固定显示节点开始帧：旧画面作为半透明洋葱皮，目标纹理可以直接拖动。拖动期间只移动目标纹理，松开后才把目标 `x/y` 写回节点。旧 v1 工程首次打开时会自动以对象在该节点开始帧的位置补齐缺少的 `x/y`。
-
-同一对象同一属性的后续插值会取消尚未结束的前一插值，并以抢占帧的实际状态作为新插值起点。贴图过渡被抢占时，其尚未发生的纹理与坐标收尾事件也会取消。
-
-## 对象间贝塞尔箭头
-
-`arrow_curve` 节点保存逻辑画布坐标中的三次贝塞尔曲线：
-
-- `object`：接受设置的箭头对象。
-- `x1`、`y1`：起点。
-- `cx1`、`cy1`：控制点 1。
-- `cx2`、`cy2`：控制点 2。
-- `x2`、`y2`：终点。
-
-新插入的曲线节点没有预设坐标。选中它后，在画布中按住鼠标左键从起点拖到终点，编辑器会生成一条自然弯曲的三次贝塞尔曲线；随后可用滚轮粗调凹凸方向，或用蓝色起点、红色终点和两个橙色控制点继续调整。箭头只使用绝对坐标。
-
-`arrow_width` 的默认线宽是 `3`，也是箭头尺寸的唯一控制量。三角头部长固定为 `line_width × 20/3`，底边宽固定为 `line_width × 5`；因此线宽 `3` 对应 `20 × 15`，线宽 `6` 对应 `40 × 30`。旧 `arrow_head` 节点在打开工程时会自动移除。
-
-## 箭头淡出与删除
-
-- `lerp_arrow_alpha` 生成 `arrow.LerpAlpha(value, frames, mode)`，其中 Alpha 范围是 0–255。
-- `lerp_arrow_color` 生成 `arrow.LerpColor(r, g, b, frames, mode)`。
-- `delete_arrow` 生成 `arrow.Delete()`，箭头从该节点所在脚本帧起不再渲染。
-- 插值命令不会自动推进时间。常用顺序是“插值箭头透明度到 0”→“等待相同帧数”→“删除箭头”。
-
-## 兼容性
-
-编辑器只打开自己支持的主版本。将来若结构发生不兼容变化，会增加 `version`，而不会悄悄改变 v1 文件的含义。手工编辑 `.cmm` 时应保留未知字段，节点 `id` 在同一文件内不得重复。
+`nodes` 在第一阶段保留为空数组。后续的 Set/Lerp、Pose 与拓扑事件会放在这里，不会把每个原子变成场景对象或 Lua table。
