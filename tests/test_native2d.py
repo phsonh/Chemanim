@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 from pathlib import Path
+import re
+import subprocess
 import sys
+
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -122,3 +128,160 @@ def test_fixed_depiction_scale_does_not_refit_irregular_coordinates():
     core.set_atom_position(ids[0], 12.0, -7.0)
     moved = core.depict(False)["transform"]
     assert first == moved == {"origin": {"x": 480.0, "y": 270.0}, "pixels_per_unit": 48.0}
+
+
+def test_atom_hit_normalizes_bond_origin_at_offsets_viewports_and_zoom():
+    offsets = [(1, 0), (-3, 4), (0, -8), (9, 7), (-12, 0)]
+    viewports = [(960, 540, 24, 0, 0), (1280, 720, 48, 2.5, -1.25), (1920, 1080, 96, -3, 2)]
+    for width, height, scale, center_x, center_y in viewports:
+        for dx, dy in offsets:
+            core = CoreSession(); core.add_blank_molecule(); core.set_viewport(width, height, scale, center_x, center_y)
+            origin = (width * .5 - center_x * scale, height * .5 + center_y * scale)
+            gesture(core, "atom_label", origin)
+            core.set_tool("single_bond")
+            core.pointer_down(origin[0] + dx, origin[1] + dy)
+            core.pointer_move(origin[0] + 2 * scale, origin[1])
+            core.pointer_up(origin[0] + 2 * scale, origin[1])
+            first, second = atoms(core)
+            assert first["y"] == second["y"]
+
+
+def test_clicking_each_benzene_vertex_places_substituent_outside_ring():
+    core = session(); gesture(core, "benzene", (480, 270)); ring_atoms = list(atoms(core)); ring_bonds = list(bonds(core))
+    center_x = sum(atom["x"] for atom in ring_atoms) / 6
+    center_y = sum(atom["y"] for atom in ring_atoms) / 6
+    for atom in ring_atoms:
+        before = {item["id"] for item in atoms(core)}
+        point = canvas_point(core, atom["id"])
+        core.set_tool("single_bond"); core.pointer_down(*point); core.pointer_up(*point)
+        endpoint = next(item for item in atoms(core) if item["id"] not in before)
+        outward = ((endpoint["x"] - atom["x"]) * (atom["x"] - center_x) +
+                   (endpoint["y"] - atom["y"]) * (atom["y"] - center_y))
+        assert outward > 0
+        def side(a, b, c): return ((b["x"] - a["x"]) * (c["y"] - a["y"]) -
+                                  (b["y"] - a["y"]) * (c["x"] - a["x"]))
+        for bond in ring_bonds:
+            if atom["id"] in (bond["a"], bond["b"]): continue
+            first = next(item for item in ring_atoms if item["id"] == bond["a"])
+            second = next(item for item in ring_atoms if item["id"] == bond["b"])
+            assert side(atom, endpoint, first) * side(atom, endpoint, second) >= -1e-12
+
+
+def test_clicking_ring_bond_fuses_on_empty_side_and_preserves_shared_bond():
+    core = session(); gesture(core, "benzene", (480, 270))
+    original_atoms = list(atoms(core)); original_bonds = list(bonds(core))
+    center = (sum(atom["x"] for atom in original_atoms) / 6,
+              sum(atom["y"] for atom in original_atoms) / 6)
+    shared = original_bonds[0]
+    first = next(atom for atom in original_atoms if atom["id"] == shared["a"])
+    second = next(atom for atom in original_atoms if atom["id"] == shared["b"])
+    midpoint = ((first["x"] + second["x"]) * .5, (first["y"] + second["y"]) * .5)
+    transform = core.depict(False)["transform"]
+    click = (transform["origin"]["x"] + midpoint[0] * transform["pixels_per_unit"],
+             transform["origin"]["y"] - midpoint[1] * transform["pixels_per_unit"])
+    gesture(core, "ring6", click)
+
+    new_atoms = [atom for atom in atoms(core) if atom["id"] not in {item["id"] for item in original_atoms}]
+    new_center = (sum(atom["x"] for atom in new_atoms) / len(new_atoms),
+                  sum(atom["y"] for atom in new_atoms) / len(new_atoms))
+    assert ((new_center[0] - midpoint[0]) * (center[0] - midpoint[0]) +
+            (new_center[1] - midpoint[1]) * (center[1] - midpoint[1])) < 0
+    restored_shared = next(bond for bond in bonds(core) if bond["id"] == shared["id"])
+    assert restored_shared["type"] == shared["type"]
+    assert len(bonds(core)) == len(original_bonds) + 5
+
+
+def test_blank_bond_uses_15_degree_snap_and_alt_disables_it():
+    core = session(); start = (200.0, 200.0); angle = math.radians(22)
+    end = (start[0] + 100 * math.cos(angle), start[1] - 100 * math.sin(angle))
+    core.set_tool("single_bond"); core.pointer_down(*start); core.pointer_move(*end); core.pointer_up(*end)
+    first, second = atoms(core); snapped = math.degrees(math.atan2(second["y"] - first["y"], second["x"] - first["x"]))
+    assert abs(snapped - 15) < 1e-9
+
+    free = session(); free.set_tool("single_bond"); free.pointer_down(*start, True); free.pointer_move(*end, True); free.pointer_up(*end, True)
+    first, second = atoms(free); unsnapped = math.degrees(math.atan2(second["y"] - first["y"], second["x"] - first["x"]))
+    assert abs(unsnapped - 22) < 1e-9
+
+
+def double_bond_count(svg: str) -> int:
+    classes = re.findall(r"class='bond-(\d+)[^']*'", svg)
+    return sum(classes.count(bond) >= 2 for bond in set(classes))
+
+
+def test_aromatic_smiles_and_aromatic_tool_draw_kekule_bonds_without_dashes():
+    imported = CoreSession(); imported.import_smiles("benzene", "c1ccccc1"); imported.set_viewport(960, 540, 48, 0, 0)
+    imported_svg = imported.depict(False)["svg"]
+    assert "stroke-dasharray" not in imported_svg
+    assert double_bond_count(imported_svg) == 3
+
+    manual = session(); gesture(manual, "ring6", (480, 270))
+    for bond in list(bonds(manual)):
+        first = next(atom for atom in atoms(manual) if atom["id"] == bond["a"])
+        second = next(atom for atom in atoms(manual) if atom["id"] == bond["b"])
+        midpoint = ((first["x"] + second["x"]) * .5, (first["y"] + second["y"]) * .5)
+        canvas = manual.depict(False)["transform"]
+        point = (canvas["origin"]["x"] + midpoint[0] * canvas["pixels_per_unit"],
+                 canvas["origin"]["y"] - midpoint[1] * canvas["pixels_per_unit"])
+        gesture(manual, "aromatic_bond", point)
+    manual_svg = manual.depict(False)["svg"]
+    assert "stroke-dasharray" not in manual_svg
+    assert double_bond_count(manual_svg) == 3
+
+
+def test_view_zoom_is_one_uniform_svg_transform():
+    core = CoreSession(); core.import_smiles("charged", "C[NH2+]C(=O)O");
+    measurements = []
+    for scale in (24, 48, 96):
+        core.set_viewport(960, 540, scale, 0, 0)
+        drawing = core.depict(False); atom_points = drawing["atoms"]
+        distance_px = math.dist((atom_points[0]["center"]["x"], atom_points[0]["center"]["y"]),
+                                (atom_points[1]["center"]["x"], atom_points[1]["center"]["y"]))
+        viewbox = [float(value) for value in re.search(r"viewBox='([^']+)'", drawing["svg"]).group(1).split()]
+        measurements.append((distance_px, viewbox[2]))
+    assert abs(measurements[1][0] / measurements[0][0] - 2) < 1e-9
+    assert abs(measurements[2][0] / measurements[0][0] - 4) < 1e-9
+    assert abs(measurements[0][1] / measurements[1][1] - 2) < 1e-9
+    assert abs(measurements[0][1] / measurements[2][1] - 4) < 1e-9
+
+
+def test_view_zoom_scales_font_and_stroke_with_bonds():
+    label = CoreSession(); label.import_smiles("ammonium", "[NH4+]")
+    bond = CoreSession(); bond.import_smiles("ethane", "CC")
+    label_boxes, bond_lengths, effective_strokes = [], [], []
+    for scale in (48, 96, 192):
+        label.set_viewport(960, 540, scale, 0, 0)
+        label_image = Image.frombytes("RGBA", (960, 540), label.depict(True)["rgba"])
+        box = label_image.getchannel("A").getbbox()
+        assert box is not None
+        label_boxes.append((box[2] - box[0], box[3] - box[1]))
+
+        bond.set_viewport(960, 540, scale, 0, 0)
+        drawing = bond.depict(False)
+        first, second = drawing["atoms"]
+        bond_lengths.append(math.dist((first["center"]["x"], first["center"]["y"]),
+                                      (second["center"]["x"], second["center"]["y"])))
+        viewbox_width = float(re.search(r"viewBox='([^']+)'", drawing["svg"]).group(1).split()[2])
+        canonical_stroke = float(re.search(r"stroke-width:([0-9.]+)px", drawing["svg"]).group(1))
+        effective_strokes.append(canonical_stroke * 960 / viewbox_width)
+
+    for values in (bond_lengths, effective_strokes):
+        assert abs(values[1] / values[0] - 2) < 1e-9
+        assert abs(values[2] / values[0] - 4) < 1e-9
+    for dimension in (0, 1):
+        assert abs(label_boxes[1][dimension] / label_boxes[0][dimension] - 2) < 0.03
+        assert abs(label_boxes[2][dimension] / label_boxes[0][dimension] - 4) < 0.04
+
+
+def test_official_rdkit_acs_pixel_regression():
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    subprocess.run([sys.executable, str(ROOT / "tools" / "generate_acs_correctness_gallery.py")],
+                   cwd=ROOT, env=env, check=True)
+    report = json.loads((ROOT / "media" / "correctness" / "acs_comparison.json").read_text(encoding="utf-8"))
+    assert set(report["molecules"]) == {
+        "benzene", "acetaminophen", "ibuprofen_wedge", "charged_heteroatoms",
+        "azulene", "hexaphenylbenzene", "phthalocyanine", "porphyrin",
+    }
+    for result in report["molecules"].values():
+        assert result["qt_iou"] >= 0.90
+        assert result["nanosvg_iou"] >= 0.90

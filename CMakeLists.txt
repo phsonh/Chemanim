@@ -104,6 +104,7 @@ target_include_directories(lua PUBLIC ${LUA_DIR})
 add_library(chemanim_core_lib STATIC
     src/core/Document.cpp
     src/core/Editing.cpp
+    src/core/SketcherGeometry.cpp
     src/core/Depiction.cpp
     src/core/SvgRaster.cpp
     src/core/Timeline.cpp

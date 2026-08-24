@@ -1,4 +1,5 @@
 #include "Editing.hpp"
+#include "SketcherGeometry.hpp"
 #include "Timeline.hpp"
 
 #include <algorithm>
@@ -33,13 +34,20 @@ std::pair<BondType, BondStereo> bondStyle(Tool tool) {
     }
 }
 Point snappedDirection(Point start, Point raw, double length, bool disableAngle) {
-    const double dx = raw.x - start.x, dy = raw.y - start.y;
     if (disableAngle) return raw;
-    const double angle = std::atan2(dy, dx);
-    const double increment = std::numbers::pi / 12.0;
-    const double snapped = std::round(angle / increment) * increment;
-    const double actualLength = std::hypot(dx, dy) < length * 0.25 ? length : std::hypot(dx, dy);
-    return {start.x + std::cos(snapped) * actualLength, start.y + std::sin(snapped) * actualLength};
+    return sketcher_geometry::roundedDirection(start, raw, length, 24);
+}
+std::vector<Point> neighborOffsets(const Molecule& molecule, const Atom& atom) {
+    std::vector<Point> result;
+    for (const Bond& bond : molecule.bonds) {
+        const std::string* otherId = nullptr;
+        if (bond.atomA == atom.id) otherId = &bond.atomB;
+        else if (bond.atomB == atom.id) otherId = &bond.atomA;
+        if (otherId) if (const Atom* other = molecule.atom(*otherId)) {
+            result.push_back({other->position.x - atom.position.x, other->position.y - atom.position.y});
+        }
+    }
+    return result;
 }
 bool pointInPolygon(Point point, const std::vector<Point>& polygon) {
     bool inside = false;
@@ -77,6 +85,8 @@ struct EditorSession::Impl {
     std::vector<Snapshot> redo;
     struct Gesture {
         Project before;
+        Point pressCanvas;
+        Point pressModel;
         Point startCanvas;
         Point currentCanvas;
         Point startModel;
@@ -140,7 +150,24 @@ struct EditorSession::Impl {
         const Hit near = hit(gesture->currentCanvas, gesture->startHit.kind == HitKind::Atom ? std::optional(gesture->startHit.id) : std::nullopt);
         if (near.kind == HitKind::Atom && value) return value->atom(near.id)->position;
         const double length = value ? value->referenceBondLength : 1.5;
-        return snappedDirection(gesture->startModel, viewport.canvasToModel(gesture->currentCanvas), length, alt);
+        if (value && gesture->startHit.kind == HitKind::Atom &&
+            distance(gesture->pressCanvas, gesture->currentCanvas) <= 12.0) {
+            if (const Atom* atom = value->atom(gesture->startHit.id)) {
+                const Point offset = sketcher_geometry::bestPlacementAroundOrigin(
+                    neighborOffsets(*value, *atom), length);
+                return {atom->position.x + offset.x, atom->position.y + offset.y};
+            }
+        }
+        const Point candidate = snappedDirection(
+            gesture->startModel, viewport.canvasToModel(gesture->currentCanvas), length, alt);
+        // Endpoint atom snapping wins over angular snapping, including when the
+        // rounded endpoint (rather than the raw cursor) lands on an atom.
+        const Hit snappedHit = hit(viewport.modelToCanvas(candidate),
+                                   gesture->startHit.kind == HitKind::Atom
+                                       ? std::optional(gesture->startHit.id)
+                                       : std::nullopt);
+        if (snappedHit.kind == HitKind::Atom && value) return value->atom(snappedHit.id)->position;
+        return candidate;
     }
 
     std::vector<Point> ringPolygon(int count, Point cursor) const {
@@ -156,9 +183,27 @@ struct EditorSession::Impl {
             const Point delta{b->position.x - a->position.x, b->position.y - a->position.y};
             const double actual = std::max(1e-9, std::hypot(delta.x, delta.y));
             const Point normal{-delta.y / actual, delta.x / actual};
-            const Point modelCursor = viewport.canvasToModel(cursor);
-            const double sign = ((modelCursor.x - mid.x) * normal.x + (modelCursor.y - mid.y) * normal.y) >= 0 ? 1.0 : -1.0;
             const double apothem = actual * .5 / std::tan(std::numbers::pi / count);
+            const Point modelCursor = viewport.canvasToModel(cursor);
+            double sign = ((modelCursor.x - mid.x) * normal.x + (modelCursor.y - mid.y) * normal.y) >= 0 ? 1.0 : -1.0;
+            if (distance(gesture->pressCanvas, cursor) <= 12.0) {
+                // Adapted from Sketcher's fragment ring-flip choice: for a
+                // click, place the new fragment on the emptier side of the
+                // shared bond. A real drag still selects the indicated side.
+                const auto clearance = [&](double candidateSign) {
+                    const Point candidateCenter{mid.x + normal.x * apothem * candidateSign,
+                                                mid.y + normal.y * apothem * candidateSign};
+                    double nearest = 1e100;
+                    for (const Atom& atom : value->atoms) {
+                        if (atom.id == a->id || atom.id == b->id) continue;
+                        nearest = std::min(nearest, distance(candidateCenter, atom.position));
+                    }
+                    return nearest;
+                };
+                const double positive = clearance(1.0), negative = clearance(-1.0);
+                if (std::abs(positive - negative) > 1e-9) sign = positive > negative ? 1.0 : -1.0;
+                else sign = normal.x >= 0.0 ? 1.0 : -1.0;
+            }
             const Point center{mid.x + normal.x * apothem * sign, mid.y + normal.y * apothem * sign};
             double startAngle = std::atan2(a->position.y - center.y, a->position.x - center.x);
             const double direction = sign > 0 ? -1.0 : 1.0;
@@ -168,7 +213,14 @@ struct EditorSession::Impl {
         }
         Point vertex = gesture->startModel;
         if (gesture->startHit.kind == HitKind::Atom) vertex = value->atom(gesture->startHit.id)->position;
-        Point direction = snappedDirection(vertex, viewport.canvasToModel(cursor), side, false);
+        Point direction;
+        if (gesture->startHit.kind == HitKind::Atom && distance(gesture->pressCanvas, cursor) <= 12.0) {
+            const Atom* atom = value->atom(gesture->startHit.id);
+            const Point offset = sketcher_geometry::bestPlacementAroundOrigin(neighborOffsets(*value, *atom), side);
+            direction = {vertex.x + offset.x, vertex.y + offset.y};
+        } else {
+            direction = snappedDirection(vertex, viewport.canvasToModel(cursor), side, false);
+        }
         double firstAngle = std::atan2(direction.y - vertex.y, direction.x - vertex.x);
         Point center{vertex.x + radius * std::cos(firstAngle + std::numbers::pi * .5 - std::numbers::pi / count),
                      vertex.y + radius * std::sin(firstAngle + std::numbers::pi * .5 - std::numbers::pi / count)};
@@ -219,8 +271,17 @@ Hit EditorSession::hitTest(Point canvasPoint) const { return impl_->hit(canvasPo
 EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, bool) {
     Molecule* molecule = impl_->molecule();
     if (!molecule) return impl_->result(canvasPoint);
-    Impl::Gesture gesture{.before = impl_->project, .startCanvas = canvasPoint, .currentCanvas = canvasPoint,
-                          .startModel = impl_->viewport.canvasToModel(canvasPoint), .startHit = impl_->hit(canvasPoint)};
+    const Point pressModel = impl_->viewport.canvasToModel(canvasPoint);
+    Impl::Gesture gesture{.before = impl_->project, .pressCanvas = canvasPoint, .pressModel = pressModel,
+                          .startCanvas = canvasPoint, .currentCanvas = canvasPoint,
+                          .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
+    if (gesture.startHit.kind == HitKind::Atom) {
+        const Molecule shown = impl_->displayed();
+        if (const Atom* atom = shown.atom(gesture.startHit.id)) {
+            gesture.startModel = atom->position;
+            gesture.startCanvas = impl_->viewport.modelToCanvas(atom->position);
+        }
+    }
     if (impl_->tool == Tool::SelectLasso) gesture.lasso.push_back(canvasPoint);
     if (impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) {
         if (gesture.startHit.kind == HitKind::Atom) {
@@ -243,7 +304,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     if (!molecule) return impl_->result(canvasPoint);
     if ((impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle) && !impl_->gesture->original.empty()) {
         const Point current = impl_->viewport.canvasToModel(canvasPoint);
-        const Point delta{current.x - impl_->gesture->startModel.x, current.y - impl_->gesture->startModel.y};
+        const Point delta{current.x - impl_->gesture->pressModel.x, current.y - impl_->gesture->pressModel.y};
         for (const auto& [id, position] : impl_->gesture->original) {
             const Point target{position.x + delta.x, position.y + delta.y};
             if (impl_->targetKind == EditTargetKind::BaseStructure) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
@@ -266,21 +327,25 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
     impl_->gesture->currentCanvas = canvasPoint;
     Molecule* molecule = impl_->molecule();
     if (!molecule) { impl_->gesture.reset(); return impl_->result(canvasPoint); }
-    const Hit releaseHit = impl_->hit(canvasPoint, impl_->gesture->startHit.kind == HitKind::Atom ? std::optional(impl_->gesture->startHit.id) : std::nullopt);
     if (impl_->targetKind != EditTargetKind::BaseStructure) {
         if (impl_->gesture->changed && impl_->targetKind == EditTargetKind::AtomTween) {
             auto found=std::find_if(impl_->project.atomTweens.begin(),impl_->project.atomTweens.end(),[&](const AtomTween& value){return value.id==impl_->targetId;});
             if(found!=impl_->project.atomTweens.end()) for(const auto& [atomId,target]:impl_->gesture->targetPositions) {
                 if(atomId==found->atomId) found->target=target;
-                else impl_->project.addAtomTween(found->moleculeId,atomId,found->startFrame,found->frames,target,found->easing);
+                else {
+                    const std::string tweenId = impl_->project.addAtomTween(
+                        found->moleculeId, atomId, found->startFrame, found->frames,
+                        target, found->easing);
+                    (void)tweenId;
+                }
             }
         } else if (impl_->gesture->changed && impl_->targetKind == EditTargetKind::Pose) {
             Pose& pose=molecule->poses[impl_->targetId]; pose.id=impl_->targetId;
             for(const auto& [atomId,target]:impl_->gesture->targetPositions) pose.atomPositions[atomId]=target;
         }
     } else if (impl_->tool == Tool::SelectRectangle && impl_->gesture->original.empty()) {
-        const double left = std::min(impl_->gesture->startCanvas.x, canvasPoint.x), right = std::max(impl_->gesture->startCanvas.x, canvasPoint.x);
-        const double top = std::min(impl_->gesture->startCanvas.y, canvasPoint.y), bottom = std::max(impl_->gesture->startCanvas.y, canvasPoint.y);
+        const double left = std::min(impl_->gesture->pressCanvas.x, canvasPoint.x), right = std::max(impl_->gesture->pressCanvas.x, canvasPoint.x);
+        const double top = std::min(impl_->gesture->pressCanvas.y, canvasPoint.y), bottom = std::max(impl_->gesture->pressCanvas.y, canvasPoint.y);
         if (!control) impl_->selectedAtoms.clear();
         for (const Atom& atom : molecule->atoms) if (Rect{left, top, right, bottom}.contains(impl_->viewport.modelToCanvas(atom.position))) impl_->selectedAtoms.insert(atom.id);
     } else if (impl_->tool == Tool::SelectLasso && impl_->gesture->lasso.size() >= 3) {
@@ -292,9 +357,17 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             if (Bond* bond = molecule->bond(impl_->gesture->startHit.id)) { bond->type = type; bond->stereo = stereo; impl_->gesture->changed = true; }
         } else {
             std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel);
-            const Point endpoint = releaseHit.kind == HitKind::Atom ? molecule->atom(releaseHit.id)->position : impl_->gestureEndpoint(alt);
-            std::string second = releaseHit.kind == HitKind::Atom ? releaseHit.id : molecule->addAtom(endpoint);
-            if (first != second) { molecule->addBond(first, second, type, stereo); impl_->gesture->changed = true; impl_->selectedAtoms = {second}; }
+            const Point endpoint = impl_->gestureEndpoint(alt);
+            const Hit endpointHit = impl_->hit(impl_->viewport.modelToCanvas(endpoint),
+                                               impl_->gesture->startHit.kind == HitKind::Atom
+                                                   ? std::optional(impl_->gesture->startHit.id)
+                                                   : std::nullopt);
+            std::string second = endpointHit.kind == HitKind::Atom ? endpointHit.id : molecule->addAtom(endpoint);
+            if (first != second) {
+                const std::string bondId = molecule->addBond(first, second, type, stereo);
+                impl_->gesture->changed = !bondId.empty();
+                impl_->selectedAtoms = {second};
+            }
         }
     } else if (isRingTool(impl_->tool)) {
         const int count = ringSize(impl_->tool); const std::vector<Point> polygon = impl_->ringPolygon(count, canvasPoint);
@@ -304,14 +377,19 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             if (impl_->gesture->startHit.kind == HitKind::Bond) { if (const Bond* bond = molecule->bond(impl_->gesture->startHit.id)) { ids[0] = bond->atomA; ids[1] = bond->atomB; } }
             for (int i = 0; i < count; ++i) if (ids[i].empty()) ids[i] = molecule->addAtom(polygon[i]);
             for (int i = 0; i < count; ++i) {
+                if (impl_->gesture->startHit.kind == HitKind::Bond && i == 0) continue;
                 const BondType type = impl_->tool == Tool::Benzene && i % 2 ? BondType::Double : BondType::Single;
-                molecule->addBond(ids[i], ids[(i + 1) % count], type);
+                const std::string bondId = molecule->addBond(ids[i], ids[(i + 1) % count], type);
+                (void)bondId;
             }
             impl_->selectedAtoms = std::set<std::string>(ids.begin(), ids.end()); impl_->gesture->changed = true;
         }
     } else if (impl_->tool == Tool::AtomLabel) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) molecule->atom(impl_->gesture->startHit.id)->element = impl_->element;
-        else molecule->addAtom(impl_->gesture->startModel, impl_->element);
+        else {
+            const std::string atomId = molecule->addAtom(impl_->gesture->startModel, impl_->element);
+            (void)atomId;
+        }
         impl_->gesture->changed = true;
     } else if (impl_->tool == Tool::ChargePositive || impl_->tool == Tool::ChargeNegative) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) { molecule->atom(impl_->gesture->startHit.id)->formalCharge += impl_->tool == Tool::ChargePositive ? 1 : -1; impl_->gesture->changed = true; }

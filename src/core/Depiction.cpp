@@ -67,6 +67,15 @@ BuiltMolecule build(const Molecule& source) {
     }
     result.value->addConformer(conformer, true);
     try { RDKit::MolOps::sanitizeMol(*result.value); } catch (...) { result.value->updatePropertyCache(false); }
+    // Preparation is deliberately performed on this transient copy. Kekulization
+    // and drawing cleanup must never mutate the authoritative atom/bond/XY table.
+    try {
+        RDKit::MolDraw2DUtils::prepareMolForDrawing(*result.value,
+            /*kekulize=*/true, /*addChiralHs=*/false, /*wedgeBonds=*/false,
+            /*forceCoords=*/false, /*wavyBonds=*/true);
+    } catch (...) {
+        result.value->updatePropertyCache(false);
+    }
     return result;
 }
 
@@ -91,26 +100,33 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     BuiltMolecule built = build(molecule);
     double minX=molecule.atoms.front().position.x,maxX=minX,minY=molecule.atoms.front().position.y,maxY=minY;
     for(const Atom& atom:molecule.atoms){minX=std::min(minX,atom.position.x);maxX=std::max(maxX,atom.position.x);minY=std::min(minY,atom.position.y);maxY=std::max(maxY,atom.position.y);}
-    const int virtualWidth=std::max(viewport.width*3,static_cast<int>(std::ceil((maxX-minX)*viewport.pixelsPerUnit*4+viewport.width)));
-    const int virtualHeight=std::max(viewport.height*3,static_cast<int>(std::ceil((maxY-minY)*viewport.pixelsPerUnit*4+viewport.height)));
+    const double referenceBondLength = molecule.referenceBondLength > 0 ? molecule.referenceBondLength : 1.0;
+    const double acsModelScale = 14.4 / referenceBondLength;
+    const int virtualWidth=std::max(4096,static_cast<int>(std::ceil((maxX-minX)*acsModelScale+2048.0)));
+    const int virtualHeight=std::max(4096,static_cast<int>(std::ceil((maxY-minY)*acsModelScale+2048.0)));
     RDKit::MolDraw2DSVG drawer(virtualWidth, virtualHeight);
     auto& options = drawer.drawOptions();
     options.clearBackground = false; options.prepareMolsBeforeDrawing = false;
     if (!style.fontFile.empty()) options.fontFile = style.fontFile;
-    RDKit::MolDraw2DUtils::setACS1996Options(options, molecule.referenceBondLength > 0 ? molecule.referenceBondLength : 1.0);
-    options.fixedBondLength = viewport.pixelsPerUnit;
+    RDKit::MolDraw2DUtils::setACS1996Options(options, referenceBondLength);
     drawer.drawMolecule(*built.value);
     const auto origin = drawer.getDrawCoords(RDGeom::Point2D(0.0, 0.0));
     const auto unit = drawer.getDrawCoords(RDGeom::Point2D(1.0, 0.0));
-    result.modelScale = std::hypot(unit.x - origin.x, unit.y - origin.y);
-    const double viewLeft=origin.x+result.modelScale*viewport.center.x-viewport.width*.5;
-    const double viewTop=origin.y-result.modelScale*viewport.center.y-viewport.height*.5;
-    result.modelOrigin = {origin.x-viewLeft, origin.y-viewTop};
+    const double canonicalModelScale = std::hypot(unit.x - origin.x, unit.y - origin.y);
+    const double uniformScale = viewport.pixelsPerUnit / canonicalModelScale;
+    const double viewWidth = viewport.width / uniformScale;
+    const double viewHeight = viewport.height / uniformScale;
+    const double viewLeft=origin.x+canonicalModelScale*viewport.center.x-viewWidth*.5;
+    const double viewTop=origin.y-canonicalModelScale*viewport.center.y-viewHeight*.5;
+    result.modelScale = canonicalModelScale * uniformScale;
+    result.modelOrigin = {viewport.width * .5 - viewport.center.x * viewport.pixelsPerUnit,
+                          viewport.height * .5 + viewport.center.y * viewport.pixelsPerUnit};
     result.atoms.reserve(molecule.atoms.size());
     for (unsigned int index = 0; index < molecule.atoms.size(); ++index) {
-        const auto rawPoint = drawer.getDrawCoords(index); const Point point{rawPoint.x-viewLeft,rawPoint.y-viewTop}; const Atom& atom = molecule.atoms[index];
-        const double width = atom.element == "C" && atom.alias.empty() ? 10.0 : std::max(18.0, 8.0 * static_cast<double>((atom.alias.empty() ? atom.element : atom.alias).size()));
-        result.atoms.push_back({atom.id, point, {point.x - width * .5, point.y - 9.0, point.x + width * .5, point.y + 9.0}});
+        const auto rawPoint = drawer.getDrawCoords(index); const Point point{(rawPoint.x-viewLeft)*uniformScale,(rawPoint.y-viewTop)*uniformScale}; const Atom& atom = molecule.atoms[index];
+        const double width = (atom.element == "C" && atom.alias.empty() ? 10.0 : std::max(18.0, 8.0 * static_cast<double>((atom.alias.empty() ? atom.element : atom.alias).size()))) * uniformScale;
+        const double halfHeight = 9.0 * uniformScale;
+        result.atoms.push_back({atom.id, point, {point.x - width * .5, point.y - halfHeight, point.x + width * .5, point.y + halfHeight}});
     }
     result.bonds.reserve(molecule.bonds.size());
     for (std::size_t index = 0; index < molecule.bonds.size(); ++index) {
@@ -122,7 +138,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     result.svg=std::regex_replace(result.svg,std::regex("width='[0-9.]+px'"),"width='"+std::to_string(viewport.width)+"px'",std::regex_constants::format_first_only);
     result.svg=std::regex_replace(result.svg,std::regex("height='[0-9.]+px'"),"height='"+std::to_string(viewport.height)+"px'",std::regex_constants::format_first_only);
-    std::ostringstream viewBox; viewBox<<std::setprecision(12)<<"viewBox='"<<viewLeft<<' '<<viewTop<<' '<<viewport.width<<' '<<viewport.height<<"'";
+    std::ostringstream viewBox; viewBox<<std::setprecision(12)<<"viewBox='"<<viewLeft<<' '<<viewTop<<' '<<viewWidth<<' '<<viewHeight<<"'";
     result.svg=std::regex_replace(result.svg,std::regex("viewBox='[^']+'"),viewBox.str(),std::regex_constants::format_first_only);
     return result;
 }
@@ -134,6 +150,14 @@ Molecule moleculeFromSmiles(const std::string& stableId, const std::string& name
     if (!parsed) throw std::runtime_error("RDKit could not parse the SMILES string");
     RDDepict::compute2DCoords(*parsed, nullptr, true, true);
     const RDKit::Conformer& conformer = parsed->getConformer();
+    RDKit::RWMol preparedForStereo(*parsed);
+    try {
+        RDKit::MolDraw2DUtils::prepareMolForDrawing(preparedForStereo,
+            /*kekulize=*/true, /*addChiralHs=*/false, /*wedgeBonds=*/true,
+            /*forceCoords=*/false, /*wavyBonds=*/true);
+    } catch (...) {
+        preparedForStereo.updatePropertyCache(false);
+    }
     Molecule result; result.id = stableId; result.name = name.empty() ? stableId : name; result.sourceSmiles = smiles;
     std::vector<std::string> ids(parsed->getNumAtoms());
     for (unsigned int index = 0; index < parsed->getNumAtoms(); ++index) {
@@ -147,7 +171,8 @@ Molecule moleculeFromSmiles(const std::string& stableId, const std::string& name
     }
     for (const RDKit::Bond* source : parsed->bonds()) {
         BondType type = source->getIsAromatic() ? BondType::Aromatic : source->getBondType() == RDKit::Bond::DOUBLE ? BondType::Double : source->getBondType() == RDKit::Bond::TRIPLE ? BondType::Triple : BondType::Single;
-        BondStereo stereo = source->getBondDir() == RDKit::Bond::BEGINWEDGE ? BondStereo::SolidWedge : source->getBondDir() == RDKit::Bond::BEGINDASH ? BondStereo::DashedWedge : source->getBondDir() == RDKit::Bond::UNKNOWN ? BondStereo::Wavy : BondStereo::None;
+        const RDKit::Bond* depictedBond = preparedForStereo.getBondWithIdx(source->getIdx());
+        BondStereo stereo = depictedBond->getBondDir() == RDKit::Bond::BEGINWEDGE ? BondStereo::SolidWedge : depictedBond->getBondDir() == RDKit::Bond::BEGINDASH ? BondStereo::DashedWedge : depictedBond->getBondDir() == RDKit::Bond::UNKNOWN ? BondStereo::Wavy : BondStereo::None;
         result.bonds.push_back({"B" + std::to_string(result.nextBondId++), ids[source->getBeginAtomIdx()], ids[source->getEndAtomIdx()], type, stereo, true});
     }
     result.referenceBondLength = RDKit::MolDraw2DUtils::meanBondLength(*parsed);

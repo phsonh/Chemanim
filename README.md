@@ -47,4 +47,4 @@ MP4 和检查帧写入 `media/<mod>/`。构建会递归复制 RDKit 的运行时
 
 这还不是 ChemDraw 的完整替代品。当前没有反应物自动对齐、键角/分支旋转助手、力场、自动价态修复、自由基工具、成键/断键时间轴事件和完整的场景曲箭头整合。价态异常现在只允许存在，还没有做成完善的诊断面板。环模板和基础结构工具已经是真实数据操作，但界面图标与属性面板仍会继续打磨。
 
-格式说明见 [tools/CMM_FORMAT.md](tools/CMM_FORMAT.md)，实现边界见 [docs/native-2d-status.md](docs/native-2d-status.md)。
+格式说明见 [tools/CMM_FORMAT.md](tools/CMM_FORMAT.md)，实现边界见 [docs/native-2d-status.md](docs/native-2d-status.md)，Sketcher 集成验证见 [docs/sketcher-integration-validation.md](docs/sketcher-integration-validation.md)。第三方代码来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
