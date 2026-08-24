@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "Molecule2D.hpp"
+
 struct lua_State;
 
 namespace chem {
@@ -27,6 +29,7 @@ struct SceneSettings {
     int logicWidth = 1920;
     int logicHeight = 1080;
     int fps = 60;
+    double viewZoom = 2.2;
     int endFrame = 0;
     std::string title = "Chemanim Preview";
     ColorValue background{245, 245, 242, 255};
@@ -111,6 +114,7 @@ struct Object {
     std::unordered_map<std::string, NumericTrack> numericTracks;
     std::unordered_map<std::string, StringTrack> stringTracks;
     std::vector<ImageTransition> imageTransitions;
+    std::unique_ptr<Molecule2D> molecule;
 };
 
 struct TextureAsset {

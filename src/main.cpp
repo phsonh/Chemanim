@@ -28,6 +28,7 @@ namespace {
 struct Options {
     std::optional<std::string> modName;
     bool openWhenFinished = true;
+    bool still = false;
 };
 
 void printHelp() {
@@ -36,9 +37,11 @@ void printHelp() {
         "Usage:\n"
         "  chemanim.exe aldol       Render mod/aldol/main.lua\n"
         "  chemanim.exe             Auto-select when mod/ contains exactly one mod\n"
+        "  chemanim.exe native2d_demo --still --no-open\n"
         "  chemanim.exe aldol --no-open\n\n"
         "Output:\n"
-        "  media/aldol/aldol_YYYY-MM-DD_HH-MM-SS.mp4\n";
+        "  media/aldol/aldol_YYYY-MM-DD_HH-MM-SS.mp4\n"
+        "  media/native2d_demo/native2d_demo_preview.png (--still)\n";
 }
 
 Options parseOptions(int argc, char** argv) {
@@ -47,6 +50,7 @@ Options parseOptions(int argc, char** argv) {
         const std::string argument = argv[i];
         if (argument == "--help" || argument == "-h") { printHelp(); std::exit(0); }
         if (argument == "--no-open") options.openWhenFinished = false;
+        else if (argument == "--still") options.still = true;
         else if (argument.starts_with('-')) throw std::runtime_error("Unknown option: " + argument);
         else if (!options.modName) options.modName = argument;
         else throw std::runtime_error("Only one mod name may be specified");
@@ -149,7 +153,9 @@ int main(int argc, char** argv) {
         const std::filesystem::path script = root / "mod" / modName / "main.lua";
         const std::filesystem::path mediaDirectory = root / "media" / modName;
         std::filesystem::create_directories(mediaDirectory);
-        const std::filesystem::path output = mediaDirectory / (modName + "_" + timestamp() + ".mp4");
+        const std::filesystem::path output = options.still
+            ? mediaDirectory / (modName + "_preview.png")
+            : mediaDirectory / (modName + "_" + timestamp() + ".mp4");
 
         std::cout << "Mod:    " << modName << "\nEntry:  " << script.string()
                   << "\nOutput: " << output.string() << "\n";
@@ -159,6 +165,15 @@ int main(int argc, char** argv) {
         chem::Engine& engine = runtime.engine();
         chem::Renderer renderer(engine);
         renderer.initialize(true);
+        if (options.still) {
+            renderer.renderScene(0);
+            renderer.savePng(output);
+            std::cout << "Created: " << output.string() << "\n";
+            if (options.openWhenFinished && !openWithDefaultApplication(output)) {
+                std::cerr << "The PNG was created, but Windows could not open the default image viewer.\n";
+            }
+            return 0;
+        }
         chem::VideoEncoder encoder(output, engine.scene.width, engine.scene.height, engine.scene.fps);
 
         for (int frame = 0; frame <= engine.scene.endFrame; ++frame) {

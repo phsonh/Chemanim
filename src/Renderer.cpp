@@ -10,7 +10,10 @@ extern "C" {
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace chem {
@@ -20,6 +23,7 @@ Renderer::Renderer(Engine& engine) : engine_(engine) {}
 Renderer::~Renderer() {
     if (!initialized_) return;
     for (auto& [_, texture] : textures_) UnloadTexture(texture);
+    if (ownsMoleculeFont_) UnloadFont(moleculeFont_);
     UnloadRenderTexture(supersampleTarget_);
     UnloadRenderTexture(target_);
     CloseWindow();
@@ -40,6 +44,12 @@ void Renderer::initialize(bool hidden) {
     SetTextureFilter(target_.texture, TEXTURE_FILTER_BILINEAR);
     SetTextureFilter(supersampleTarget_.texture, TEXTURE_FILTER_BILINEAR);
     initialized_ = true;
+    const std::filesystem::path arial = "C:/Windows/Fonts/arial.ttf";
+    if (std::filesystem::is_regular_file(arial)) {
+        moleculeFont_ = LoadFontEx(arial.string().c_str(), 48, nullptr, 0);
+        ownsMoleculeFont_ = moleculeFont_.texture.id != 0;
+    }
+    if (!ownsMoleculeFont_) moleculeFont_ = GetFontDefault();
     loadAssets();
 }
 
@@ -127,8 +137,161 @@ void Renderer::drawObject(const Object& object) {
     lua_rawgeti(state, LUA_REGISTRYINDEX, object.luaRef);
     const int table = lua_gettop(state);
     if (object.kind == "sprite") drawSprite(table, object);
+    else if (object.kind == "molecule") drawMolecule(table, object);
     else if (object.kind == "arrow") drawArrow(table);
     lua_pop(state, 1);
+}
+
+namespace {
+
+std::string atomLabel(const Atom2D& atom) {
+    if (atom.hidden) return {};
+    if (!atom.alias.empty()) return atom.alias;
+    const bool ordinaryCarbon = atom.element == "C" && atom.isotope == 0 &&
+                                atom.formalCharge == 0 && atom.radicalElectrons == 0;
+    if (ordinaryCarbon) return {};
+    std::ostringstream label;
+    if (atom.isotope > 0) label << atom.isotope;
+    label << atom.element;
+    if (atom.implicitHydrogens > 0) {
+        label << 'H';
+        if (atom.implicitHydrogens > 1) label << atom.implicitHydrogens;
+    }
+    if (atom.formalCharge != 0) {
+        const int magnitude = std::abs(atom.formalCharge);
+        if (magnitude > 1) label << magnitude;
+        label << (atom.formalCharge > 0 ? '+' : '-');
+    }
+    if (atom.radicalElectrons > 0) label << '.';
+    return label.str();
+}
+
+Vector2 shortenedToLabel(Vector2 from, Vector2 to, Rectangle label, float gap) {
+    Vector2 direction = Vector2Subtract(to, from);
+    const float length = Vector2Length(direction);
+    if (length < 0.001f || label.width <= 0 || label.height <= 0) return to;
+    direction = Vector2Scale(direction, 1.0f / length);
+    const float halfW = label.width * 0.5f + gap;
+    const float halfH = label.height * 0.5f + gap;
+    const float tx = std::abs(direction.x) > 0.0001f ? halfW / std::abs(direction.x) : 1.0e9f;
+    const float ty = std::abs(direction.y) > 0.0001f ? halfH / std::abs(direction.y) : 1.0e9f;
+    return Vector2Subtract(to, Vector2Scale(direction, std::min(tx, ty)));
+}
+
+} // namespace
+
+void Renderer::drawMolecule(int table, const Object& object) {
+    if (!object.molecule || object.molecule->atoms.empty()) return;
+    const Molecule2D& molecule = *object.molecule;
+    const float renderWidth = static_cast<float>(engine_.scene.width * supersample_);
+    const float renderHeight = static_cast<float>(engine_.scene.height * supersample_);
+    const float canvasScaleX = renderWidth / engine_.scene.logicWidth;
+    const float canvasScaleY = renderHeight / engine_.scene.logicHeight;
+    const float objectX = static_cast<float>(number(table, "x", 0));
+    const float objectY = static_cast<float>(number(table, "y", 0));
+    const float scaleX = static_cast<float>(number(table, "scale_x", 1));
+    const float scaleY = static_cast<float>(number(table, "scale_y", 1));
+    const float rotation = static_cast<float>(number(table, "rotation", 0) * DEG2RAD);
+
+    std::unordered_map<std::string, const Atom2D*> byId;
+    for (const Atom2D& atom : molecule.atoms) byId[atom.stableId] = &atom;
+    std::vector<double> lengths;
+    for (const Bond2D& bond : molecule.bonds) {
+        const auto a = byId.find(bond.atomA), b = byId.find(bond.atomB);
+        if (a != byId.end() && b != byId.end()) {
+            const double dx = a->second->position.x - b->second->position.x;
+            const double dy = a->second->position.y - b->second->position.y;
+            const double length = std::hypot(dx, dy);
+            if (length > 0.001) lengths.push_back(length);
+        }
+    }
+    double medianBond = 1.5;
+    if (!lengths.empty()) {
+        const auto middle = lengths.begin() + static_cast<std::ptrdiff_t>(lengths.size() / 2);
+        std::nth_element(lengths.begin(), middle, lengths.end());
+        medianBond = *middle;
+    }
+    // ACS Document 1996 reference bond length: 14.4 pt at 96-DPI equivalent.
+    const float viewZoom = static_cast<float>(engine_.scene.viewZoom);
+    const float referenceBond = 19.2f * supersample_ * viewZoom;
+    const float unit = referenceBond / static_cast<float>(medianBond);
+    const auto transform = [&](const Atom2D& atom) {
+        float x = static_cast<float>(atom.position.x) * unit * scaleX;
+        float y = static_cast<float>(atom.position.y) * unit * scaleY;
+        const float rx = x * std::cos(rotation) - y * std::sin(rotation);
+        const float ry = x * std::sin(rotation) + y * std::cos(rotation);
+        return Vector2{renderWidth * 0.5f + objectX * canvasScaleX + rx,
+                       renderHeight * 0.5f - objectY * canvasScaleY - ry};
+    };
+
+    const float fontSize = (10.0f * 96.0f / 72.0f) * supersample_ * viewZoom;
+    const float spacing = 0.2f * fontSize;
+    const float labelGap = 1.5f * supersample_ * viewZoom;
+    const float lineWidth = 0.8f * supersample_ * viewZoom;
+    const float doubleGap = referenceBond * 0.18f;
+    const Color color = objectColor(table);
+    std::unordered_map<std::string, Vector2> positions;
+    std::unordered_map<std::string, Rectangle> labels;
+    std::unordered_map<std::string, std::string> labelText;
+    for (const Atom2D& atom : molecule.atoms) {
+        const Vector2 p = transform(atom);
+        positions[atom.stableId] = p;
+        const std::string label = atomLabel(atom);
+        labelText[atom.stableId] = label;
+        if (label.empty()) {
+            labels[atom.stableId] = Rectangle{p.x, p.y, 0, 0};
+        } else {
+            const Vector2 size = MeasureTextEx(moleculeFont_, label.c_str(), fontSize, spacing);
+            labels[atom.stableId] = Rectangle{p.x - size.x * 0.5f, p.y - size.y * 0.5f, size.x, size.y};
+        }
+    }
+
+    const auto line = [&](Vector2 a, Vector2 b, float width = -1.0f) {
+        DrawLineEx(a, b, width < 0 ? lineWidth : width, color);
+    };
+    for (const Bond2D& bond : molecule.bonds) {
+        if (!bond.visible) continue;
+        const auto pa = positions.find(bond.atomA), pb = positions.find(bond.atomB);
+        if (pa == positions.end() || pb == positions.end()) continue;
+        Vector2 a = shortenedToLabel(pb->second, pa->second, labels[bond.atomA], labelGap);
+        Vector2 b = shortenedToLabel(pa->second, pb->second, labels[bond.atomB], labelGap);
+        Vector2 tangent = Vector2Normalize(Vector2Subtract(b, a));
+        if (Vector2Length(tangent) < 0.001f) continue;
+        const Vector2 normal{-tangent.y, tangent.x};
+        if (bond.stereo == "wedge") {
+            const float wedgeWidth = 5.0f * supersample_;
+            DrawTriangle(a, Vector2Add(b, Vector2Scale(normal, wedgeWidth)),
+                         Vector2Subtract(b, Vector2Scale(normal, wedgeWidth)), color);
+        } else if (bond.stereo == "dash") {
+            constexpr int marks = 7;
+            for (int i = 0; i < marks; ++i) {
+                const float t = static_cast<float>(i + 1) / (marks + 1);
+                const Vector2 center = Vector2Lerp(a, b, t);
+                const float half = t * 5.0f * supersample_;
+                line(Vector2Subtract(center, Vector2Scale(normal, half)),
+                     Vector2Add(center, Vector2Scale(normal, half)), lineWidth * 0.85f);
+            }
+        } else if (bond.order >= 2.8) {
+            line(a, b);
+            const Vector2 offset = Vector2Scale(normal, doubleGap * 0.55f);
+            line(Vector2Add(a, offset), Vector2Add(b, offset));
+            line(Vector2Subtract(a, offset), Vector2Subtract(b, offset));
+        } else if (bond.order >= 1.8) {
+            const Vector2 offset = Vector2Scale(normal, doubleGap * 0.35f);
+            line(Vector2Add(a, offset), Vector2Add(b, offset));
+            line(Vector2Subtract(a, offset), Vector2Subtract(b, offset));
+        } else if (bond.aromatic || std::abs(bond.order - 1.5) < 0.1) {
+            line(a, b);
+        } else {
+            line(a, b);
+        }
+    }
+    for (const Atom2D& atom : molecule.atoms) {
+        const std::string& label = labelText[atom.stableId];
+        if (label.empty()) continue;
+        const Rectangle box = labels[atom.stableId];
+        DrawTextEx(moleculeFont_, label.c_str(), Vector2{box.x, box.y}, fontSize, spacing, color);
+    }
 }
 
 void Renderer::drawSprite(int table, const Object& object) {
@@ -317,6 +480,17 @@ std::vector<unsigned char> Renderer::captureRgba() {
     std::vector<unsigned char> result(pixels, pixels + size);
     UnloadImage(image);
     return result;
+}
+
+void Renderer::savePng(const std::filesystem::path& path) {
+    std::filesystem::create_directories(path.parent_path());
+    Image image = LoadImageFromTexture(target_.texture);
+    ImageFlipVertical(&image);
+    if (!ExportImage(image, path.string().c_str())) {
+        UnloadImage(image);
+        throw std::runtime_error("Failed to write PNG: " + path.string());
+    }
+    UnloadImage(image);
 }
 
 } // namespace chem

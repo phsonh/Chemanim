@@ -124,7 +124,7 @@ void LuaRuntime::copyTable(int fromIndex, int toIndex) {
     }
 }
 
-void LuaRuntime::createObjectTable(const std::string& kind, int propertiesIndex) {
+Object& LuaRuntime::createObjectTable(const std::string& kind, int propertiesIndex) {
     if (propertiesIndex != 0) propertiesIndex = lua_absindex(state_, propertiesIndex);
     lua_newtable(state_);
     const int table = lua_gettop(state_);
@@ -136,9 +136,10 @@ void LuaRuntime::createObjectTable(const std::string& kind, int propertiesIndex)
     setDefaultNumber(table, "anchor_x", -1); setDefaultNumber(table, "anchor_y", -1);
     setDefaultNumber(table, "layer", 0); setDefaultNumber(table, "visible", 1);
     setDefaultNumber(table, "reveal", 1); setDefaultString(table, "reveal_dir", "ltr");
-    setDefaultNumber(table, "r", kind == "arrow" ? 25 : 255);
-    setDefaultNumber(table, "g", kind == "arrow" ? 25 : 255);
-    setDefaultNumber(table, "b", kind == "arrow" ? 25 : 255);
+    const double defaultInk = (kind == "arrow" || kind == "molecule") ? 25 : 255;
+    setDefaultNumber(table, "r", defaultInk);
+    setDefaultNumber(table, "g", defaultInk);
+    setDefaultNumber(table, "b", defaultInk);
 
     if (kind == "sprite") {
         setDefaultString(table, "texture", "");
@@ -158,6 +159,81 @@ void LuaRuntime::createObjectTable(const std::string& kind, int propertiesIndex)
     object.bornFrame = cursor_;
     currentObjectId_ = object.id;
     bindObjectMethods(table, object);
+    return object;
+}
+
+void LuaRuntime::readMolecule(Object& object, int tableIndex) {
+    tableIndex = lua_absindex(state_, tableIndex);
+    auto molecule = std::make_unique<Molecule2D>();
+    molecule->sourceSmiles = stringField(state_, tableIndex, "source_smiles", "");
+
+    lua_getfield(state_, tableIndex, "atoms");
+    if (!lua_istable(state_, -1)) {
+        lua_pop(state_, 1);
+        throw std::runtime_error("chem.NewMol: compiled molecule data requires an atoms table");
+    }
+    const int atomsTable = lua_gettop(state_);
+    const std::size_t atomCount = lua_rawlen(state_, atomsTable);
+    molecule->atoms.reserve(atomCount);
+    for (std::size_t i = 1; i <= atomCount; ++i) {
+        lua_rawgeti(state_, atomsTable, static_cast<lua_Integer>(i));
+        if (!lua_istable(state_, -1)) {
+            lua_pop(state_, 2);
+            throw std::runtime_error("chem.NewMol: every atom must be a table");
+        }
+        Atom2D atom;
+        atom.stableId = stringField(state_, -1, "id", "");
+        atom.element = stringField(state_, -1, "element", "C");
+        atom.alias = stringField(state_, -1, "alias", "");
+        atom.isotope = static_cast<int>(numberField(state_, -1, "isotope", 0));
+        atom.formalCharge = static_cast<int>(numberField(state_, -1, "formal_charge", 0));
+        atom.radicalElectrons = static_cast<int>(numberField(state_, -1, "radical_electrons", 0));
+        atom.implicitHydrogens = static_cast<int>(numberField(state_, -1, "implicit_hydrogens", 0));
+        atom.aromatic = numberField(state_, -1, "aromatic", 0) != 0;
+        atom.hidden = numberField(state_, -1, "hidden", 0) != 0;
+        atom.position.x = numberField(state_, -1, "x", 0);
+        atom.position.y = numberField(state_, -1, "y", 0);
+        if (atom.stableId.empty()) {
+            lua_pop(state_, 2);
+            throw std::runtime_error("chem.NewMol: atom stable ID cannot be empty");
+        }
+        molecule->atoms.push_back(std::move(atom));
+        lua_pop(state_, 1);
+    }
+    lua_pop(state_, 1);
+
+    lua_getfield(state_, tableIndex, "bonds");
+    if (!lua_istable(state_, -1)) {
+        lua_pop(state_, 1);
+        throw std::runtime_error("chem.NewMol: compiled molecule data requires a bonds table");
+    }
+    const int bondsTable = lua_gettop(state_);
+    const std::size_t bondCount = lua_rawlen(state_, bondsTable);
+    molecule->bonds.reserve(bondCount);
+    for (std::size_t i = 1; i <= bondCount; ++i) {
+        lua_rawgeti(state_, bondsTable, static_cast<lua_Integer>(i));
+        if (!lua_istable(state_, -1)) {
+            lua_pop(state_, 2);
+            throw std::runtime_error("chem.NewMol: every bond must be a table");
+        }
+        Bond2D bond;
+        bond.stableId = stringField(state_, -1, "id", "");
+        bond.atomA = stringField(state_, -1, "a", "");
+        bond.atomB = stringField(state_, -1, "b", "");
+        bond.order = numberField(state_, -1, "order", 1);
+        bond.aromatic = numberField(state_, -1, "aromatic", 0) != 0;
+        bond.stereo = stringField(state_, -1, "stereo", "none");
+        bond.visible = numberField(state_, -1, "visible", 1) != 0;
+        if (bond.stableId.empty() || bond.atomA.empty() || bond.atomB.empty()) {
+            lua_pop(state_, 2);
+            throw std::runtime_error("chem.NewMol: bond ID and atom references cannot be empty");
+        }
+        molecule->bonds.push_back(std::move(bond));
+        lua_pop(state_, 1);
+    }
+    lua_pop(state_, 1);
+
+    object.molecule = std::move(molecule);
 }
 
 void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
@@ -172,7 +248,7 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     bind("Delete", mDelete);
     bind("LerpPos", mLerpPos); bind("LerpPosX", mLerpPosX); bind("LerpPosY", mLerpPosY);
     bind("LerpAlpha", mLerpAlpha); bind("LerpColor", mLerpColor);
-    if (object.kind == "sprite") {
+    if (object.kind == "sprite" || object.kind == "molecule") {
         bind("SetScale", mSetScale); bind("SetScaleX", mSetScaleX); bind("SetScaleY", mSetScaleY);
         bind("SetRotation", mSetRotation); bind("SetRot", mSetRotation);
         bind("LerpScale", mLerpScale); bind("LerpScaleX", mLerpScaleX); bind("LerpScaleY", mLerpScaleY);
@@ -245,6 +321,7 @@ int LuaRuntime::lScene(lua_State* state) {
     runtime.engine_->scene.logicWidth = static_cast<int>(numberField(state, 1, "logic_width", runtime.engine_->scene.width));
     runtime.engine_->scene.logicHeight = static_cast<int>(numberField(state, 1, "logic_height", runtime.engine_->scene.height));
     runtime.engine_->scene.fps = static_cast<int>(numberField(state, 1, "fps", runtime.engine_->scene.fps));
+    runtime.engine_->scene.viewZoom = numberField(state, 1, "view_zoom", runtime.engine_->scene.viewZoom);
     runtime.engine_->scene.endFrame = static_cast<int>(numberField(state, 1, "end_frame", runtime.engine_->scene.endFrame));
     runtime.engine_->scene.title = stringField(state, 1, "title", runtime.engine_->scene.title);
     lua_getfield(state, 1, "background");
@@ -252,7 +329,7 @@ int LuaRuntime::lScene(lua_State* state) {
     lua_pop(state, 1);
     if (runtime.engine_->scene.width <= 0 || runtime.engine_->scene.height <= 0 ||
         runtime.engine_->scene.logicWidth <= 0 || runtime.engine_->scene.logicHeight <= 0 ||
-        runtime.engine_->scene.fps <= 0) {
+        runtime.engine_->scene.fps <= 0 || runtime.engine_->scene.viewZoom <= 0) {
         return luaL_error(state, "scene width, height, logic_width, logic_height and fps must be positive");
     }
     return 0;
@@ -268,7 +345,23 @@ int LuaRuntime::lLoadTexture(lua_State* state) {
 
 int LuaRuntime::lNewMol(lua_State* state) {
     auto& runtime = self(state);
-    runtime.createObjectTable("sprite", lua_istable(state, 1) ? 1 : 0);
+    // During the first native-2D slice an empty call remains capable of opening
+    // old PNG examples. New v2 projects always pass embedded atom/bond data.
+    if (!lua_istable(state, 1)) {
+        runtime.createObjectTable("sprite", 0);
+        return 1;
+    }
+    lua_getfield(state, 1, "atoms");
+    const bool native = lua_istable(state, -1);
+    lua_pop(state, 1);
+    Object& object = runtime.createObjectTable(native ? "molecule" : "sprite", 1);
+    if (native) {
+        try {
+            runtime.readMolecule(object, -1);
+        } catch (const std::exception& error) {
+            return luaL_error(state, "%s", error.what());
+        }
+    }
     return 1;
 }
 

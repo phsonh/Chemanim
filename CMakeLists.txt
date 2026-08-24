@@ -53,6 +53,7 @@ add_executable(chemanim
     src/LuaRuntime.cpp
     src/Renderer.cpp
     src/VideoEncoder.cpp
+    src/Molecule2D.hpp
 )
 target_include_directories(chemanim PRIVATE src)
 target_link_libraries(chemanim PRIVATE raylib lua)

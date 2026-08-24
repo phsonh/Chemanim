@@ -29,7 +29,8 @@ private:
     int currentObjectId_ = 0;
 
     void installApi();
-    void createObjectTable(const std::string& kind, int propertiesIndex);
+    Object& createObjectTable(const std::string& kind, int propertiesIndex);
+    void readMolecule(Object& object, int tableIndex);
     void bindObjectMethods(int tableIndex, Object& object);
     void copyTable(int fromIndex, int toIndex);
     Object* resolveObject(int index, int& nextArgument);
