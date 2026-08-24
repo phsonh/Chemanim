@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QPushButton, QTreeWidget,
 class NodeList(QWidget):
     nodeSelected = pyqtSignal(str)
     frameRequested = pyqtSignal(int)
+    editRequested = pyqtSignal(str)
     sequenceEdited = pyqtSignal()
 
     def __init__(self, session, parent=None):
@@ -52,6 +53,7 @@ class NodeList(QWidget):
         node_id = item.data(0, Qt.ItemDataRole.UserRole)
         timing = next((value for value in self.session.node_timings() if value["id"] == node_id), None)
         if timing: self.frameRequested.emit(timing["start"])
+        self.editRequested.emit(node_id)
 
     def _enabled_changed(self, item, column):
         if self._updating: return

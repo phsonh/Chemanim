@@ -32,6 +32,43 @@ void pointToJson(json& value, const Point& point) { value = json{{"x", point.x},
 Point pointFromJson(const json& value) {
     return {value.value("x", 0.0), value.value("y", 0.0)};
 }
+void colorToJson(json& value, const Color& color) {
+    value = json{{"r", color.red}, {"g", color.green}, {"b", color.blue}};
+}
+Color colorFromJson(const json& value, Color fallback = {}) {
+    return {value.value("r", fallback.red), value.value("g", fallback.green),
+            value.value("b", fallback.blue)};
+}
+
+void migrateProjectWideStableIds(Project& project) {
+    std::uint64_t nextAtom=1,nextBond=1,nextAdornment=1;
+    for(const Molecule& molecule:project.molecules){
+        for(const Atom& value:molecule.atoms)nextAtom=std::max(nextAtom,numericSuffix(value.id,'A')+1);
+        for(const Bond& value:molecule.bonds)nextBond=std::max(nextBond,numericSuffix(value.id,'B')+1);
+        for(const AtomAdornment& value:molecule.adornments)nextAdornment=std::max(nextAdornment,numericSuffix(value.id,'D')+1);
+    }
+    std::set<std::string> atomIds,bondIds,adornmentIds;
+    struct Remap { std::map<std::string,std::string> atoms,bonds,adornments; };
+    std::map<std::string,Remap> remaps;
+    for(Molecule& molecule:project.molecules){
+        Remap& remap=remaps[molecule.id];
+        for(Atom& value:molecule.atoms){const std::string old=value.id;if(!atomIds.insert(old).second){do value.id="A"+std::to_string(nextAtom++);while(!atomIds.insert(value.id).second);remap.atoms[old]=value.id;}}
+        for(Bond& value:molecule.bonds){if(auto it=remap.atoms.find(value.atomA);it!=remap.atoms.end())value.atomA=it->second;if(auto it=remap.atoms.find(value.atomB);it!=remap.atoms.end())value.atomB=it->second;const std::string old=value.id;if(!bondIds.insert(old).second){do value.id="B"+std::to_string(nextBond++);while(!bondIds.insert(value.id).second);remap.bonds[old]=value.id;}}
+        for(AtomAdornment& value:molecule.adornments){if(auto it=remap.atoms.find(value.atomId);it!=remap.atoms.end())value.atomId=it->second;const std::string old=value.id;if(!adornmentIds.insert(old).second){do value.id="D"+std::to_string(nextAdornment++);while(!adornmentIds.insert(value.id).second);remap.adornments[old]=value.id;}}
+        for(auto& [_,pose]:molecule.poses){std::map<std::string,Point> positions;for(const auto& [id,point]:pose.atomPositions){const auto it=remap.atoms.find(id);positions[it==remap.atoms.end()?id:it->second]=point;}pose.atomPositions=std::move(positions);}
+        molecule.nextAtomId=std::max(molecule.nextAtomId,nextAtom);molecule.nextBondId=std::max(molecule.nextBondId,nextBond);molecule.nextAdornmentId=std::max(molecule.nextAdornmentId,nextAdornment);
+    }
+    const auto rename=[&](json& params,const std::string& moleculeId,const char* key,const std::map<std::string,std::string> Remap::* member){
+        const auto mapIt=remaps.find(moleculeId);if(mapIt==remaps.end())return;const auto& values=mapIt->second.*member;auto found=params.find(key);if(found==params.end())return;
+        if(found->is_string()){if(auto it=values.find(found->get<std::string>());it!=values.end())*found=it->second;}
+        else if(found->is_array())for(json& value:*found)if(value.is_string())if(auto it=values.find(value.get<std::string>());it!=values.end())value=it->second;
+    };
+    for(ScriptNode& node:project.nodes){json params=json::parse(node.paramsJson);const std::string target=params.value("target","");rename(params,target,"atom",&Remap::atoms);rename(params,target,"atoms",&Remap::atoms);rename(params,target,"bond",&Remap::bonds);rename(params,target,"bonds",&Remap::bonds);rename(params,target,"adornment",&Remap::adornments);rename(params,target,"adornments",&Remap::adornments);
+        if(node.type=="bond_form"){rename(params,target,"a",&Remap::atoms);rename(params,target,"b",&Remap::atoms);}
+        if(node.type=="merge_molecules"){rename(params,target,"a",&Remap::atoms);rename(params,params.value("source",""),"b",&Remap::atoms);}
+        node.paramsJson=params.dump();
+    }
+}
 }  // namespace
 
 bool Rect::contains(Point point, double padding) const {
@@ -55,11 +92,31 @@ const Bond* Molecule::bond(const std::string& stableId) const {
     const auto found = std::find_if(bonds.begin(), bonds.end(), [&](const Bond& value) { return value.id == stableId; });
     return found == bonds.end() ? nullptr : &*found;
 }
+AtomAdornment* Molecule::adornment(const std::string& stableId) {
+    const auto found = std::find_if(adornments.begin(), adornments.end(), [&](const AtomAdornment& value) { return value.id == stableId; });
+    return found == adornments.end() ? nullptr : &*found;
+}
+const AtomAdornment* Molecule::adornment(const std::string& stableId) const {
+    const auto found = std::find_if(adornments.begin(), adornments.end(), [&](const AtomAdornment& value) { return value.id == stableId; });
+    return found == adornments.end() ? nullptr : &*found;
+}
 Bond* Molecule::bondBetween(const std::string& first, const std::string& second) {
     const auto found = std::find_if(bonds.begin(), bonds.end(), [&](const Bond& value) {
-        return (value.atomA == first && value.atomB == second) || (value.atomA == second && value.atomB == first);
+        return value.alive && ((value.atomA == first && value.atomB == second) || (value.atomA == second && value.atomB == first));
     });
     return found == bonds.end() ? nullptr : &*found;
+}
+const Atom* Molecule::anchorAtom() const {
+    const Atom* result = nullptr;
+    for (const Atom& value : atoms) {
+        if (!value.alive) continue;
+        if (!result || value.creationSerial < result->creationSerial) result = &value;
+    }
+    return result;
+}
+std::optional<Point> Molecule::coordinate() const {
+    if (const Atom* anchor = anchorAtom()) return anchor->position;
+    return std::nullopt;
 }
 
 std::string Molecule::allocateAtomId() {
@@ -74,9 +131,16 @@ std::string Molecule::allocateBondId() {
         if (!bond(result)) return result;
     }
 }
-std::string Molecule::addAtom(Point position, std::string element) {
+std::string Molecule::allocateAdornmentId() {
+    for (;;) {
+        const std::string result = "D" + std::to_string(nextAdornmentId++);
+        if (!adornment(result)) return result;
+    }
+}
+std::string Molecule::addAtom(Point position, std::string element, std::uint64_t creationSerial) {
     const std::string stableId = allocateAtomId();
-    atoms.push_back(Atom{.id = stableId, .element = std::move(element), .position = position});
+    atoms.push_back(Atom{.id = stableId, .creationSerial = creationSerial,
+                         .element = std::move(element), .position = position});
     return stableId;
 }
 std::string Molecule::addBond(const std::string& first, const std::string& second,
@@ -84,30 +148,41 @@ std::string Molecule::addBond(const std::string& first, const std::string& secon
     if (first == second || !atom(first) || !atom(second)) return {};
     if (Bond* existing = bondBetween(first, second)) {
         existing->type = type;
-        existing->displayType = type == BondType::Aromatic
-            ? std::optional<BondType>((numericSuffix(existing->id,'B')%2)?BondType::Double:BondType::Single)
-            : std::nullopt;
         existing->stereo = stereo;
+        existing->alive = true;
         return existing->id;
     }
     const std::string stableId = allocateBondId();
     bonds.push_back(Bond{.id = stableId, .atomA = first, .atomB = second, .type = type,
-        .displayType = type == BondType::Aromatic ? std::optional<BondType>((numericSuffix(stableId,'B')%2)?BondType::Double:BondType::Single) : std::nullopt,
         .stereo = stereo});
     return stableId;
 }
+std::string Molecule::addAdornment(const std::string& atomId, std::string text,
+                                    Point offset, std::uint64_t creationSerial) {
+    const Atom* owner = atom(atomId);
+    if (!owner || !owner->alive) return {};
+    const std::string stableId = allocateAdornmentId();
+    adornments.push_back(AtomAdornment{.id = stableId, .creationSerial = creationSerial,
+        .atomId = atomId, .text = std::move(text), .offset = offset});
+    return stableId;
+}
 bool Molecule::removeAtom(const std::string& stableId) {
-    const auto before = atoms.size();
-    std::erase_if(atoms, [&](const Atom& value) { return value.id == stableId; });
-    if (atoms.size() == before) return false;
-    std::erase_if(bonds, [&](const Bond& value) { return value.atomA == stableId || value.atomB == stableId; });
-    for (auto& [_, pose] : poses) pose.atomPositions.erase(stableId);
+    Atom* value = atom(stableId);
+    if (!value || !value->alive) return false;
+    value->alive = false;
+    for (Bond& bondValue : bonds) {
+        if (bondValue.atomA == stableId || bondValue.atomB == stableId) bondValue.alive = false;
+    }
+    for (AtomAdornment& adornmentValue : adornments) {
+        if (adornmentValue.atomId == stableId) adornmentValue.alive = false;
+    }
     return true;
 }
 bool Molecule::removeBond(const std::string& stableId) {
-    const auto before = bonds.size();
-    std::erase_if(bonds, [&](const Bond& value) { return value.id == stableId; });
-    return bonds.size() != before;
+    Bond* value = bond(stableId);
+    if (!value || !value->alive) return false;
+    value->alive = false;
+    return true;
 }
 void Molecule::validateIds() const {
     std::set<std::string> atomIds;
@@ -120,6 +195,11 @@ void Molecule::validateIds() const {
         if (!atomIds.contains(value.atomA) || !atomIds.contains(value.atomB) || value.atomA == value.atomB) {
             throw std::runtime_error("Bond " + value.id + " has invalid endpoints");
         }
+    }
+    std::set<std::string> adornmentIds;
+    for (const AtomAdornment& value : adornments) {
+        if (value.id.empty() || !adornmentIds.insert(value.id).second) throw std::runtime_error("Duplicate or empty adornment ID: " + value.id);
+        if (!atomIds.contains(value.atomId)) throw std::runtime_error("Adornment " + value.id + " has an invalid atom anchor");
     }
 }
 
@@ -138,11 +218,24 @@ std::string Project::addBlankMolecule(std::string name) {
     Molecule value;
     value.id = id;
     value.name = std::move(name);
+    // Atom/bond/adornment IDs are referenced by ordered nodes and survive
+    // ownership transfer.  Start every new molecule above the project-wide
+    // high-water mark so DetachSubgraph/MergeMolecules can move records without
+    // renaming them.
+    for (const Molecule& existing : molecules) {
+        for (const Atom& atomValue : existing.atoms)
+            value.nextAtomId = std::max(value.nextAtomId, numericSuffix(atomValue.id, 'A') + 1);
+        for (const Bond& bondValue : existing.bonds)
+            value.nextBondId = std::max(value.nextBondId, numericSuffix(bondValue.id, 'B') + 1);
+        for (const AtomAdornment& adornmentValue : existing.adornments)
+            value.nextAdornmentId = std::max(value.nextAdornmentId, numericSuffix(adornmentValue.id, 'D') + 1);
+    }
     molecules.push_back(std::move(value));
     const std::string createNodeId=addNode("molecule_create", json({{"target", id}}).dump());
     (void)createNodeId;
     return id;
 }
+std::uint64_t Project::allocateCreationSerial() { return nextCreationSerial++; }
 std::string Project::addAtomTween(const std::string& moleculeId, const std::string& atomId,
                                   int startFrame, int frames, Point target, Easing easing) {
     const Molecule* value = molecule(moleculeId);
@@ -183,9 +276,22 @@ void Project::ensureDefaultNodes() {
 }
 void Project::validateIds() const {
     std::set<std::string> moleculeIds;
+    std::set<std::uint64_t> creationSerials;
+    std::set<std::string> atomIds,bondIds,adornmentIds;
     for (const Molecule& value : molecules) {
         if (value.id.empty() || !moleculeIds.insert(value.id).second) throw std::runtime_error("Duplicate or empty molecule ID: " + value.id);
         value.validateIds();
+        for (const Atom& atomValue : value.atoms) {
+            if(!atomIds.insert(atomValue.id).second)throw std::runtime_error("Atom stable ID is not project-wide unique: "+atomValue.id);
+            if (!atomValue.creationSerial || !creationSerials.insert(atomValue.creationSerial).second)
+                throw std::runtime_error("Duplicate or empty atom creation serial");
+        }
+        for (const AtomAdornment& adornmentValue : value.adornments) {
+            if(!adornmentIds.insert(adornmentValue.id).second)throw std::runtime_error("Adornment stable ID is not project-wide unique: "+adornmentValue.id);
+            if (!adornmentValue.creationSerial || !creationSerials.insert(adornmentValue.creationSerial).second)
+                throw std::runtime_error("Duplicate or empty adornment creation serial");
+        }
+        for(const Bond& bondValue:value.bonds)if(!bondIds.insert(bondValue.id).second)throw std::runtime_error("Bond stable ID is not project-wide unique: "+bondValue.id);
     }
     std::set<std::string> nodeIds;
     for(const ScriptNode& value:nodes){
@@ -199,7 +305,6 @@ const char* toString(BondType value) {
         case BondType::Single: return "single";
         case BondType::Double: return "double";
         case BondType::Triple: return "triple";
-        case BondType::Aromatic: return "aromatic";
     }
     return "single";
 }
@@ -215,7 +320,6 @@ const char* toString(BondStereo value) {
 BondType bondTypeFromString(const std::string& value) {
     if (value == "double") return BondType::Double;
     if (value == "triple") return BondType::Triple;
-    if (value == "aromatic") return BondType::Aromatic;
     return BondType::Single;
 }
 BondStereo bondStereoFromString(const std::string& value) {
@@ -224,9 +328,24 @@ BondStereo bondStereoFromString(const std::string& value) {
     if (value == "wavy" || value == "either") return BondStereo::Wavy;
     return BondStereo::None;
 }
+const char* toString(SecondaryLineSide value) {
+    switch (value) {
+        case SecondaryLineSide::Left: return "left";
+        case SecondaryLineSide::Right: return "right";
+        case SecondaryLineSide::Center: return "center";
+    }
+    return "center";
+}
+SecondaryLineSide secondaryLineSideFromString(const std::string& value) {
+    if (value == "left") return SecondaryLineSide::Left;
+    if (value == "right") return SecondaryLineSide::Right;
+    return SecondaryLineSide::Center;
+}
 
 std::string toJson(const Project& project, int indent) {
-    json root{{"format", "chemanim-native-2d"}, {"version", 4}, {"mod", project.mod}, {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId}, {"next_node_id",project.nextNodeId}};
+    json root{{"format", "chemanim-native-2d"}, {"version", 5}, {"mod", project.mod},
+        {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId},
+        {"next_node_id",project.nextNodeId}, {"next_creation_serial", project.nextCreationSerial}};
     root["scene"] = {{"width", project.scene.width}, {"height", project.scene.height},
         {"logic_width", project.scene.logicWidth}, {"logic_height", project.scene.logicHeight},
         {"fps", project.scene.fps}, {"view_zoom", project.scene.viewZoom},
@@ -239,20 +358,31 @@ std::string toJson(const Project& project, int indent) {
     for (const Molecule& molecule : project.molecules) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
-            {"next_bond_id", molecule.nextBondId}, {"x", molecule.scenePosition.x}, {"y", molecule.scenePosition.y},
-            {"rotation", molecule.rotation}, {"scale", molecule.scale}, {"alpha", molecule.alpha}, {"layer", molecule.layer}, {"visible",molecule.visible}};
+            {"next_bond_id", molecule.nextBondId}, {"next_adornment_id", molecule.nextAdornmentId},
+            {"rotation", molecule.rotation}, {"scale", molecule.scale}, {"alpha", molecule.alpha},
+            {"layer", molecule.layer}, {"visible",molecule.visible}, {"retired", molecule.retired}};
+        colorToJson(item["color"], molecule.color);
         item["atoms"] = json::array();
         for (const Atom& atom : molecule.atoms) item["atoms"].push_back({{"id", atom.id}, {"element", atom.element},
-            {"alias", atom.alias}, {"isotope", atom.isotope}, {"formal_charge", atom.formalCharge},
+            {"creation_serial", atom.creationSerial}, {"alias", atom.alias}, {"isotope", atom.isotope},
             {"radical_electrons", atom.radicalElectrons}, {"implicit_hydrogens", atom.implicitHydrogens},
-            {"aromatic", atom.aromatic}, {"hidden", atom.hidden}, {"x", atom.position.x}, {"y", atom.position.y}});
+            {"hidden", atom.hidden}, {"alive", atom.alive}, {"alpha", atom.alpha},
+            {"color", {{"r", atom.color.red}, {"g", atom.color.green}, {"b", atom.color.blue}}},
+            {"x", atom.position.x}, {"y", atom.position.y}});
         item["bonds"] = json::array();
         for (const Bond& bond : molecule.bonds) {
             json raw={{"id", bond.id}, {"a", bond.atomA}, {"b", bond.atomB}, {"type", toString(bond.type)},
-                {"order", bond.type == BondType::Double ? 2.0 : bond.type == BondType::Triple ? 3.0 : bond.type == BondType::Aromatic ? 1.5 : 1.0},
-                {"aromatic", bond.type == BondType::Aromatic}, {"stereo", toString(bond.stereo)}, {"visible", bond.visible}};
-            if(bond.displayType)raw["display_type"]=toString(*bond.displayType);
+                {"secondary_line_side", toString(bond.secondaryLineSide)}, {"stereo", toString(bond.stereo)},
+                {"visible", bond.visible}, {"alive", bond.alive}, {"alpha", bond.alpha},
+                {"color", {{"r", bond.color.red}, {"g", bond.color.green}, {"b", bond.color.blue}}}};
             item["bonds"].push_back(std::move(raw));
+        }
+        item["adornments"] = json::array();
+        for (const AtomAdornment& adornment : molecule.adornments) {
+            item["adornments"].push_back({{"id", adornment.id}, {"creation_serial", adornment.creationSerial},
+                {"atom", adornment.atomId}, {"text", adornment.text}, {"x", adornment.offset.x},
+                {"y", adornment.offset.y}, {"alpha", adornment.alpha}, {"alive", adornment.alive},
+                {"color", {{"r", adornment.color.red}, {"g", adornment.color.green}, {"b", adornment.color.blue}}}});
         }
         item["poses"] = json::object();
         for (const auto& [id, pose] : molecule.poses) {
@@ -271,12 +401,14 @@ Project fromJson(const std::string& source) {
     const json root = json::parse(source);
     if (root.value("format", "") != "chemanim-native-2d") throw std::runtime_error("Not a Chemanim native 2D project");
     const int version = root.value("version", 0);
-    if (version != 2 && version != 3 && version != 4) throw std::runtime_error("Unsupported Chemanim native 2D project version");
+    if (version < 2 || version > 5) throw std::runtime_error("Unsupported Chemanim native 2D project version");
     Project project;
+    std::map<std::string,std::pair<Point,double>> legacyTransforms;
     project.mod = root.value("mod", project.mod);
     project.nextMoleculeId = root.value("next_molecule_id", std::uint64_t{1});
     project.nextTimelineId = root.value("next_timeline_id", std::uint64_t{1});
     project.nextNodeId = root.value("next_node_id", std::uint64_t{1});
+    project.nextCreationSerial = root.value("next_creation_serial", std::uint64_t{1});
     if (const auto found = root.find("scene"); found != root.end()) {
         project.scene.width = found->value("width", project.scene.width); project.scene.height = found->value("height", project.scene.height);
         project.scene.logicWidth = found->value("logic_width", project.scene.logicWidth); project.scene.logicHeight = found->value("logic_height", project.scene.logicHeight);
@@ -294,26 +426,72 @@ Project fromJson(const std::string& source) {
         molecule.id = raw.value("id", ""); molecule.name = raw.value("name", molecule.id); molecule.sourceSmiles = raw.value("source_smiles", "");
         molecule.referenceBondLength = raw.value("reference_bond_length", molecule.referenceBondLength);
         molecule.nextAtomId = raw.value("next_atom_id", std::uint64_t{1}); molecule.nextBondId = raw.value("next_bond_id", std::uint64_t{1});
-        molecule.scenePosition = {raw.value("x", 0.0), raw.value("y", 0.0)}; molecule.rotation = raw.value("rotation", 0.0);
-        molecule.scale = raw.value("scale", 2.2); molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0); molecule.visible=raw.value("visible",true);
+        molecule.nextAdornmentId = raw.value("next_adornment_id", std::uint64_t{1});
+        const Point legacyOrigin{raw.value("x", 0.0), raw.value("y", 0.0)};
+        const double legacyScale = raw.value("scale", 2.2) * 14.4 / std::max(.01, molecule.referenceBondLength);
+        if(version<5)legacyTransforms[molecule.id]={legacyOrigin,legacyScale};
+        molecule.rotation = raw.value("rotation", 0.0);
+        molecule.scale = version >= 5 ? raw.value("scale", 1.0) : 1.0;
+        molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0);
+        molecule.visible=raw.value("visible",true); molecule.retired=raw.value("retired",false);
+        if (const auto color = raw.find("color"); color != raw.end()) molecule.color = colorFromJson(*color, {255,255,255});
         for (const json& value : raw.value("atoms", json::array())) {
             Atom atom; atom.id = value.value("id", ""); atom.element = value.value("element", "C"); atom.alias = value.value("alias", "");
-            atom.isotope = value.value("isotope", 0); atom.formalCharge = value.value("formal_charge", 0); atom.radicalElectrons = value.value("radical_electrons", 0);
-            atom.implicitHydrogens = value.value("implicit_hydrogens", 0); atom.aromatic = value.value("aromatic", false); atom.hidden = value.value("hidden", false);
-            atom.position = {value.value("x", 0.0), value.value("y", 0.0)}; molecule.nextAtomId = std::max(molecule.nextAtomId, numericSuffix(atom.id, 'A') + 1); molecule.atoms.push_back(std::move(atom));
+            atom.creationSerial = version >= 5 ? value.value("creation_serial", std::uint64_t{0}) : project.allocateCreationSerial();
+            if (atom.creationSerial == 0) atom.creationSerial = project.allocateCreationSerial();
+            project.nextCreationSerial = std::max(project.nextCreationSerial, atom.creationSerial + 1);
+            atom.isotope = value.value("isotope", 0); atom.radicalElectrons = value.value("radical_electrons", 0);
+            atom.implicitHydrogens = value.value("implicit_hydrogens", 0); atom.hidden = value.value("hidden", false);
+            atom.alive = value.value("alive", true); atom.alpha = value.value("alpha", 255);
+            if (const auto color = value.find("color"); color != value.end()) atom.color = colorFromJson(*color);
+            Point stored{value.value("x", 0.0), value.value("y", 0.0)};
+            atom.position = version >= 5 ? stored : Point{legacyOrigin.x + stored.x * legacyScale,
+                                                          legacyOrigin.y + stored.y * legacyScale};
+            molecule.nextAtomId = std::max(molecule.nextAtomId, numericSuffix(atom.id, 'A') + 1);
+            const int legacyCharge = value.value("formal_charge", 0);
+            molecule.atoms.push_back(std::move(atom));
+            if (legacyCharge != 0) {
+                const std::string text = std::abs(legacyCharge) == 1
+                    ? (legacyCharge > 0 ? "+" : "−")
+                    : std::to_string(std::abs(legacyCharge)) + (legacyCharge > 0 ? "+" : "−");
+                const std::string adornmentId = "D" + std::to_string(molecule.nextAdornmentId++);
+                molecule.adornments.push_back({adornmentId, project.allocateCreationSerial(), molecule.atoms.back().id,
+                                                text, {18.0, 18.0}, {}, 255, true});
+            }
         }
         for (const json& value : raw.value("bonds", json::array())) {
             Bond bond; bond.id = value.value("id", ""); bond.atomA = value.value("a", ""); bond.atomB = value.value("b", "");
-            if (value.contains("type")) bond.type = bondTypeFromString(value.value("type", "single"));
-            else { const double order = value.value("order", 1.0); bond.type = value.value("aromatic", false) ? BondType::Aromatic : order > 2.5 ? BondType::Triple : order > 1.5 ? BondType::Double : BondType::Single; }
-            if(value.contains("display_type"))bond.displayType=bondTypeFromString(value.value("display_type","single"));
-            else if(bond.type==BondType::Aromatic)bond.displayType=(numericSuffix(bond.id,'B')%2)?BondType::Double:BondType::Single;
+            const std::string persistedType = value.value("type", "single");
+            if (persistedType == "aromatic" || value.value("aromatic", false)) {
+                bond.type = value.contains("display_type")
+                    ? bondTypeFromString(value.value("display_type", "single"))
+                    : ((numericSuffix(bond.id,'B') % 2) ? BondType::Double : BondType::Single);
+            } else if (value.contains("type")) bond.type = bondTypeFromString(persistedType);
+            else { const double order = value.value("order", 1.0); bond.type = order > 2.5 ? BondType::Triple : order > 1.5 ? BondType::Double : BondType::Single; }
+            bond.secondaryLineSide = secondaryLineSideFromString(value.value("secondary_line_side", "center"));
             bond.stereo = bondStereoFromString(value.value("stereo", "none")); bond.visible = value.value("visible", true);
+            bond.alive = value.value("alive", true); bond.alpha = value.value("alpha", 255);
+            if (const auto color = value.find("color"); color != value.end()) bond.color = colorFromJson(*color);
             molecule.nextBondId = std::max(molecule.nextBondId, numericSuffix(bond.id, 'B') + 1); molecule.bonds.push_back(std::move(bond));
         }
+        if (version >= 5) for (const json& value : raw.value("adornments", json::array())) {
+            AtomAdornment adornment;
+            adornment.id = value.value("id", ""); adornment.creationSerial = value.value("creation_serial", std::uint64_t{0});
+            if (!adornment.creationSerial) adornment.creationSerial = project.allocateCreationSerial();
+            project.nextCreationSerial = std::max(project.nextCreationSerial, adornment.creationSerial + 1);
+            adornment.atomId = value.value("atom", ""); adornment.text = value.value("text", "+");
+            adornment.offset = {value.value("x", 0.0), value.value("y", 0.0)};
+            adornment.alpha = value.value("alpha", 255); adornment.alive = value.value("alive", true);
+            if (const auto color = value.find("color"); color != value.end()) adornment.color = colorFromJson(*color);
+            molecule.nextAdornmentId = std::max(molecule.nextAdornmentId, numericSuffix(adornment.id, 'D') + 1);
+            molecule.adornments.push_back(std::move(adornment));
+        }
+        if (version < 5) molecule.referenceBondLength *= legacyScale;
         if (const auto poses = raw.find("poses"); poses != raw.end() && poses->is_object()) for (const auto& [id, value] : poses->items()) {
             Pose pose; pose.id = value.value("id", id);
-            if (const auto positions = value.find("atoms"); positions != value.end()) for (const auto& [atomId, point] : positions->items()) pose.atomPositions[atomId] = pointFromJson(point);
+            if (const auto positions = value.find("atoms"); positions != value.end()) for (const auto& [atomId, point] : positions->items()) {
+                Point stored=pointFromJson(point);pose.atomPositions[atomId]=version>=5?stored:Point{legacyOrigin.x+stored.x*legacyScale,legacyOrigin.y+stored.y*legacyScale};
+            }
             molecule.poses[id] = std::move(pose);
         }
         project.nextMoleculeId = std::max(project.nextMoleculeId, numericSuffix(molecule.id, "molecule") + 1);
@@ -332,6 +510,11 @@ Project fromJson(const std::string& source) {
             ScriptNode node{value.value("id",""),value.value("type",""),value.value("enabled",true),value.value("params",json::object()).dump()};
             project.nextNodeId=std::max(project.nextNodeId,numericSuffix(node.id,'N')+1);project.nodes.push_back(std::move(node));
         }
+        if(version<5)for(ScriptNode& node:project.nodes){
+            if(node.type!="atom_set_xy"&&node.type!="atom_lerp_xy")continue;json params=json::parse(node.paramsJson);const auto transform=legacyTransforms.find(params.value("target",""));if(transform==legacyTransforms.end())continue;
+            params["x"]=transform->second.first.x+params.value("x",0.0)*transform->second.second;
+            params["y"]=transform->second.first.y+params.value("y",0.0)*transform->second.second;node.paramsJson=params.dump();
+        }
     } else {
         project.ensureDefaultNodes();
         struct LegacyCommand{int start;std::size_t order;std::string type;json params;};std::vector<LegacyCommand> commands;std::size_t order=0;
@@ -342,6 +525,7 @@ Project fromJson(const std::string& source) {
         project.atomTweens.clear();project.poseTweens.clear();
     }
     project.ensureDefaultNodes();
+    migrateProjectWideStableIds(project);
     project.validateIds();
     return project;
 }

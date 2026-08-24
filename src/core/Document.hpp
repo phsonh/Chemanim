@@ -25,19 +25,28 @@ struct Rect {
     [[nodiscard]] bool contains(Point point, double padding = 0.0) const;
 };
 
-enum class BondType { Single, Double, Triple, Aromatic };
+enum class BondType { Single, Double, Triple };
 enum class BondStereo { None, SolidWedge, DashedWedge, Wavy };
+enum class SecondaryLineSide { Left, Right, Center };
+
+struct Color {
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+};
 
 struct Atom {
     std::string id;
+    std::uint64_t creationSerial = 0;
     std::string element = "C";
     std::string alias;
     int isotope = 0;
-    int formalCharge = 0;
     int radicalElectrons = 0;
     int implicitHydrogens = 0;
-    bool aromatic = false;
     bool hidden = false;
+    bool alive = true;
+    int alpha = 255;
+    Color color;
     Point position;
 };
 
@@ -46,11 +55,23 @@ struct Bond {
     std::string atomA;
     std::string atomB;
     BondType type = BondType::Single;
-    // Chemical aromaticity remains in `type`.  `displayType` is the stable
-    // Kekule assignment used only for depiction and is persisted by bond ID.
-    std::optional<BondType> displayType;
+    SecondaryLineSide secondaryLineSide = SecondaryLineSide::Center;
     BondStereo stereo = BondStereo::None;
     bool visible = true;
+    bool alive = true;
+    int alpha = 255;
+    Color color;
+};
+
+struct AtomAdornment {
+    std::string id;
+    std::uint64_t creationSerial = 0;
+    std::string atomId;
+    std::string text = "+";
+    Point offset;
+    Color color;
+    int alpha = 255;
+    bool alive = true;
 };
 
 struct Pose {
@@ -62,30 +83,41 @@ struct Molecule {
     std::string id;
     std::string name;
     std::string sourceSmiles;
-    double referenceBondLength = 1.5;
+    double referenceBondLength = 32.0;
     std::uint64_t nextAtomId = 1;
     std::uint64_t nextBondId = 1;
+    std::uint64_t nextAdornmentId = 1;
     std::vector<Atom> atoms;
     std::vector<Bond> bonds;
+    std::vector<AtomAdornment> adornments;
     std::map<std::string, Pose> poses;
-    Point scenePosition;
     double rotation = 0.0;
-    double scale = 2.2;
+    double scale = 1.0;
     int alpha = 255;
+    Color color{255, 255, 255};
     int layer = 0;
     bool visible = true;
+    bool retired = false;
 
     [[nodiscard]] Atom* atom(const std::string& stableId);
     [[nodiscard]] const Atom* atom(const std::string& stableId) const;
     [[nodiscard]] Bond* bond(const std::string& stableId);
     [[nodiscard]] const Bond* bond(const std::string& stableId) const;
+    [[nodiscard]] AtomAdornment* adornment(const std::string& stableId);
+    [[nodiscard]] const AtomAdornment* adornment(const std::string& stableId) const;
     [[nodiscard]] Bond* bondBetween(const std::string& first, const std::string& second);
+    [[nodiscard]] const Atom* anchorAtom() const;
+    [[nodiscard]] std::optional<Point> coordinate() const;
     [[nodiscard]] std::string allocateAtomId();
     [[nodiscard]] std::string allocateBondId();
-    [[nodiscard]] std::string addAtom(Point position, std::string element = "C");
+    [[nodiscard]] std::string allocateAdornmentId();
+    [[nodiscard]] std::string addAtom(Point position, std::string element = "C",
+                                      std::uint64_t creationSerial = 0);
     [[nodiscard]] std::string addBond(const std::string& first, const std::string& second,
                                       BondType type = BondType::Single,
                                       BondStereo stereo = BondStereo::None);
+    [[nodiscard]] std::string addAdornment(const std::string& atomId, std::string text,
+                                           Point offset, std::uint64_t creationSerial = 0);
     bool removeAtom(const std::string& stableId);
     bool removeBond(const std::string& stableId);
     void validateIds() const;
@@ -149,6 +181,7 @@ struct Project {
     std::uint64_t nextMoleculeId = 1;
     std::uint64_t nextTimelineId = 1;
     std::uint64_t nextNodeId = 1;
+    std::uint64_t nextCreationSerial = 1;
     std::vector<Molecule> molecules;
     std::vector<ScriptNode> nodes;
     // v2/v3 compatibility input only.  v4 serialization and authoring use
@@ -159,6 +192,7 @@ struct Project {
     [[nodiscard]] Molecule* molecule(const std::string& stableId);
     [[nodiscard]] const Molecule* molecule(const std::string& stableId) const;
     [[nodiscard]] std::string addBlankMolecule(std::string name = {});
+    [[nodiscard]] std::uint64_t allocateCreationSerial();
     [[nodiscard]] std::string addAtomTween(const std::string& moleculeId,
                                            const std::string& atomId,
                                            int startFrame, int frames,
@@ -178,7 +212,9 @@ void saveProject(const Project& project, const std::filesystem::path& path);
 
 [[nodiscard]] const char* toString(BondType value);
 [[nodiscard]] const char* toString(BondStereo value);
+[[nodiscard]] const char* toString(SecondaryLineSide value);
 [[nodiscard]] BondType bondTypeFromString(const std::string& value);
 [[nodiscard]] BondStereo bondStereoFromString(const std::string& value);
+[[nodiscard]] SecondaryLineSide secondaryLineSideFromString(const std::string& value);
 
 }  // namespace chem::core

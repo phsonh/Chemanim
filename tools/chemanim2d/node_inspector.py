@@ -36,8 +36,8 @@ class NodeInspector(QWidget):
             by_id = {item["id"]: item for item in project.get("molecules", [])}
             return [(by_id[value]["name"], value) for value in alive if value in by_id]
         molecule = next((item for item in project.get("molecules", []) if item["id"] == target), None)
-        if kind == "atom": return [(f'{item["element"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("atoms", [])]
-        if kind == "bond": return [(f'{item["a"]}—{item["b"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("bonds", [])]
+        if kind == "atom": return [(f'{item["element"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("atoms", []) if item.get("alive",True)]
+        if kind == "bond": return [(f'{item["a"]}—{item["b"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("bonds", []) if item.get("alive",True)]
         if kind == "pose": return [(key, key) for key in (molecule or {}).get("poses", {})]
         if kind == "arrow":
             names = []
@@ -47,7 +47,8 @@ class NodeInspector(QWidget):
                 elif node["type"] == "arrow_delete" and node["params"].get("target") in names: names.remove(node["params"].get("target"))
             return [(name, name) for name in names if name]
         if kind == "easing": return [(name, value) for name, value in (("Linear","linear"),("In Quad","in_quad"),("Out Quad","out_quad"),("In/Out Quad","in_out_quad"),("Smoothstep","smoothstep"),("Step","step"))]
-        if kind == "bond_order": return [(name, value) for name, value in (("单键","single"),("双键","double"),("三键","triple"),("芳香键","aromatic"))]
+        if kind == "bond_order": return [(name, value) for name, value in (("单键","single"),("双键","double"),("三键","triple"))]
+        if kind == "secondary_line_side": return [(name,value) for name,value in (("左侧","left"),("右侧","right"),("居中","center"))]
         if kind == "bond_stereo": return [(name, value) for name, value in (("无","none"),("实楔","wedge"),("虚楔","dash"),("波浪","wavy"))]
         return []
 

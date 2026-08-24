@@ -16,6 +16,7 @@ class StructureCanvas(QWidget):
     transactionCommitted = pyqtSignal()
     hoverChanged = pyqtSignal(dict)
     zoomChanged = pyqtSignal(float)
+    contextRequested = pyqtSignal(dict, object)
 
     def __init__(self, session: CoreSession, parent=None):
         super().__init__(parent)
@@ -34,6 +35,8 @@ class StructureCanvas(QWidget):
         self._pan_press = QPointF()
         self._pan_origin = QPointF()
         self._space_down = False
+        self._gesture_active = False
+        self._base_edit = True
         self._fit_pending = True
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -82,11 +85,8 @@ class StructureCanvas(QWidget):
         project = self.session.project()
         points = []
         for molecule in project.get("molecules", []):
-            origin = {"x": molecule.get("x", 0), "y": molecule.get("y", 0)}
-            scale = molecule.get("scale", 2.2) * 14.4 / max(.01, molecule.get("reference_bond_length", 1.5))
             for atom in molecule.get("atoms", []):
-                points.append(QPointF(origin.get("x", 0) + atom["x"] * scale,
-                                      origin.get("y", 0) + atom["y"] * scale))
+                if atom.get("alive",True):points.append(QPointF(atom["x"],atom["y"]))
         if not points:
             self.fit_artboard()
             return
@@ -110,19 +110,8 @@ class StructureCanvas(QWidget):
         return next((item for item in self.session.project().get("molecules", []) if item["id"] == active), None)
 
     def _sync_core_viewport(self):
-        molecule = self._active_molecule()
-        if not molecule:
-            self.session.set_viewport(max(1, self.width()), max(1, self.height()), 48, 0, 0)
-            return
-        evaluated = self.session.evaluated_molecules(self.preview_frame).get(molecule["id"], {})
-        origin = {"x": evaluated.get("x", molecule.get("x", 0.0)),
-                  "y": evaluated.get("y", molecule.get("y", 0.0))}
-        target = self.world_to_screen(QPointF(origin.get("x", 0), origin.get("y", 0)))
-        object_scale = evaluated.get("scale", molecule.get("scale", 2.2))
-        model_ppu = self.view_scale * object_scale * 14.4 / max(.01, molecule.get("reference_bond_length", 1.5))
-        center_x = (self.width()*.5 - target.x()) / model_ppu
-        center_y = (target.y() - self.height()*.5) / model_ppu
-        self.session.set_viewport(max(1, self.width()), max(1, self.height()), model_ppu, center_x, center_y)
+        center=self.screen_to_world(QPointF(self.width()*.5,self.height()*.5))
+        self.session.set_viewport(max(1,self.width()),max(1,self.height()),self.view_scale,center.x(),center.y())
 
     def request_refresh(self):
         if not self._timer.isActive():
@@ -131,9 +120,7 @@ class StructureCanvas(QWidget):
     def _refresh_now(self):
         self._sync_core_viewport()
         try:
-            data = self.session.depict_at(self.preview_frame, self.final_effect)
-            if not self.final_effect:
-                data = self.session.depict(False)
+            data = self.session.depict(self.final_effect) if self._base_edit else self.session.depict_at(self.preview_frame,self.final_effect)
         except RuntimeError:
             self._depiction = self._svg = self._raster = None
             self.update()
@@ -150,6 +137,10 @@ class StructureCanvas(QWidget):
     def set_preview_frame(self, frame: int):
         self.preview_frame = max(0, int(frame))
         self.session.preview_timeline(self.preview_frame)
+        self.request_refresh()
+
+    def set_base_edit(self, enabled: bool):
+        self._base_edit = bool(enabled)
         self.request_refresh()
 
     def set_final_effect(self, enabled: bool):
@@ -254,6 +245,11 @@ class StructureCanvas(QWidget):
                 if atom_id in points:
                     point=points[atom_id]
                     painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
+            bonds={item["id"]:item for item in self._depiction.get("bonds",[])}
+            painter.setPen(QPen(QColor(42,145,235,190),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            for bond_id in self._selected_bonds:
+                if bond_id in bonds:
+                    bond=bonds[bond_id];painter.drawLine(QPointF(bond["first"]["x"],bond["first"]["y"]),QPointF(bond["second"]["x"],bond["second"]["y"]))
         if self._preview.get("active"):
             kind=self._preview.get("kind","none")
             start,current=self._preview.get("start"),self._preview.get("current")
@@ -296,11 +292,13 @@ class StructureCanvas(QWidget):
     def mousePressEvent(self,event:QMouseEvent):
         if event.button()==Qt.MouseButton.MiddleButton or (event.button()==Qt.MouseButton.LeftButton and self._space_down):
             self._begin_pan(event.position());event.accept();return
+        if event.button()==Qt.MouseButton.RightButton:
+            self._sync_core_viewport();self.contextRequested.emit(self.session.hit_test(event.position().x(),event.position().y()),event.globalPosition().toPoint());event.accept();return
         if event.button()!=Qt.MouseButton.LeftButton:
             return
         self.setFocus();self._sync_core_viewport()
         alt,control,shift=self._mods(event)
-        self._consume(self.session.pointer_down(event.position().x(),event.position().y(),alt,control,shift))
+        self._gesture_active=True;self._consume(self.session.pointer_down(event.position().x(),event.position().y(),alt,control,shift))
 
     def mouseMoveEvent(self,event:QMouseEvent):
         if self._panning:
@@ -319,7 +317,7 @@ class StructureCanvas(QWidget):
         self._sync_core_viewport()
         alt,control,shift=self._mods(event)
         result=self.session.pointer_up(event.position().x(),event.position().y(),alt,control,shift)
-        self._consume(result);self.request_refresh()
+        self._gesture_active=False;self._consume(result);self.request_refresh()
         if result["changed"]:
             self.transactionCommitted.emit()
 
@@ -331,8 +329,11 @@ class StructureCanvas(QWidget):
         if abs(new_scale-self.view_scale)<1e-12:
             return
         self.view_scale=new_scale
-        self.pan=QPointF(event.position().x()-self.width()*.5-before.x()*new_scale,
-                         event.position().y()-self.height()*.5+before.y()*new_scale)
+        if abs(new_scale-low)<1e-12 and factor<1:
+            self.pan=QPointF()
+        else:
+            self.pan=QPointF(event.position().x()-self.width()*.5-before.x()*new_scale,
+                             event.position().y()-self.height()*.5+before.y()*new_scale)
         self.zoomChanged.emit(self.view_scale)
         self.request_refresh();event.accept()
 
@@ -347,7 +348,7 @@ class StructureCanvas(QWidget):
                 self.request_refresh();self.transactionCommitted.emit()
             return
         if event.key()==Qt.Key.Key_Escape:
-            self.session.cancel_gesture();self._preview={"active":False,"kind":"none"};self.request_refresh();return
+            self.session.cancel_gesture();self._gesture_active=False;self._preview={"active":False,"kind":"none"};self.request_refresh();return
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self,event:QKeyEvent):

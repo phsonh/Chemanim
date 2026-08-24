@@ -141,7 +141,7 @@ void Renderer::drawObject(const Object& object) {
 }
 
 void Renderer::drawAcsMolecule(int table, const Object& object) {
-    if (!object.molecule || object.molecule->atoms.empty()) return;
+    const auto evaluatedMolecule=engine_.moleculeAt(object.id,currentFrame_);if(!evaluatedMolecule||evaluatedMolecule->atoms.empty())return;
     const float renderWidth = static_cast<float>(engine_.scene.width * supersample_);
     const float renderHeight = static_cast<float>(engine_.scene.height * supersample_);
     const float canvasScaleX = renderWidth / engine_.scene.logicWidth;
@@ -152,13 +152,14 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
                               std::max(std::abs(scaleX), std::abs(scaleY));
     SvgCacheEntry& cache = moleculeSvgs_[object.id];
     if (!cache.hasViewport) {
-        double minX = object.molecule->atoms.front().position.x, maxX = minX;
-        double minY = object.molecule->atoms.front().position.y, maxY = minY;
-        for (const auto& atom : object.molecule->atoms) {
+        core::Molecule extent=*evaluatedMolecule;if(const auto finalMolecule=engine_.moleculeAt(object.id,engine_.maxScheduledFrame());finalMolecule)extent.atoms.insert(extent.atoms.end(),finalMolecule->atoms.begin(),finalMolecule->atoms.end());
+        double minX = extent.atoms.front().position.x, maxX = minX;
+        double minY = extent.atoms.front().position.y, maxY = minY;
+        for (const auto& atom : extent.atoms) {
             minX = std::min(minX, atom.position.x); maxX = std::max(maxX, atom.position.x);
             minY = std::min(minY, atom.position.y); maxY = std::max(maxY, atom.position.y);
         }
-        const double reference = std::max(0.01, object.molecule->referenceBondLength);
+        const double reference = std::max(0.01, evaluatedMolecule->referenceBondLength);
         const double pixelsPerUnit = 14.4 / reference;
         cache.viewport.width = std::max(64, static_cast<int>(std::ceil((maxX - minX) * pixelsPerUnit + 64.0)));
         cache.viewport.height = std::max(64, static_cast<int>(std::ceil((maxY - minY) * pixelsPerUnit + 64.0)));
@@ -166,28 +167,37 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         cache.viewport.center = {(minX + maxX) * .5, (minY + maxY) * .5};
         cache.hasViewport = true;
     }
-    core::Molecule currentMolecule = *object.molecule;
+    core::Molecule currentMolecule = *evaluatedMolecule;
+    const Color moleculeTint=objectColor(table);currentMolecule.color={moleculeTint.r,moleculeTint.g,moleculeTint.b};
     for (auto& atom : currentMolecule.atoms) {
         const auto x = object.numericTracks.find("atom:" + atom.id + ":x");
         const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
         if (x != object.numericTracks.end()) atom.position.x = x->second.valueAt(currentFrame_);
         if (y != object.numericTracks.end()) atom.position.y = y->second.valueAt(currentFrame_);
         if(const auto value=object.stringTracks.find("atom:"+atom.id+":element");value!=object.stringTracks.end())atom.element=value->second.valueAt(currentFrame_);
-        if(const auto value=object.numericTracks.find("atom:"+atom.id+":charge");value!=object.numericTracks.end())atom.formalCharge=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
         if(const auto value=object.numericTracks.find("atom:"+atom.id+":hidden");value!=object.numericTracks.end())atom.hidden=value->second.valueAt(currentFrame_)>.5;
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":alpha");value!=object.numericTracks.end())atom.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":color:r");value!=object.numericTracks.end())atom.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":color:g");value!=object.numericTracks.end())atom.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":color:b");value!=object.numericTracks.end())atom.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
     }
     for(auto& bond:currentMolecule.bonds){
         if(const auto value=object.stringTracks.find("bond:"+bond.id+":type");value!=object.stringTracks.end()){
             bond.type=core::bondTypeFromString(value->second.valueAt(currentFrame_));
-            if(bond.type==core::BondType::Aromatic){unsigned suffix=0;for(const char ch:bond.id)if(ch>='0'&&ch<='9')suffix=suffix*10+static_cast<unsigned>(ch-'0');bond.displayType=suffix%2==0?core::BondType::Double:core::BondType::Single;}
-            else bond.displayType.reset();
         }
+        if(const auto value=object.stringTracks.find("bond:"+bond.id+":secondary");value!=object.stringTracks.end())bond.secondaryLineSide=core::secondaryLineSideFromString(value->second.valueAt(currentFrame_));
         if(const auto value=object.stringTracks.find("bond:"+bond.id+":stereo");value!=object.stringTracks.end())bond.stereo=core::bondStereoFromString(value->second.valueAt(currentFrame_));
         if(const auto value=object.numericTracks.find("bond:"+bond.id+":visible");value!=object.numericTracks.end())bond.visible=value->second.valueAt(currentFrame_)>.5;
+        if(const auto value=object.numericTracks.find("bond:"+bond.id+":alpha");value!=object.numericTracks.end())bond.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("bond:"+bond.id+":color:r");value!=object.numericTracks.end())bond.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("bond:"+bond.id+":color:g");value!=object.numericTracks.end())bond.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("bond:"+bond.id+":color:b");value!=object.numericTracks.end())bond.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
     }
+    for(auto& adornment:currentMolecule.adornments){const std::string prefix="adornment:"+adornment.id+":";if(const auto value=object.numericTracks.find(prefix+"x");value!=object.numericTracks.end())adornment.offset.x=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"y");value!=object.numericTracks.end())adornment.offset.y=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"alpha");value!=object.numericTracks.end())adornment.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.stringTracks.find(prefix+"text");value!=object.stringTracks.end())adornment.text=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"color:r");value!=object.numericTracks.end())adornment.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:g");value!=object.numericTracks.end())adornment.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:b");value!=object.numericTracks.end())adornment.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));}
     std::ostringstream geometry; geometry << std::setprecision(12);
-    for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.formalCharge << ':' << atom.position.x << ':' << atom.position.y << ';';
-    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << (bond.displayType?static_cast<int>(*bond.displayType):-1) << ':' << static_cast<int>(bond.stereo) << ';';
+    for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.position.x << ':' << atom.position.y << ':' << atom.alive << ':' << atom.alpha << ':' << atom.color.red << ':' << atom.color.green << ':' << atom.color.blue << ';';
+    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.secondaryLineSide) << ':' << static_cast<int>(bond.stereo) << ':' << bond.alive << ':' << bond.alpha << ':' << bond.color.red << ':' << bond.color.green << ':' << bond.color.blue << ';';
+    for(const auto& value:currentMolecule.adornments)geometry<<value.id<<':'<<value.atomId<<':'<<value.text<<':'<<value.offset.x<<':'<<value.offset.y<<':'<<value.alpha<<':'<<value.alive<<';';
     const std::string geometryKey = geometry.str();
     const bool geometryChanged = cache.geometryKey != geometryKey;
     if (geometryChanged) {
@@ -210,8 +220,11 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         SetTextureFilter(cache.texture, TEXTURE_FILTER_BILINEAR);
         cache.rasterScale = rasterScale;
     }
-    const float x = renderWidth * 0.5f + static_cast<float>(number(table, "x", 0)) * canvasScaleX;
-    const float y = renderHeight * 0.5f - static_cast<float>(number(table, "y", 0)) * canvasScaleY;
+    const double rotationDegrees=number(table,"rotation",0);const double radians=rotationDegrees*3.14159265358979323846/180.0;
+    const double localX=cache.viewport.center.x*scaleX,localY=cache.viewport.center.y*scaleY;
+    const double offsetX=localX*std::cos(radians)-localY*std::sin(radians),offsetY=localX*std::sin(radians)+localY*std::cos(radians);
+    const float x = renderWidth * 0.5f + static_cast<float>(number(table, "x", 0)+offsetX) * canvasScaleX;
+    const float y = renderHeight * 0.5f - static_cast<float>(number(table, "y", 0)+offsetY) * canvasScaleY;
     const float expectedX = static_cast<float>(engine_.scene.viewZoom * supersample_) * std::abs(scaleX);
     const float expectedY = static_cast<float>(engine_.scene.viewZoom * supersample_) * std::abs(scaleY);
     const float naturalWidth = cache.texture.width / rasterScale;
@@ -224,7 +237,7 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     Color tint = WHITE;
     tint.a = objectColor(table).a;
     DrawTexturePro(cache.texture, source, destination, origin,
-                   static_cast<float>(number(table, "rotation", 0)), tint);
+                   static_cast<float>(rotationDegrees), tint);
 }
 
 void Renderer::drawSprite(int table, const Object& object) {

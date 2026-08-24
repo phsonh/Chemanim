@@ -22,7 +22,8 @@ double pointSegmentDistance(Point point, Point first, Point second) {
     return distance(point, {first.x + t * dx, first.y + t * dy});
 }
 bool isBondTool(Tool tool) {
-    return tool >= Tool::SingleBond && tool <= Tool::WavyBond;
+    return tool == Tool::SingleBond || tool == Tool::DoubleBond || tool == Tool::TripleBond ||
+           tool == Tool::SolidWedge || tool == Tool::DashedWedge || tool == Tool::WavyBond;
 }
 bool isRingTool(Tool tool) { return tool >= Tool::Ring3 && tool <= Tool::Benzene; }
 int ringSize(Tool tool) { return tool == Tool::Benzene ? 6 : 3 + static_cast<int>(tool) - static_cast<int>(Tool::Ring3); }
@@ -30,7 +31,6 @@ std::pair<BondType, BondStereo> bondStyle(Tool tool) {
     switch (tool) {
         case Tool::DoubleBond: return {BondType::Double, BondStereo::None};
         case Tool::TripleBond: return {BondType::Triple, BondStereo::None};
-        case Tool::AromaticBond: return {BondType::Aromatic, BondStereo::None};
         case Tool::SolidWedge: return {BondType::Single, BondStereo::SolidWedge};
         case Tool::DashedWedge: return {BondType::Single, BondStereo::DashedWedge};
         case Tool::WavyBond: return {BondType::Single, BondStereo::Wavy};
@@ -44,10 +44,11 @@ Point snappedDirection(Point start, Point raw, double length, bool disableAngle)
 std::vector<Point> neighborOffsets(const Molecule& molecule, const Atom& atom) {
     std::vector<Point> result;
     for (const Bond& bond : molecule.bonds) {
+        if (!bond.alive) continue;
         const std::string* otherId = nullptr;
         if (bond.atomA == atom.id) otherId = &bond.atomB;
         else if (bond.atomB == atom.id) otherId = &bond.atomA;
-        if (otherId) if (const Atom* other = molecule.atom(*otherId)) {
+        if (otherId) if (const Atom* other = molecule.atom(*otherId); other && other->alive) {
             result.push_back({other->position.x - atom.position.x, other->position.y - atom.position.y});
         }
     }
@@ -61,10 +62,6 @@ bool pointInPolygon(Point point, const std::vector<Point>& polygon) {
             point.x < (b.x - a.x) * (point.y - a.y) / ((b.y - a.y) + 1e-15) + a.x) inside = !inside;
     }
     return inside;
-}
-BondType stableAromaticDisplay(const std::string& id) {
-    try { return (std::stoull(id.size()>1?id.substr(1):id)%2)?BondType::Double:BondType::Single; }
-    catch (...) { return BondType::Single; }
 }
 }  // namespace
 
@@ -102,6 +99,10 @@ struct EditorSession::Impl {
         std::map<std::string, Point> original;
         std::vector<Point> lasso;
         std::map<std::string, Point> targetPositions;
+        std::map<std::string, Point> targetAdornmentOffsets;
+        std::map<std::string, Point> originalAdornments;
+        std::set<std::string> erasedAtoms;
+        std::set<std::string> erasedBonds;
         GesturePreviewKind previewKind = GesturePreviewKind::None;
         bool changed = false;
     };
@@ -112,7 +113,10 @@ struct EditorSession::Impl {
 
     Molecule displayed() const {
         Molecule result = targetKind == EditTargetKind::BaseStructure ? *molecule() : evaluateMolecule(project, activeMolecule, previewFrame);
-        if (gesture && targetKind != EditTargetKind::BaseStructure && targetKind != EditTargetKind::TimelinePreview) for (const auto& [id, position] : gesture->targetPositions) if (Atom* atom = result.atom(id)) atom->position = position;
+        if (gesture && targetKind != EditTargetKind::BaseStructure && targetKind != EditTargetKind::TimelinePreview) {
+            for (const auto& [id, position] : gesture->targetPositions) if (Atom* atom = result.atom(id)) atom->position = position;
+            for (const auto& [id, offset] : gesture->targetAdornmentOffsets) if (AtomAdornment* value=result.adornment(id)) value->offset=offset;
+        }
         return result;
     }
 
@@ -122,16 +126,26 @@ struct EditorSession::Impl {
         Hit best;
         best.distance = 1e9;
         for (const Atom& atom : value->atoms) {
+            if (!atom.alive) continue;
             if (ignoreAtom && atom.id == *ignoreAtom) continue;
             const double d = distance(canvasPoint, viewport.modelToCanvas(atom.position));
             if (d <= 14.0 && d < best.distance) best = {HitKind::Atom, atom.id, d};
         }
         if (best.kind == HitKind::Atom) return best;
         for (const Bond& bond : value->bonds) {
+            if (!bond.alive || !bond.visible) continue;
             const Atom* a = value->atom(bond.atomA); const Atom* b = value->atom(bond.atomB);
             if (!a || !b) continue;
             const double d = pointSegmentDistance(canvasPoint, viewport.modelToCanvas(a->position), viewport.modelToCanvas(b->position));
             if (d <= 9.0 && d < best.distance) best = {HitKind::Bond, bond.id, d};
+        }
+        if (best.kind == HitKind::Bond) return best;
+        for (const AtomAdornment& adornment : value->adornments) {
+            const Atom* atom = value->atom(adornment.atomId);
+            if (!adornment.alive || !atom || !atom->alive) continue;
+            const Point point{atom->position.x + adornment.offset.x, atom->position.y + adornment.offset.y};
+            const double d = distance(canvasPoint, viewport.modelToCanvas(point));
+            if (d <= 14.0 && d < best.distance) best = {HitKind::Adornment, adornment.id, d};
         }
         if (best.distance == 1e9) best.distance = 0.0;
         return best;
@@ -205,6 +219,7 @@ struct EditorSession::Impl {
                                                 mid.y + normal.y * apothem * candidateSign};
                     double nearest = 1e100;
                     for (const Atom& atom : value->atoms) {
+                        if (!atom.alive) continue;
                         if (atom.id == a->id || atom.id == b->id) continue;
                         nearest = std::min(nearest, distance(candidateCenter, atom.position));
                     }
@@ -223,19 +238,20 @@ struct EditorSession::Impl {
         }
         Point vertex = gesture->startModel;
         if (gesture->startHit.kind == HitKind::Atom) vertex = value->atom(gesture->startHit.id)->position;
-        Point direction;
+        Point centerDirection;
         if (gesture->startHit.kind == HitKind::Atom && distance(gesture->pressCanvas, cursor) <= 12.0) {
             const Atom* atom = value->atom(gesture->startHit.id);
-            const Point offset = sketcher_geometry::bestPlacementAroundOrigin(neighborOffsets(*value, *atom), side);
-            direction = {vertex.x + offset.x, vertex.y + offset.y};
+            centerDirection = sketcher_geometry::bestPlacementAroundOrigin(neighborOffsets(*value, *atom), radius);
         } else {
-            direction = snappedDirection(vertex, viewport.canvasToModel(cursor), side, false);
+            const Point raw = viewport.canvasToModel(cursor);
+            const double rawLength = std::hypot(raw.x - vertex.x, raw.y - vertex.y);
+            centerDirection = rawLength > 1e-9
+                ? Point{(raw.x - vertex.x) * radius / rawLength, (raw.y - vertex.y) * radius / rawLength}
+                : Point{radius, 0.0};
         }
-        double firstAngle = std::atan2(direction.y - vertex.y, direction.x - vertex.x);
-        Point center{vertex.x + radius * std::cos(firstAngle + std::numbers::pi * .5 - std::numbers::pi / count),
-                     vertex.y + radius * std::sin(firstAngle + std::numbers::pi * .5 - std::numbers::pi / count)};
+        Point center{vertex.x + centerDirection.x, vertex.y + centerDirection.y};
         const double startAngle = std::atan2(vertex.y - center.y, vertex.x - center.x);
-        for (int i = 0; i < count; ++i) result.push_back({center.x + radius * std::cos(startAngle - i * 2 * std::numbers::pi / count), center.y + radius * std::sin(startAngle - i * 2 * std::numbers::pi / count)});
+        for (int i = 0; i < count; ++i) result.push_back({center.x + radius * std::cos(startAngle + i * 2 * std::numbers::pi / count), center.y + radius * std::sin(startAngle + i * 2 * std::numbers::pi / count)});
         result[0] = vertex;
         return result;
     }
@@ -296,8 +312,8 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
                           .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
     if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
     else if (isRingTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Ring;
-    else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind==HitKind::Atom?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
-    else if (impl_->tool==Tool::SelectRectangle) gesture.previewKind=gesture.startHit.kind==HitKind::Atom?GesturePreviewKind::Move:GesturePreviewKind::Rectangle;
+    else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
+    else if (impl_->tool==Tool::SelectRectangle) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Rectangle;
     else if (impl_->tool==Tool::Move) gesture.previewKind=GesturePreviewKind::Move;
     if (gesture.startHit.kind == HitKind::Atom) {
         const Molecule shown = impl_->displayed();
@@ -307,6 +323,9 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
         }
     }
     if (impl_->tool == Tool::SelectLasso) gesture.lasso.push_back(canvasPoint);
+    if(gesture.startHit.kind==HitKind::Adornment&&(impl_->tool==Tool::SelectRectangle||impl_->tool==Tool::SelectLasso||impl_->tool==Tool::Move)){
+        const Molecule shown=impl_->displayed();if(const AtomAdornment* value=shown.adornment(gesture.startHit.id))gesture.originalAdornments[value->id]=value->offset;
+    }
     if (impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) {
         if (gesture.startHit.kind == HitKind::Atom) {
             if (control) {
@@ -317,9 +336,27 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
                 impl_->selectedAtoms = {gesture.startHit.id}; impl_->selectedBonds.clear();
             }
             if (impl_->targetKind != EditTargetKind::TimelinePreview) { const Molecule shown=impl_->displayed(); for (const std::string& id : impl_->selectedAtoms) if (const Atom* atom = shown.atom(id)) gesture.original[id] = atom->position; }
+        } else if(gesture.startHit.kind==HitKind::Bond){
+            if(control){if(impl_->selectedBonds.contains(gesture.startHit.id))impl_->selectedBonds.erase(gesture.startHit.id);else impl_->selectedBonds.insert(gesture.startHit.id);}
+            else if(shift)impl_->selectedBonds.insert(gesture.startHit.id);
+            else if(!impl_->selectedBonds.contains(gesture.startHit.id)){impl_->selectedAtoms.clear();impl_->selectedBonds={gesture.startHit.id};}
+            if(impl_->targetKind!=EditTargetKind::TimelinePreview){const Molecule shown=impl_->displayed();for(const std::string& id:impl_->selectedAtoms)if(const Atom* atom=shown.atom(id))gesture.original[id]=atom->position;for(const std::string& id:impl_->selectedBonds)if(const Bond* bond=shown.bond(id))for(const std::string* atomId:{&bond->atomA,&bond->atomB})if(const Atom* atom=shown.atom(*atomId))gesture.original[atom->id]=atom->position;}
         } else if (!control && !shift) { impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
     }
+    if(impl_->targetKind==EditTargetKind::ScriptNode){
+        gesture.original.clear();gesture.originalAdornments.clear();const ScriptNode* node=impl_->project.node(impl_->targetId);const json params=node?json::parse(node->paramsJson):json::object();
+        if(node&&(node->type=="molecule_set_position"||node->type=="molecule_lerp_position")&&gesture.startHit.kind==HitKind::Atom){const Molecule shown=impl_->displayed();for(const Atom& atom:shown.atoms)if(atom.alive)gesture.original[atom.id]=atom.position;}
+        else if(node&&(node->type=="atom_set_xy"||node->type=="atom_lerp_xy")&&gesture.startHit.kind==HitKind::Atom&&gesture.startHit.id==params.value("atom","")){const Molecule shown=impl_->displayed();if(const Atom* atom=shown.atom(gesture.startHit.id))gesture.original[atom->id]=atom->position;}
+        else if(node&&(node->type=="adornment_set_offset"||node->type=="adornment_lerp_offset")&&gesture.startHit.kind==HitKind::Adornment&&gesture.startHit.id==params.value("adornment","")){const Molecule shown=impl_->displayed();if(const AtomAdornment* value=shown.adornment(gesture.startHit.id))gesture.originalAdornments[value->id]=value->offset;}
+    }
     impl_->gesture = std::move(gesture);
+    if (impl_->tool == Tool::Eraser && impl_->gesture) {
+        const Hit hit = impl_->gesture->startHit;
+        if (hit.kind == HitKind::Atom && impl_->gesture->erasedAtoms.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeAtom(hit.id);
+        else if (hit.kind == HitKind::Bond && impl_->gesture->erasedBonds.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeBond(hit.id);
+    }
     return impl_->result(canvasPoint);
 }
 
@@ -337,6 +374,10 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             else impl_->gesture->targetPositions[id] = target;
         }
         impl_->gesture->changed = std::hypot(delta.x, delta.y) > 1e-9;
+    } else if((impl_->tool==Tool::Move||impl_->tool==Tool::SelectRectangle||impl_->tool==Tool::SelectLasso)&&!impl_->gesture->originalAdornments.empty()){
+        const Point current=impl_->viewport.canvasToModel(canvasPoint);const Point delta{current.x-impl_->gesture->pressModel.x,current.y-impl_->gesture->pressModel.y};
+        for(const auto& [id,offset]:impl_->gesture->originalAdornments){const Point target{offset.x+delta.x,offset.y+delta.y};if(impl_->targetKind==EditTargetKind::BaseStructure){if(AtomAdornment* value=molecule->adornment(id))value->offset=target;}else impl_->gesture->targetAdornmentOffsets[id]=target;}
+        impl_->gesture->changed=std::hypot(delta.x,delta.y)>1e-9;
     } else if (impl_->tool == Tool::SelectLasso) {
         if (impl_->gesture->lasso.empty() || distance(canvasPoint, impl_->gesture->lasso.back()) > 3.0) impl_->gesture->lasso.push_back(canvasPoint);
     } else if (isBondTool(impl_->tool)) {
@@ -344,6 +385,12 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     } else if (isRingTool(impl_->tool)) {
         impl_->gesture->lasso.clear();
         for (Point point : impl_->ringPolygon(ringSize(impl_->tool), canvasPoint)) impl_->gesture->lasso.push_back(impl_->viewport.modelToCanvas(point));
+    } else if (impl_->tool == Tool::Eraser) {
+        const Hit hit = impl_->hit(canvasPoint);
+        if (hit.kind == HitKind::Atom && impl_->gesture->erasedAtoms.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeAtom(hit.id);
+        else if (hit.kind == HitKind::Bond && impl_->gesture->erasedBonds.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeBond(hit.id);
     }
     return impl_->result(canvasPoint);
 }
@@ -374,31 +421,38 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 if(const auto found=impl_->gesture->targetPositions.find(atomId);found!=impl_->gesture->targetPositions.end()){
                     params["x"]=found->second.x;params["y"]=found->second.y;node->paramsJson=params.dump();
                 }
+                const std::string adornmentId=params.value("adornment","");
+                if(const auto found=impl_->gesture->targetAdornmentOffsets.find(adornmentId);found!=impl_->gesture->targetAdornmentOffsets.end()){params["x"]=found->second.x;params["y"]=found->second.y;node->paramsJson=params.dump();}
+                if((node->type=="molecule_set_position"||node->type=="molecule_lerp_position")&&!impl_->gesture->targetPositions.empty()){
+                    const auto moved=impl_->gesture->targetPositions.begin();const auto original=impl_->gesture->original.find(moved->first);if(original!=impl_->gesture->original.end()){const Point delta{moved->second.x-original->second.x,moved->second.y-original->second.y};const Molecule shown=impl_->displayed();if(const auto coordinate=shown.coordinate()){params["x"]=coordinate->x+delta.x;params["y"]=coordinate->y+delta.y;node->paramsJson=params.dump();}}
+                }
             }
         }
-    } else if (impl_->tool == Tool::SelectRectangle && impl_->gesture->original.empty()) {
+    } else if (impl_->tool == Tool::SelectRectangle && impl_->gesture->original.empty() && impl_->gesture->originalAdornments.empty()) {
         const double left = std::min(impl_->gesture->pressCanvas.x, canvasPoint.x), right = std::max(impl_->gesture->pressCanvas.x, canvasPoint.x);
         const double top = std::min(impl_->gesture->pressCanvas.y, canvasPoint.y), bottom = std::max(impl_->gesture->pressCanvas.y, canvasPoint.y);
         if (!control) impl_->selectedAtoms.clear();
-        for (const Atom& atom : molecule->atoms) if (Rect{left, top, right, bottom}.contains(impl_->viewport.modelToCanvas(atom.position))) impl_->selectedAtoms.insert(atom.id);
-    } else if (impl_->tool == Tool::SelectLasso && impl_->gesture->lasso.size() >= 3) {
+        for (const Atom& atom : molecule->atoms) if (atom.alive && Rect{left, top, right, bottom}.contains(impl_->viewport.modelToCanvas(atom.position))) impl_->selectedAtoms.insert(atom.id);
+        if(!control)impl_->selectedBonds.clear();for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
+    } else if (impl_->tool == Tool::SelectLasso && impl_->gesture->original.empty() && impl_->gesture->originalAdornments.empty() && impl_->gesture->lasso.size() >= 3) {
         if (!control) impl_->selectedAtoms.clear();
-        for (const Atom& atom : molecule->atoms) if (pointInPolygon(impl_->viewport.modelToCanvas(atom.position), impl_->gesture->lasso)) impl_->selectedAtoms.insert(atom.id);
+        for (const Atom& atom : molecule->atoms) if (atom.alive && pointInPolygon(impl_->viewport.modelToCanvas(atom.position), impl_->gesture->lasso)) impl_->selectedAtoms.insert(atom.id);
+        if(!control)impl_->selectedBonds.clear();for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
     } else if (isBondTool(impl_->tool)) {
         const auto [type, stereo] = bondStyle(impl_->tool);
         if (impl_->gesture->startHit.kind == HitKind::Bond && distance(impl_->gesture->startCanvas, canvasPoint) < 5.0) {
             if (Bond* bond = molecule->bond(impl_->gesture->startHit.id)) {
-                bond->type = type; bond->displayType = type==BondType::Aromatic ? std::optional<BondType>(stableAromaticDisplay(bond->id)) : std::nullopt;
+                bond->type = type;
                 bond->stereo = stereo; impl_->gesture->changed = true;
             }
         } else {
-            std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel);
+            std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel, "C", impl_->project.allocateCreationSerial());
             const Point endpoint = impl_->gestureEndpoint(alt);
             const Hit endpointHit = impl_->hit(impl_->viewport.modelToCanvas(endpoint),
                                                impl_->gesture->startHit.kind == HitKind::Atom
                                                    ? std::optional(impl_->gesture->startHit.id)
                                                    : std::nullopt);
-            std::string second = endpointHit.kind == HitKind::Atom ? endpointHit.id : molecule->addAtom(endpoint);
+            std::string second = endpointHit.kind == HitKind::Atom ? endpointHit.id : molecule->addAtom(endpoint, "C", impl_->project.allocateCreationSerial());
             if (first != second) {
                 const std::string bondId = molecule->addBond(first, second, type, stereo);
                 impl_->gesture->changed = !bondId.empty();
@@ -411,36 +465,43 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             std::vector<std::string> ids(count);
             if (impl_->gesture->startHit.kind == HitKind::Atom) ids[0] = impl_->gesture->startHit.id;
             if (impl_->gesture->startHit.kind == HitKind::Bond) { if (const Bond* bond = molecule->bond(impl_->gesture->startHit.id)) { ids[0] = bond->atomA; ids[1] = bond->atomB; } }
-            for (int i = 0; i < count; ++i) if (ids[i].empty()) ids[i] = molecule->addAtom(polygon[i]);
+            for (int i = 0; i < count; ++i) if (ids[i].empty()) ids[i] = molecule->addAtom(polygon[i], "C", impl_->project.allocateCreationSerial());
             for (int i = 0; i < count; ++i) {
                 if (impl_->gesture->startHit.kind == HitKind::Bond && i == 0) continue;
-                const BondType type = impl_->tool == Tool::Benzene ? BondType::Aromatic : BondType::Single;
+                const BondType type = impl_->tool == Tool::Benzene && i % 2 == 0 ? BondType::Double : BondType::Single;
                 const std::string bondId = molecule->addBond(ids[i], ids[(i + 1) % count], type);
-                if(impl_->tool==Tool::Benzene)if(Bond* bond=molecule->bond(bondId)){bond->displayType=i%2?BondType::Double:BondType::Single;bond->visible=true;}
+                if (type == BondType::Double) if (Bond* bond=molecule->bond(bondId)) {
+                    const Point a=polygon[i], b=polygon[(i+1)%count];
+                    Point center{}; for(const Point p:polygon){center.x+=p.x;center.y+=p.y;} center.x/=count;center.y/=count;
+                    const Point normal{-(b.y-a.y),b.x-a.x};
+                    const Point mid{(a.x+b.x)*.5,(a.y+b.y)*.5};
+                    bond->secondaryLineSide=((center.x-mid.x)*normal.x+(center.y-mid.y)*normal.y)>=0
+                        ? SecondaryLineSide::Left : SecondaryLineSide::Right;
+                }
                 (void)bondId;
             }
-            if(impl_->tool==Tool::Benzene)for(const std::string& id:ids)if(Atom* atom=molecule->atom(id))atom->aromatic=true;
             impl_->selectedAtoms = std::set<std::string>(ids.begin(), ids.end()); impl_->gesture->changed = true;
         }
     } else if (impl_->tool == Tool::AtomLabel) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) molecule->atom(impl_->gesture->startHit.id)->element = impl_->element;
         else {
-            const std::string atomId = molecule->addAtom(impl_->gesture->startModel, impl_->element);
+            const std::string atomId = molecule->addAtom(impl_->gesture->startModel, impl_->element, impl_->project.allocateCreationSerial());
             (void)atomId;
         }
         impl_->gesture->changed = true;
     } else if (impl_->tool == Tool::ChargePositive || impl_->tool == Tool::ChargeNegative) {
-        if (impl_->gesture->startHit.kind == HitKind::Atom) { molecule->atom(impl_->gesture->startHit.id)->formalCharge += impl_->tool == Tool::ChargePositive ? 1 : -1; impl_->gesture->changed = true; }
-    } else if (impl_->tool == Tool::Eraser) {
-        if (impl_->gesture->startHit.kind == HitKind::Atom) impl_->gesture->changed = molecule->removeAtom(impl_->gesture->startHit.id);
-        else if (impl_->gesture->startHit.kind == HitKind::Bond) impl_->gesture->changed = molecule->removeBond(impl_->gesture->startHit.id);
+        if (impl_->gesture->startHit.kind == HitKind::Atom) {
+            const std::string id=molecule->addAdornment(impl_->gesture->startHit.id,
+                impl_->tool == Tool::ChargePositive ? "+" : "−", {18.0,18.0}, impl_->project.allocateCreationSerial());
+            impl_->gesture->changed = !id.empty();
+        }
     }
     const bool changed = impl_->gesture->changed;
     impl_->commit();
     EditResult result = impl_->result(canvasPoint); result.changed = changed; return result;
 }
 
-void EditorSession::cancelGesture() { if (impl_->gesture) { impl_->project = std::move(impl_->gesture->before); impl_->gesture.reset(); } }
+void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl_->project.nextCreationSerial;impl_->project = std::move(impl_->gesture->before);impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->gesture.reset(); } }
 bool EditorSession::deleteSelection() {
     Molecule* molecule = impl_->molecule(); if (!molecule) return false;
     Project before = impl_->project; bool changed = false;
@@ -459,10 +520,20 @@ bool EditorSession::setAtomElement(const std::string& atomId, std::string elemen
     if (!atom || atom->element == element || element.empty()) return false;
     Project before = impl_->project; atom->element = std::move(element); impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
 }
-bool EditorSession::changeAtomCharge(const std::string& atomId, int delta) {
+bool EditorSession::addChargeAdornment(const std::string& atomId, int delta) {
     Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || delta == 0) return false;
-    Project before = impl_->project; atom->formalCharge += delta; impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
+    Project before = impl_->project;
+    const std::string text = std::abs(delta) == 1 ? (delta > 0 ? "+" : "−")
+        : std::to_string(std::abs(delta)) + (delta > 0 ? "+" : "−");
+    const std::string id=molecule->addAdornment(atomId,text,{18.0,18.0},impl_->project.allocateCreationSerial());
+    if(id.empty())return false;
+    impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
+}
+bool EditorSession::setAdornmentOffset(const std::string& adornmentId, Point offset) {
+    Molecule* molecule=impl_->molecule(); AtomAdornment* value=molecule?molecule->adornment(adornmentId):nullptr;
+    if(!value||(value->offset.x==offset.x&&value->offset.y==offset.y))return false;
+    Project before=impl_->project;value->offset=offset;impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
 }
 std::string EditorSession::addScriptNode(const std::string& type,const std::string& paramsJson,std::optional<std::size_t> index) {
     Project before=impl_->project; const std::string id=impl_->project.addNode(type,paramsJson,index);
@@ -506,11 +577,11 @@ bool EditorSession::updateScene(const std::string& sceneJson) {
 }
 bool EditorSession::canUndo() const { return !impl_->undo.empty(); }
 bool EditorSession::canRedo() const { return !impl_->redo.empty(); }
-bool EditorSession::undo() { if (impl_->undo.empty()) return false; auto snapshot = std::move(impl_->undo.back()); impl_->undo.pop_back(); impl_->project = snapshot.before; impl_->redo.push_back(std::move(snapshot)); return true; }
-bool EditorSession::redo() { if (impl_->redo.empty()) return false; auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after; impl_->undo.push_back(std::move(snapshot)); return true; }
+bool EditorSession::undo() { if (impl_->undo.empty()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->undo.back()); impl_->undo.pop_back(); impl_->project = snapshot.before;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->redo.push_back(std::move(snapshot)); return true; }
+bool EditorSession::redo() { if (impl_->redo.empty()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot)); return true; }
 
 const char* toString(Tool value) {
-    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","charge_positive","charge_negative","single_bond","double_bond","triple_bond","aromatic_bond","solid_wedge","dashed_wedge","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
+    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
     return names[static_cast<int>(value)];
 }
 Tool toolFromString(const std::string& value) {

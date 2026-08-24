@@ -20,7 +20,6 @@ enum class Tool {
     SingleBond,
     DoubleBond,
     TripleBond,
-    AromaticBond,
     SolidWedge,
     DashedWedge,
     WavyBond,
@@ -43,7 +42,7 @@ struct Viewport {
     [[nodiscard]] Point canvasToModel(Point value) const;
 };
 
-enum class HitKind { None, Atom, Bond };
+enum class HitKind { None, Atom, Bond, Adornment };
 enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose, ScriptNode };
 enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Move, Pan };
 
@@ -106,7 +105,8 @@ public:
     bool deleteSelection();
     bool setAtomPosition(const std::string& atomId, Point position);
     bool setAtomElement(const std::string& atomId, std::string element);
-    bool changeAtomCharge(const std::string& atomId, int delta);
+    bool addChargeAdornment(const std::string& atomId, int delta);
+    bool setAdornmentOffset(const std::string& adornmentId, Point offset);
     [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,
                                             std::optional<std::size_t> index = std::nullopt);
     bool updateScriptNode(const std::string& nodeId, const std::string& paramsJson);

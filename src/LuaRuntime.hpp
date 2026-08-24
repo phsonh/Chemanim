@@ -92,13 +92,31 @@ private:
     static int mLerpAtomXY(lua_State* state);
     static int mLerpAtomsXY(lua_State* state);
     static int mSetAtomElement(lua_State* state);
-    static int mSetAtomCharge(lua_State* state);
     static int mSetAtomHidden(lua_State* state);
+    static int mSetAtomAlpha(lua_State* state);
+    static int mLerpAtomAlpha(lua_State* state);
+    static int mSetAtomColor(lua_State* state);
+    static int mLerpAtomColor(lua_State* state);
     static int mFormBond(lua_State* state);
     static int mDeleteBond(lua_State* state);
+    static int mBreakBond(lua_State* state);
     static int mSetBondOrder(lua_State* state);
+    static int mSetBondSecondarySide(lua_State* state);
     static int mSetBondStereo(lua_State* state);
     static int mSetBondVisible(lua_State* state);
+    static int mSetBondAlpha(lua_State* state);
+    static int mLerpBondAlpha(lua_State* state);
+    static int mSetBondColor(lua_State* state);
+    static int mLerpBondColor(lua_State* state);
+    static int mSetAdornmentOffset(lua_State* state);
+    static int mLerpAdornmentOffset(lua_State* state);
+    static int mSetAdornmentAlpha(lua_State* state);
+    static int mLerpAdornmentAlpha(lua_State* state);
+    static int mSetAdornmentColor(lua_State* state);
+    static int mLerpAdornmentColor(lua_State* state);
+    static int mSetAdornmentText(lua_State* state);
+    static int mDetachSubgraph(lua_State* state);
+    static int mMergeFrom(lua_State* state);
 };
 
 } // namespace chem

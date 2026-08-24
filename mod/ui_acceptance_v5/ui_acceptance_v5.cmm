@@ -1,0 +1,770 @@
+{
+  "format": "chemanim-native-2d",
+  "mod": "ui_acceptance_v5",
+  "molecules": [
+    {
+      "adornments": [
+        {
+          "alive": true,
+          "alpha": 255,
+          "atom": "A6",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 17,
+          "id": "D1",
+          "text": "+",
+          "x": 18.0,
+          "y": 18.0
+        }
+      ],
+      "alpha": 255,
+      "atoms": [
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 1,
+          "element": "C",
+          "hidden": false,
+          "id": "A1",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 0.0,
+          "y": -0.0
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 2,
+          "element": "C",
+          "hidden": false,
+          "id": "A2",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 15.999999999999996,
+          "y": -27.712812921102042
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 3,
+          "element": "C",
+          "hidden": false,
+          "id": "A3",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 48.00000000000001,
+          "y": -27.712812921102046
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 4,
+          "element": "C",
+          "hidden": false,
+          "id": "A4",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 64.00000000000001,
+          "y": 0.0
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 5,
+          "element": "C",
+          "hidden": false,
+          "id": "A5",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 73.55740432612315,
+          "y": 46.880866165694385
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 6,
+          "element": "C",
+          "hidden": false,
+          "id": "A6",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 15.999999999999996,
+          "y": 27.712812921102042
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 7,
+          "element": "C",
+          "hidden": false,
+          "id": "A7",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": -32.0,
+          "y": 1.8129724472473535e-14
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 8,
+          "element": "C",
+          "hidden": false,
+          "id": "A8",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 8.881784197001252e-15,
+          "y": -55.425625842204084
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 9,
+          "element": "C",
+          "hidden": false,
+          "id": "A9",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 63.999999999999986,
+          "y": -55.4256258422041
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 10,
+          "element": "C",
+          "hidden": false,
+          "id": "A10",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 50.6456340480467,
+          "y": 10.765061836851
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 11,
+          "element": "C",
+          "hidden": false,
+          "id": "A11",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 47.30072322348178,
+          "y": -21.05963881493374
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 12,
+          "element": "C",
+          "hidden": false,
+          "id": "A12",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 16.000000000000007,
+          "y": -27.712812921102035
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 13,
+          "element": "C",
+          "hidden": false,
+          "id": "A13",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 79.82470065178477,
+          "y": 31.057723745666923
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 14,
+          "element": "C",
+          "hidden": false,
+          "id": "A14",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 86.47787475795309,
+          "y": 62.3584469691487
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 15,
+          "element": "C",
+          "hidden": false,
+          "id": "A15",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 58.76506183685107,
+          "y": 78.35844696914872
+        },
+        {
+          "alias": "",
+          "alive": true,
+          "alpha": 255,
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "creation_serial": 16,
+          "element": "C",
+          "hidden": false,
+          "id": "A16",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 60.541831747697564,
+          "y": 76.11432081025762
+        }
+      ],
+      "bonds": [
+        {
+          "a": "A1",
+          "alive": true,
+          "alpha": 255,
+          "b": "A2",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B1",
+          "secondary_line_side": "left",
+          "stereo": "none",
+          "type": "double",
+          "visible": true
+        },
+        {
+          "a": "A2",
+          "alive": true,
+          "alpha": 255,
+          "b": "A3",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B2",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A3",
+          "alive": true,
+          "alpha": 255,
+          "b": "A4",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B3",
+          "secondary_line_side": "left",
+          "stereo": "none",
+          "type": "double",
+          "visible": true
+        },
+        {
+          "a": "A4",
+          "alive": true,
+          "alpha": 255,
+          "b": "A5",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B4",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A5",
+          "alive": true,
+          "alpha": 255,
+          "b": "A6",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B5",
+          "secondary_line_side": "left",
+          "stereo": "none",
+          "type": "double",
+          "visible": true
+        },
+        {
+          "a": "A6",
+          "alive": true,
+          "alpha": 255,
+          "b": "A1",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B6",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A1",
+          "alive": true,
+          "alpha": 255,
+          "b": "A7",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B7",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A2",
+          "alive": true,
+          "alpha": 255,
+          "b": "A8",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B8",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A3",
+          "alive": true,
+          "alpha": 255,
+          "b": "A9",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B9",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A2",
+          "alive": true,
+          "alpha": 255,
+          "b": "A10",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B10",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A10",
+          "alive": true,
+          "alpha": 255,
+          "b": "A11",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B11",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A11",
+          "alive": true,
+          "alpha": 255,
+          "b": "A12",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B12",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A12",
+          "alive": true,
+          "alpha": 255,
+          "b": "A1",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B13",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A5",
+          "alive": true,
+          "alpha": 255,
+          "b": "A13",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B14",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A13",
+          "alive": true,
+          "alpha": 255,
+          "b": "A14",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B15",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A14",
+          "alive": true,
+          "alpha": 255,
+          "b": "A15",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B16",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A15",
+          "alive": true,
+          "alpha": 255,
+          "b": "A16",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B17",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A16",
+          "alive": true,
+          "alpha": 255,
+          "b": "A5",
+          "color": {
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "id": "B18",
+          "secondary_line_side": "center",
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        }
+      ],
+      "color": {
+        "b": 255,
+        "g": 255,
+        "r": 255
+      },
+      "id": "molecule1",
+      "layer": 0,
+      "name": "molecule1",
+      "next_adornment_id": 2,
+      "next_atom_id": 17,
+      "next_bond_id": 19,
+      "poses": {},
+      "reference_bond_length": 32.0,
+      "retired": false,
+      "rotation": 0.0,
+      "scale": 1.0,
+      "source_smiles": "",
+      "visible": true
+    }
+  ],
+  "next_creation_serial": 18,
+  "next_molecule_id": 2,
+  "next_node_id": 11,
+  "next_timeline_id": 1,
+  "nodes": [
+    {
+      "enabled": true,
+      "id": "N1",
+      "params": {},
+      "type": "scene"
+    },
+    {
+      "enabled": true,
+      "id": "N3",
+      "params": {
+        "target": "molecule1",
+        "x": 0.0,
+        "y": 0.0
+      },
+      "type": "molecule_set_position"
+    },
+    {
+      "enabled": true,
+      "id": "N4",
+      "params": {
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "x": 0.0,
+        "y": 0.0
+      },
+      "type": "molecule_lerp_position"
+    },
+    {
+      "enabled": true,
+      "id": "N5",
+      "params": {
+        "atom": "A1",
+        "target": "molecule1",
+        "value": 255
+      },
+      "type": "atom_set_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N6",
+      "params": {
+        "atom": "A1",
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "x": 0.0,
+        "y": 0.0
+      },
+      "type": "atom_lerp_xy"
+    },
+    {
+      "enabled": true,
+      "id": "N7",
+      "params": {
+        "bond": "B1",
+        "target": "molecule1",
+        "value": "double"
+      },
+      "type": "bond_set_order"
+    },
+    {
+      "enabled": true,
+      "id": "N8",
+      "params": {
+        "bond": "B1",
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "value": 255
+      },
+      "type": "bond_lerp_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N9",
+      "params": {
+        "adornment": "D1",
+        "target": "molecule1",
+        "value": "+"
+      },
+      "type": "adornment_set_text"
+    },
+    {
+      "enabled": true,
+      "id": "N10",
+      "params": {
+        "adornment": "D1",
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "x": 18.0,
+        "y": 18.0
+      },
+      "type": "adornment_lerp_offset"
+    },
+    {
+      "enabled": true,
+      "id": "N2",
+      "params": {
+        "target": "molecule1"
+      },
+      "type": "molecule_create"
+    }
+  ],
+  "scene": {
+    "background": "16243BFF",
+    "fps": 60,
+    "height": 1920,
+    "logic_height": 960,
+    "logic_width": 540,
+    "title": "ui_acceptance_v5",
+    "view_zoom": 2.2,
+    "width": 1080
+  },
+  "style": {
+    "bond_length_pt": 14.4,
+    "double_bond_spacing": 0.18,
+    "font_family": "Arial",
+    "font_file": "C:/Windows/Fonts/arial.ttf",
+    "font_pt": 10.0,
+    "line_width_pt": 0.6,
+    "preset": "acs_document_1996"
+  },
+  "version": 5
+}

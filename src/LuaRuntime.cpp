@@ -184,14 +184,16 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         }
         core::Atom atom;
         atom.id = stringField(state_, -1, "id", "");
+        atom.creationSerial = static_cast<std::uint64_t>(numberField(state_, -1, "creation_serial", i));
         atom.element = stringField(state_, -1, "element", "C");
         atom.alias = stringField(state_, -1, "alias", "");
         atom.isotope = static_cast<int>(numberField(state_, -1, "isotope", 0));
-        atom.formalCharge = static_cast<int>(numberField(state_, -1, "formal_charge", 0));
         atom.radicalElectrons = static_cast<int>(numberField(state_, -1, "radical_electrons", 0));
         atom.implicitHydrogens = static_cast<int>(numberField(state_, -1, "implicit_hydrogens", 0));
-        atom.aromatic = numberField(state_, -1, "aromatic", 0) != 0;
         atom.hidden = numberField(state_, -1, "hidden", 0) != 0;
+        atom.alive = numberField(state_, -1, "alive", 1) != 0;
+        atom.alpha = static_cast<int>(numberField(state_, -1, "alpha", 255));
+        atom.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
         atom.position.x = numberField(state_, -1, "x", 0);
         atom.position.y = numberField(state_, -1, "y", 0);
         if (atom.id.empty()) {
@@ -222,11 +224,13 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         bond.atomA = stringField(state_, -1, "a", "");
         bond.atomB = stringField(state_, -1, "b", "");
         const double order = numberField(state_, -1, "order", 1);
-        bond.type = numberField(state_, -1, "aromatic", 0) != 0 ? core::BondType::Aromatic :
-                    order > 2.5 ? core::BondType::Triple : order > 1.5 ? core::BondType::Double : core::BondType::Single;
-        if(bond.type==core::BondType::Aromatic){const double display=numberField(state_,-1,"display_order",1);bond.displayType=display>1.5?core::BondType::Double:core::BondType::Single;}
+        bond.type = order > 2.5 ? core::BondType::Triple : order > 1.5 ? core::BondType::Double : core::BondType::Single;
+        bond.secondaryLineSide = core::secondaryLineSideFromString(stringField(state_, -1, "secondary_line_side", "center"));
         bond.stereo = core::bondStereoFromString(stringField(state_, -1, "stereo", "none"));
         bond.visible = numberField(state_, -1, "visible", 1) != 0;
+        bond.alive = numberField(state_, -1, "alive", 1) != 0;
+        bond.alpha = static_cast<int>(numberField(state_, -1, "alpha", 255));
+        bond.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
         if (bond.id.empty() || bond.atomA.empty() || bond.atomB.empty()) {
             lua_pop(state_, 2);
             throw std::runtime_error("chem.NewMol: bond ID and atom references cannot be empty");
@@ -235,6 +239,19 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         lua_pop(state_, 1);
     }
     lua_pop(state_, 1);
+
+    lua_getfield(state_, tableIndex, "adornments");
+    if (lua_istable(state_, -1)) {
+        const int adornmentsTable=lua_gettop(state_);const std::size_t count=lua_rawlen(state_,adornmentsTable);
+        for(std::size_t i=1;i<=count;++i){lua_rawgeti(state_,adornmentsTable,static_cast<lua_Integer>(i));if(lua_istable(state_,-1)){
+            core::AtomAdornment value;value.id=stringField(state_,-1,"id","");value.creationSerial=static_cast<std::uint64_t>(numberField(state_,-1,"creation_serial",atomCount+i));
+            value.atomId=stringField(state_,-1,"atom","");value.text=stringField(state_,-1,"text","+");
+            value.offset={numberField(state_,-1,"x",0),numberField(state_,-1,"y",0)};
+            value.alpha=static_cast<int>(numberField(state_,-1,"alpha",255));value.alive=numberField(state_,-1,"alive",1)!=0;
+            value.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
+            molecule->adornments.push_back(std::move(value));}lua_pop(state_,1);}
+    }
+    lua_pop(state_,1);
 
     molecule->validateIds();
     object.molecule = std::move(molecule);
@@ -263,9 +280,11 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     } else if (object.kind == "molecule") {
         bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
         bind("LerpAtomsXY", mLerpAtomsXY);
-        bind("SetAtomElement",mSetAtomElement);bind("SetAtomCharge",mSetAtomCharge);bind("SetAtomHidden",mSetAtomHidden);
-        bind("FormBond",mFormBond);bind("DeleteBond",mDeleteBond);bind("SetBondOrder",mSetBondOrder);
-        bind("SetBondStereo",mSetBondStereo);bind("SetBondVisible",mSetBondVisible);
+        bind("SetAtomElement",mSetAtomElement);bind("SetAtomHidden",mSetAtomHidden);bind("SetAtomAlpha",mSetAtomAlpha);bind("LerpAtomAlpha",mLerpAtomAlpha);bind("SetAtomColor",mSetAtomColor);bind("LerpAtomColor",mLerpAtomColor);
+        bind("FormBond",mFormBond);bind("DeleteBond",mDeleteBond);bind("BreakBond",mBreakBond);bind("SetBondOrder",mSetBondOrder);bind("SetBondSecondarySide",mSetBondSecondarySide);
+        bind("SetBondStereo",mSetBondStereo);bind("SetBondVisible",mSetBondVisible);bind("SetBondAlpha",mSetBondAlpha);bind("LerpBondAlpha",mLerpBondAlpha);bind("SetBondColor",mSetBondColor);bind("LerpBondColor",mLerpBondColor);
+        bind("SetAdornmentOffset",mSetAdornmentOffset);bind("LerpAdornmentOffset",mLerpAdornmentOffset);bind("SetAdornmentAlpha",mSetAdornmentAlpha);bind("LerpAdornmentAlpha",mLerpAdornmentAlpha);bind("SetAdornmentColor",mSetAdornmentColor);bind("LerpAdornmentColor",mLerpAdornmentColor);bind("SetAdornmentText",mSetAdornmentText);
+        bind("DetachSubgraph",mDetachSubgraph);bind("MergeFrom",mMergeFrom);
     } else if (object.kind == "arrow") {
         bind("SetProgress", mSetProgress); bind("LerpProgress", mLerpProgress);
         bind("SetCurve", mSetCurve);
@@ -536,6 +555,9 @@ int durationValue(lua_State* state, int index) {
 double alphaValue(lua_State* state, int index) {
     return std::clamp(luaL_checknumber(state, index), 0.0, 255.0) / 255.0;
 }
+double byteAlphaValue(lua_State* state, int index) {
+    return std::clamp(luaL_checknumber(state, index), 0.0, 255.0);
+}
 } // namespace
 
 int LuaRuntime::mSetPos(lua_State* state) {
@@ -781,16 +803,15 @@ int LuaRuntime::mSetAtomElement(lua_State* state) {
     if(!object.molecule)return luaL_error(state,"SetAtomElement requires a molecule");const std::string id=luaL_checkstring(state,a);
     if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addStringKey(object,"atom:"+id+":element",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);
 }
-int LuaRuntime::mSetAtomCharge(lua_State* state) {
-    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
-    if(!object.molecule)return luaL_error(state,"SetAtomCharge requires a molecule");const std::string id=luaL_checkstring(state,a);
-    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addNumericTween(object,"atom:"+id+":charge",runtime.cursor_,0,luaL_checknumber(state,a+1),Ease::Step);return returnBoundObject(state,object);
-}
 int LuaRuntime::mSetAtomHidden(lua_State* state) {
     auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
     if(!object.molecule)return luaL_error(state,"SetAtomHidden requires a molecule");const std::string id=luaL_checkstring(state,a);
     if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addNumericTween(object,"atom:"+id+":hidden",runtime.cursor_,0,lua_toboolean(state,a+1)?1:0,Ease::Step);return returnBoundObject(state,object);
 }
+int LuaRuntime::mSetAtomAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"atom:"+id+":alpha",r.cursor_,0,byteAlphaValue(state,a+1),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpAtomAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"atom:"+id+":alpha",r.cursor_,durationValue(state,a+2),byteAlphaValue(state,a+1),boundEase(state,a+3));return returnBoundObject(state,o);}
+int LuaRuntime::mSetAtomColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="atom:"+std::string(luaL_checkstring(state,a))+":color:";for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,0,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpAtomColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="atom:"+std::string(luaL_checkstring(state,a))+":color:";const int d=durationValue(state,a+4);const Ease e=boundEase(state,a+5);for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,d,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),e);return returnBoundObject(state,o);}
 int LuaRuntime::mFormBond(lua_State* state) {
     auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
     if(!object.molecule)return luaL_error(state,"FormBond requires a molecule");const std::string id=luaL_checkstring(state,a),first=luaL_checkstring(state,a+1),second=luaL_checkstring(state,a+2);
@@ -799,8 +820,23 @@ int LuaRuntime::mFormBond(lua_State* state) {
     runtime.engine_->addStringKey(object,"bond:"+id+":type",runtime.cursor_,luaL_checkstring(state,a+3));runtime.engine_->addStringKey(object,"bond:"+id+":stereo",runtime.cursor_,luaL_checkstring(state,a+4));runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,1,Ease::Step);return returnBoundObject(state,object);
 }
 int LuaRuntime::mDeleteBond(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,0,Ease::Step);return returnBoundObject(state,object);}
+int LuaRuntime::mBreakBond(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);const int d=durationValue(state,a+1);const Ease e=boundEase(state,a+2);r.engine_->addNumericTween(o,"bond:"+id+":alpha",r.cursor_,d,0,e);r.engine_->addNumericTween(o,"bond:"+id+":visible",r.cursor_+d,0,0,Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mSetBondSecondarySide(lua_State* state){auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addStringKey(object,"bond:"+id+":secondary",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);}
 int LuaRuntime::mSetBondOrder(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addStringKey(object,"bond:"+id+":type",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);}
 int LuaRuntime::mSetBondStereo(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addStringKey(object,"bond:"+id+":stereo",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);}
 int LuaRuntime::mSetBondVisible(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,lua_toboolean(state,a+1)?1:0,Ease::Step);return returnBoundObject(state,object);}
+int LuaRuntime::mSetBondAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"bond:"+id+":alpha",r.cursor_,0,byteAlphaValue(state,a+1),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpBondAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"bond:"+id+":alpha",r.cursor_,durationValue(state,a+2),byteAlphaValue(state,a+1),boundEase(state,a+3));return returnBoundObject(state,o);}
+int LuaRuntime::mSetBondColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="bond:"+std::string(luaL_checkstring(state,a))+":color:";for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,0,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpBondColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="bond:"+std::string(luaL_checkstring(state,a))+":color:";const int d=durationValue(state,a+4);const Ease e=boundEase(state,a+5);for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,d,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),e);return returnBoundObject(state,o);}
+int LuaRuntime::mSetAdornmentOffset(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="adornment:"+std::string(luaL_checkstring(state,a))+":";r.engine_->addNumericTween(o,p+"x",r.cursor_,0,luaL_checknumber(state,a+1),Ease::Step);r.engine_->addNumericTween(o,p+"y",r.cursor_,0,luaL_checknumber(state,a+2),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpAdornmentOffset(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="adornment:"+std::string(luaL_checkstring(state,a))+":";const int d=durationValue(state,a+3);const Ease e=boundEase(state,a+4);r.engine_->addNumericTween(o,p+"x",r.cursor_,d,luaL_checknumber(state,a+1),e);r.engine_->addNumericTween(o,p+"y",r.cursor_,d,luaL_checknumber(state,a+2),e);return returnBoundObject(state,o);}
+int LuaRuntime::mSetAdornmentAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"adornment:"+id+":alpha",r.cursor_,0,byteAlphaValue(state,a+1),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpAdornmentAlpha(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addNumericTween(o,"adornment:"+id+":alpha",r.cursor_,durationValue(state,a+2),byteAlphaValue(state,a+1),boundEase(state,a+3));return returnBoundObject(state,o);}
+int LuaRuntime::mSetAdornmentColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="adornment:"+std::string(luaL_checkstring(state,a))+":color:";for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,0,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),Ease::Step);return returnBoundObject(state,o);}
+int LuaRuntime::mLerpAdornmentColor(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string p="adornment:"+std::string(luaL_checkstring(state,a))+":color:";const int d=durationValue(state,a+4);const Ease e=boundEase(state,a+5);for(int i=0;i<3;++i)r.engine_->addNumericTween(o,p+"rgb"[i],r.cursor_,d,std::clamp(luaL_checknumber(state,a+1+i),0.0,255.0),e);return returnBoundObject(state,o);}
+int LuaRuntime::mSetAdornmentText(lua_State* state){auto& r=boundRuntime(state);auto& o=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);r.engine_->addStringKey(o,"adornment:"+id+":text",r.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,o);}
+int LuaRuntime::mDetachSubgraph(lua_State* state){auto& r=boundRuntime(state);auto& source=boundObject(state);Object* destination=r.engine_->objectFromTable(1);if(!destination||!destination->molecule)return luaL_error(state,"DetachSubgraph expects a destination molecule");std::vector<std::string> atoms,bonds;const auto read=[&](int index,std::vector<std::string>& out){luaL_checktype(state,index,LUA_TTABLE);for(std::size_t i=1;i<=lua_rawlen(state,index);++i){lua_rawgeti(state,index,static_cast<lua_Integer>(i));out.emplace_back(luaL_checkstring(state,-1));lua_pop(state,1);}};read(2,atoms);read(3,bonds);r.engine_->addDetach(source,*destination,r.cursor_,std::move(atoms),std::move(bonds));return returnBoundObject(state,source);}
+int LuaRuntime::mMergeFrom(lua_State* state){auto& r=boundRuntime(state);auto& destination=boundObject(state);Object* source=r.engine_->objectFromTable(1);if(!source||!source->molecule)return luaL_error(state,"MergeFrom expects a source molecule");const std::string id=luaL_checkstring(state,2),a=luaL_checkstring(state,3),b=luaL_checkstring(state,4);std::optional<core::Bond> bond;if(!id.empty()){core::Bond value;value.id=id;value.atomA=a;value.atomB=b;value.type=core::bondTypeFromString(luaL_checkstring(state,5));value.alpha=0;bond=value;r.engine_->addNumericTween(destination,"bond:"+id+":alpha",r.cursor_,durationValue(state,6),255,boundEase(state,7));}r.engine_->addMerge(*source,destination,r.cursor_,std::move(bond));return returnBoundObject(state,destination);}
 
 } // namespace chem

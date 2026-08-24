@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -9,65 +8,92 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
 
-from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtCore import QPoint,QPointF,QTimer,Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication,QDialog,QMenu
 
 from chemanim2d.app import MainWindow
 from chemanim2d.core import BUILD_COMMIT
 
 
 def main():
-    def milestone(value): print(value,flush=True)
-    application=QApplication(sys.argv);application.setStyle("Fusion");application.setQuitOnLastWindowClosed(False)
-    window=MainWindow(ROOT);window.resize(1580,960);window.show();QTest.qWait(250);window.canvas.fit_artboard();QTest.qWait(120)
-    directory=ROOT/"media"/"ui_acceptance";directory.mkdir(parents=True,exist_ok=True)
-    for old in directory.glob("frame-*.png"):old.unlink()
-    frames=[]
-    def capture(hold=4):
-        application.processEvents();path=directory/f"frame-{len(frames):04d}.png";window.grab().save(str(path));frames.append(path)
-        for _ in range(hold-1):
-            duplicate=directory/f"frame-{len(frames):04d}.png";window.grab().save(str(duplicate));frames.append(duplicate)
+    app=QApplication(sys.argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(False)
+    window=MainWindow(ROOT);window.resize(1720,1040);window.show();QTest.qWait(300)
+    canvas=window.canvas;canvas.fit_artboard();QTest.qWait(120)
+    output=ROOT/"media"/"ui_acceptance_v5";output.mkdir(parents=True,exist_ok=True)
+    for old in output.glob("frame-*.png"):old.unlink()
+    frames=[];milestones=[]
+    def capture(name,hold=4):
+        app.processEvents();milestones.append((name,len(frames)))
+        for _ in range(hold):
+            path=output/f"frame-{len(frames):04d}.png";window.grab().save(str(path));frames.append(path)
 
-    capture(8);milestone("initial")
-    document=window.session.project();document["mod"]="ui_acceptance";window.session.replace_json(json.dumps(document));window.refresh_all()
-    scene=window.session.project()["scene"];scene.update({"width":1080,"height":1920,"logic_width":540,"logic_height":960,"background":"E8EEF6FF","title":"ui_acceptance"});window.session.update_scene(json.dumps(scene));window.scene_inspector.refresh();window.canvas.fit_artboard();capture(10);milestone("scene")
+    project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard();capture("干净布局")
 
-    canvas=window.canvas
-    start=QPoint(canvas.width()//2,canvas.height()//2);end=start+QPoint(85,45)
-    QTest.mousePress(canvas,Qt.MouseButton.MiddleButton,Qt.KeyboardModifier.NoModifier,start);QTest.mouseMove(canvas,end,80);capture(3);QTest.mouseRelease(canvas,Qt.MouseButton.MiddleButton,Qt.KeyboardModifier.NoModifier,end);capture(5);milestone("pan")
-    mouse=QPointF(canvas.width()*.62,canvas.height()*.38)
-    for _ in range(5):
-        wheel=QWheelEvent(mouse,QPointF(canvas.mapToGlobal(mouse.toPoint())),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False);canvas.wheelEvent(wheel)
-    capture(7);milestone("zoom")
-
-    window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("benzene");canvas.fit_artboard();QTest.qWait(80)
-    center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,center);QTest.qWait(100);capture(8);milestone("benzene")
+    # All structure operations below are real QTest mouse gestures on the PyQt canvas.
+    window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("benzene")
+    center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QTest.qWait(100)
+    molecule=window.session.project()["molecules"][0];ring_atoms=list(molecule["atoms"]);original={b["id"]:(b["type"],b["secondary_line_side"]) for b in molecule["bonds"]};capture("显式单双键苯环")
     window._set_tool("single_bond")
-    for atom in window.session.depict(False)["atoms"][:3]:
-        point=QPoint(round(atom["center"]["x"]),round(atom["center"]["y"]));QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,point);QTest.qWait(80);capture(4)
-    milestone("substituents")
+    for atom in ring_atoms[:3]:
+        p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==atom["id"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(60)
+    current={b["id"]:(b["type"],b["secondary_line_side"]) for b in window.session.project()["molecules"][0]["bonds"] if b["id"] in original};assert current==original
+    capture("连续取代且副线不跳")
 
-    window.mode_panel.set_category("工具");window._set_tool("select_rectangle");depiction=window.session.depict(False);centers=[item["center"] for item in depiction["atoms"]];left=min(item["x"] for item in centers)-18;right=max(item["x"] for item in centers)+18;top=min(item["y"] for item in centers)-18;bottom=max(item["y"] for item in centers)+18
-    first=QPoint(round(right),round(bottom));last=QPoint(round(left),round(top));QTest.mousePress(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,first);QTest.mouseMove(canvas,last,100);capture(5);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,last);capture(5)
-    atom_point=window.session.depict(False)["atoms"][0]["center"];first=QPoint(round(atom_point["x"]),round(atom_point["y"]));last=first+QPoint(45,-28);QTest.mousePress(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,first);QTest.mouseMove(canvas,last,100);capture(4);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,last);capture(7);milestone("select-move")
+    window._set_tool("ring5");shared=window.session.depict(False)["bonds"][0];mid=QPoint(round((shared["first"]["x"]+shared["second"]["x"])/2),round((shared["first"]["y"]+shared["second"]["y"])/2));before_atoms=len(window.session.project()["molecules"][0]["atoms"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);QTest.qWait(80);assert len(window.session.project()["molecules"][0]["atoms"])==before_atoms+3;capture("点击键生成稠合五元环")
+    window._set_tool("ring5");p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==ring_atoms[4]["id"]);before_atoms=len(window.session.project()["molecules"][0]["atoms"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(80);assert len(window.session.project()["molecules"][0]["atoms"])==before_atoms+4;capture("点击原子生成对称螺环")
 
-    window.mode_panel.set_mode("脚本");window.mode_panel.set_category("通用");window._add_node("wait");wait_id=window.node_list.current_id();capture(5);milestone("wait")
-    window.mode_panel.set_category("分子");window._add_node("molecule_lerp_position");move_id=window.node_list.current_id();move=next(item for item in window.session.project()["nodes"] if item["id"]==move_id);params=move["params"]|{"x":360,"y":0,"frames":30,"easing":"linear"};window.session.update_node(move_id,json.dumps(params));window.refresh_all(move_id);capture(6)
-    if canvas.selected_atoms:
-        window._add_node("atom_lerp_xy");capture(5)
-    window.mode_panel.set_category("箭头");window._add_node("arrow_new");window._add_node("arrow_set_curve");window._add_node("arrow_lerp_progress");capture(7);milestone("arrows")
-    window.node_list.refresh(wait_id);window.node_list.move(1);capture(6);milestone("reorder")
-    window._set_frame(window.session.end_frame);capture(8)
+    window.mode_panel.set_category("电荷");window._set_tool("charge_positive");anchor=ring_atoms[5]
+    p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==anchor["id"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(80)
+    adornment=window.session.project()["molecules"][0]["adornments"][-1];start=canvas.world_to_screen(QPointF(anchor["x"]+adornment["x"],anchor["y"]+adornment["y"])).toPoint();end=start+QPoint(32,-24)
+    window.mode_panel.set_category("工具");window._set_tool("select_rectangle");QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,80);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);capture("视觉电荷自由拖动")
 
-    save_path=ROOT/"mod"/"ui_acceptance"/"ui_acceptance.cmm";save_path.parent.mkdir(parents=True,exist_ok=True);window.session.save(str(save_path));window.path=save_path;window.dirty=False;window.refresh_all();capture(5);window.load(save_path);capture(8)
-    window.actions["final"].setChecked(True);canvas.set_final_effect(True);capture(10)
+    all_atoms=window.session.project()["molecules"][0]["atoms"];points=[]
+    for atom in all_atoms[-3:]:
+        value=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==atom["id"]);points.append(QPoint(round(value["x"]),round(value["y"])))
+    window._set_tool("eraser");QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=points[0])
+    for point in points[1:]:QTest.mouseMove(canvas,point,60)
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=points[-1]);capture("连续橡皮删除")
+    window.undo();assert all(a["alive"] for a in window.session.project()["molecules"][0]["atoms"]);capture("一次撤销全部恢复")
+
+    canvas.pan=QPointF(240,-150);mouse=QPointF(canvas.width()*.78,canvas.height()*.22)
+    for _ in range(80):
+        event=QWheelEvent(mouse,QPointF(canvas.mapToGlobal(mouse.toPoint())),QPoint(),QPoint(0,-120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False);canvas.wheelEvent(event)
+    assert canvas.pan==QPointF();capture("最小缩放自动居中");canvas.fit_artboard()
+
+    def close_dialogs():
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget,QDialog) and widget.isVisible():widget.reject()
+    def context_action(position,path):
+        error=[]
+        def choose():
+            menu=QApplication.activePopupWidget()
+            try:
+                for index,label in enumerate(path):
+                    if not isinstance(menu,QMenu):raise RuntimeError(f"{label}: no menu")
+                    action=next(a for a in menu.actions() if a.text()==label)
+                    if index+1<len(path):menu=action.menu()
+                    else:QTimer.singleShot(120,close_dialogs);action.trigger()
+            except Exception as exc:
+                error.append(str(exc))
+                if isinstance(menu,QMenu):menu.close()
+        QTimer.singleShot(80,choose);QTest.mouseClick(canvas,Qt.MouseButton.RightButton,pos=position);QTest.qWait(180)
+        if error:raise RuntimeError(error[0])
+
+    canvas.fit_artboard();QTest.qWait(80);drawing=window.session.depict(False);atom_p=drawing["atoms"][0]["center"];atom_p=QPoint(round(atom_p["x"]),round(atom_p["y"]));bond=drawing["bonds"][0];bond_p=QPoint(round((bond["first"]["x"]+bond["second"]["x"])/2),round((bond["first"]["y"]+bond["second"]["y"])/2))
+    mol=window.session.project()["molecules"][0];ad=mol["adornments"][0];owner=next(a for a in mol["atoms"] if a["id"]==ad["atom"]);ad_p=canvas.world_to_screen(QPointF(owner["x"]+ad["x"],owner["y"]+ad["y"])).toPoint()
+    actions=((atom_p,["分子","设定","坐标"]),(atom_p,["分子","插值","坐标"]),(atom_p,["原子","设定","透明度"]),(atom_p,["原子","插值","坐标"]),(bond_p,["键","设定","视觉键型"]),(bond_p,["键","插值","透明度"]),(ad_p,["电荷标记","设定","文字"]),(ad_p,["电荷标记","插值","坐标"]))
+    for position,path in actions:context_action(position,path)
+    capture("右键 Set Lerp 进入左侧节点")
+
+    scene=window.session.project()["scene"];scene.update({"width":1080,"height":1920,"logic_width":540,"logic_height":960,"background":"16243BFF"});window.session.update_scene(json.dumps(scene));canvas.fit_artboard();window.refresh_all(window.node_list.current_id());capture("竖屏场景和背景")
+    save=ROOT/"mod"/"ui_acceptance_v5"/"ui_acceptance_v5.cmm";save.parent.mkdir(parents=True,exist_ok=True);window.session.save(str(save));before=json.loads(window.session.json());window.load(save);after=window.session.project();assert [n["id"] for n in before["nodes"]]==[n["id"] for n in after["nodes"]];capture("保存关闭重开")
 
     import imageio_ffmpeg
-    output=directory/f"ui-acceptance-{BUILD_COMMIT[:12]}.mp4"
-    ffmpeg=imageio_ffmpeg.get_ffmpeg_exe();subprocess.run([ffmpeg,"-y","-framerate","12","-i",str(directory/"frame-%04d.png"),"-c:v","libx264","-pix_fmt","yuv420p","-movflags","+faststart",str(output)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    print(json.dumps({"core":BUILD_COMMIT,"frames":len(frames),"video":str(output),"project":str(save_path)},ensure_ascii=False));window.close()
+    video=output/f"ui-acceptance-{BUILD_COMMIT[:12]}.mp4";ffmpeg=imageio_ffmpeg.get_ffmpeg_exe();subprocess.run([ffmpeg,"-y","-framerate","10","-i",str(output/"frame-%04d.png"),"-c:v","libx264","-pix_fmt","yuv420p","-movflags","+faststart",str(video)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    report={"core":BUILD_COMMIT,"frames":len(frames),"video":str(video),"project":str(save),"milestones":milestones};(output/"report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(json.dumps(report,ensure_ascii=False));window.close()
 
 
 if __name__=="__main__":main()

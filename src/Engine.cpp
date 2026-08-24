@@ -8,6 +8,7 @@ extern "C" {
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 namespace chem {
@@ -29,6 +30,28 @@ double applyEase(Ease ease, double t) {
         case Ease::Step: return t >= 1.0 ? 1.0 : 0.0;
     }
     return t;
+}
+
+std::vector<std::string> propertyParts(const std::string& value) {
+    std::vector<std::string> result;std::size_t start=0;
+    while(start<=value.size()){const std::size_t end=value.find(':',start);result.push_back(value.substr(start,end==std::string::npos?value.size()-start:end-start));if(end==std::string::npos)break;start=end+1;}
+    return result;
+}
+
+std::optional<double> moleculeNumericBase(const Object& object,const std::string& property) {
+    if(!object.molecule)return std::nullopt;const auto parts=propertyParts(property);if(parts.size()<3)return std::nullopt;
+    if(parts[0]=="atom"){const core::Atom* value=object.molecule->atom(parts[1]);if(!value)return std::nullopt;if(parts[2]=="x")return value->position.x;if(parts[2]=="y")return value->position.y;if(parts[2]=="alpha")return value->alpha;if(parts[2]=="hidden")return value->hidden?1.0:0.0;if(parts.size()==4&&parts[2]=="color"){if(parts[3]=="r")return value->color.red;if(parts[3]=="g")return value->color.green;if(parts[3]=="b")return value->color.blue;}}
+    if(parts[0]=="bond"){const core::Bond* value=object.molecule->bond(parts[1]);if(!value)return std::nullopt;if(parts[2]=="alpha")return value->alpha;if(parts[2]=="visible")return value->visible?1.0:0.0;if(parts.size()==4&&parts[2]=="color"){if(parts[3]=="r")return value->color.red;if(parts[3]=="g")return value->color.green;if(parts[3]=="b")return value->color.blue;}}
+    if(parts[0]=="adornment"){const core::AtomAdornment* value=object.molecule->adornment(parts[1]);if(!value)return std::nullopt;if(parts[2]=="x")return value->offset.x;if(parts[2]=="y")return value->offset.y;if(parts[2]=="alpha")return value->alpha;if(parts.size()==4&&parts[2]=="color"){if(parts[3]=="r")return value->color.red;if(parts[3]=="g")return value->color.green;if(parts[3]=="b")return value->color.blue;}}
+    return std::nullopt;
+}
+
+std::optional<std::string> moleculeStringBase(const Object& object,const std::string& property) {
+    if(!object.molecule)return std::nullopt;const auto parts=propertyParts(property);if(parts.size()!=3)return std::nullopt;
+    if(parts[0]=="atom"){const core::Atom* value=object.molecule->atom(parts[1]);if(value&&parts[2]=="element")return value->element;}
+    if(parts[0]=="bond"){const core::Bond* value=object.molecule->bond(parts[1]);if(!value)return std::nullopt;if(parts[2]=="type")return core::toString(value->type);if(parts[2]=="secondary")return core::toString(value->secondaryLineSide);if(parts[2]=="stereo")return core::toString(value->stereo);}
+    if(parts[0]=="adornment"){const core::AtomAdornment* value=object.molecule->adornment(parts[1]);if(value&&parts[2]=="text")return value->text;}
+    return std::nullopt;
 }
 } // namespace
 
@@ -129,10 +152,8 @@ unsigned long long Engine::addNumericTween(Object& object, const std::string& pr
     auto [it, inserted] = object.numericTracks.try_emplace(property);
     NumericTrack& track = it->second;
     if (inserted) {
-        lua_rawgeti(state_, LUA_REGISTRYINDEX, object.luaRef);
-        lua_getfield(state_, -1, property.c_str());
-        track.base = lua_isnumber(state_, -1) ? lua_tonumber(state_, -1) : 0.0;
-        lua_pop(state_, 2);
+        if(const auto base=moleculeNumericBase(object,property))track.base=*base;
+        else {lua_rawgeti(state_, LUA_REGISTRYINDEX, object.luaRef);lua_getfield(state_, -1, property.c_str());track.base = lua_isnumber(state_, -1) ? lua_tonumber(state_, -1) : 0.0;lua_pop(state_, 2);}
     }
     const double from = track.valueAt(start);
     // A later command for the same property owns the track from this frame
@@ -157,10 +178,8 @@ unsigned long long Engine::addStringKey(Object& object, const std::string& prope
     auto [it, inserted] = object.stringTracks.try_emplace(property);
     StringTrack& track = it->second;
     if (inserted) {
-        lua_rawgeti(state_, LUA_REGISTRYINDEX, object.luaRef);
-        lua_getfield(state_, -1, property.c_str());
-        if (lua_isstring(state_, -1)) track.base = lua_tostring(state_, -1);
-        lua_pop(state_, 2);
+        if(const auto base=moleculeStringBase(object,property))track.base=*base;
+        else {lua_rawgeti(state_, LUA_REGISTRYINDEX, object.luaRef);lua_getfield(state_, -1, property.c_str());if (lua_isstring(state_, -1)) track.base = lua_tostring(state_, -1);lua_pop(state_, 2);}
     }
     const unsigned long long order = nextOrder_++;
     track.events.push_back(StringEvent{frame, std::move(value), order});
@@ -265,6 +284,26 @@ void Engine::addAtomTween(Object& object, const std::string& atomId, int start, 
     object.numericTracks.try_emplace(yKey, NumericTrack{atom->position.y, {}});
     addNumericTween(object, xKey, start, duration, x, ease);
     addNumericTween(object, yKey, start, duration, y, ease);
+}
+
+void Engine::addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds){topologyEvents_.push_back({TopologyEventKind::Detach,frame,source.id,destination.id,std::move(atoms),std::move(bonds),std::nullopt,nextOrder_++});}
+void Engine::addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond){topologyEvents_.push_back({TopologyEventKind::Merge,frame,source.id,destination.id,{},{},std::move(newBond),nextOrder_++});}
+
+std::optional<core::Molecule> Engine::moleculeAt(int objectId,int frame) const {
+    std::map<int,core::Molecule> values;for(const auto& object:objects_)if(object->molecule)values.emplace(object->id,*object->molecule);
+    const auto objectFor=[&](int id)->const Object*{const auto found=byId_.find(id);return found==byId_.end()?nullptr:found->second;};
+    const auto valueAt=[&](const Object* object,const std::string& key,int at,double fallback){if(!object)return fallback;if(auto it=object->numericTracks.find(key);it!=object->numericTracks.end())return it->second.valueAt(at);return fallback;};
+    const auto toWorld=[&](const Object* object,core::Point point,int at){const double sx=valueAt(object,"scale_x",at,1),sy=valueAt(object,"scale_y",at,1),angle=valueAt(object,"rotation",at,0)*3.14159265358979323846/180.0,c=std::cos(angle),s=std::sin(angle);point={point.x*sx,point.y*sy};return core::Point{valueAt(object,"x",at,0)+point.x*c-point.y*s,valueAt(object,"y",at,0)+point.x*s+point.y*c};};
+    const auto fromWorld=[&](const Object* object,core::Point point,int at){point.x-=valueAt(object,"x",at,0);point.y-=valueAt(object,"y",at,0);const double angle=-valueAt(object,"rotation",at,0)*3.14159265358979323846/180.0,c=std::cos(angle),s=std::sin(angle),x=point.x*c-point.y*s,y=point.x*s+point.y*c;double sx=valueAt(object,"scale_x",at,1),sy=valueAt(object,"scale_y",at,1);if(std::abs(sx)<1e-9)sx=sx<0?-1e-9:1e-9;if(std::abs(sy)<1e-9)sy=sy<0?-1e-9:1e-9;return core::Point{x/sx,y/sy};};
+    std::vector<const TopologyEvent*> ordered;for(const TopologyEvent& event:topologyEvents_)if(event.frame<=frame)ordered.push_back(&event);std::stable_sort(ordered.begin(),ordered.end(),[](const auto* a,const auto* b){return a->frame!=b->frame?a->frame<b->frame:a->order<b->order;});
+    for(const TopologyEvent* event:ordered){auto source=values.find(event->sourceObject),destination=values.find(event->destinationObject);if(source==values.end()||destination==values.end()||source==destination)continue;const Object* sourceObject=objectFor(event->sourceObject);const Object* destinationObject=objectFor(event->destinationObject);
+        std::set<std::string> atoms(event->atoms.begin(),event->atoms.end()),bonds(event->bonds.begin(),event->bonds.end());if(event->kind==TopologyEventKind::Merge)for(const core::Atom& atom:source->second.atoms)atoms.insert(atom.id);
+        for(auto it=source->second.atoms.begin();it!=source->second.atoms.end();)if(atoms.contains(it->id)){it->position.x=valueAt(sourceObject,"atom:"+it->id+":x",event->frame,it->position.x);it->position.y=valueAt(sourceObject,"atom:"+it->id+":y",event->frame,it->position.y);it->position=fromWorld(destinationObject,toWorld(sourceObject,it->position,event->frame),event->frame);destination->second.atoms.push_back(std::move(*it));it=source->second.atoms.erase(it);}else ++it;
+        for(auto it=source->second.bonds.begin();it!=source->second.bonds.end();)if(event->kind==TopologyEventKind::Merge||bonds.contains(it->id)||(atoms.contains(it->atomA)&&atoms.contains(it->atomB))){destination->second.bonds.push_back(std::move(*it));it=source->second.bonds.erase(it);}else{if(atoms.contains(it->atomA)||atoms.contains(it->atomB))it->alive=false;++it;}
+        for(auto it=source->second.adornments.begin();it!=source->second.adornments.end();)if(atoms.contains(it->atomId)){destination->second.adornments.push_back(std::move(*it));it=source->second.adornments.erase(it);}else ++it;
+        if(event->kind==TopologyEventKind::Merge){source->second.retired=true;source->second.visible=false;if(event->newBond)destination->second.bonds.push_back(*event->newBond);}
+    }
+    const auto found=values.find(objectId);if(found==values.end())return std::nullopt;return found->second;
 }
 
 std::optional<ImageBlend> Engine::imageBlendAt(const Object& object, int frame) const {

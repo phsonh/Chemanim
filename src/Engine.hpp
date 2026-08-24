@@ -117,6 +117,18 @@ struct Object {
     std::unique_ptr<core::Molecule> molecule;
 };
 
+enum class TopologyEventKind { Detach, Merge };
+struct TopologyEvent {
+    TopologyEventKind kind = TopologyEventKind::Detach;
+    int frame = 0;
+    int sourceObject = 0;
+    int destinationObject = 0;
+    std::vector<std::string> atoms;
+    std::vector<std::string> bonds;
+    std::optional<core::Bond> newBond;
+    unsigned long long order = 0;
+};
+
 struct TextureAsset {
     std::string name;
     std::filesystem::path path;
@@ -149,6 +161,9 @@ public:
                             std::optional<double> targetY = std::nullopt);
     void addAtomTween(Object& object, const std::string& atomId, int start, int duration,
                       double x, double y, Ease ease);
+    void addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds);
+    void addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond);
+    [[nodiscard]] std::optional<core::Molecule> moleculeAt(int objectId,int frame) const;
     void applyFrame(int frame);
     void registerTexture(std::string name, std::filesystem::path path,
                          double anchorX = 0.5, double anchorY = 0.5);
@@ -168,6 +183,7 @@ private:
     std::unordered_map<int, Object*> byId_;
     std::map<std::string, TextureAsset> textures_;
     std::vector<int> frameCallbacks_;
+    std::vector<TopologyEvent> topologyEvents_;
     int nextId_ = 1;
     unsigned long long nextOrder_ = 1;
 

@@ -23,7 +23,7 @@ Core 可以读取 v2/v3 原生二维工程，并在内存中一次性迁移为 o
 
 ## 权威层
 
-`source_smiles` 只记录导入来源；`atoms`、`bonds` 和 XY 决定拓扑和初始画面。原子、键、分子与节点的 stable ID 单调递增，删除后不复用。`Bond.type=aromatic` 是化学语义，`display_type` 按 bond stable ID 保存稳定的 Kekulé 显示方案。
+`source_smiles` 只记录导入来源；`atoms`、`bonds` 和 XY 决定拓扑与初始画面。SMILES 导入只做一次 Kekulé 展平，保存后只剩显式单、双、三键。双键的 `secondary_line_side`（`left/right/center`）是持久化视觉数据，编辑与播放都不会自动重排。每个原子的 `creation_serial` 单调递增且不因删除、撤销或重开复用；最早存活原子就是分子锚点。
 
 `nodes` 是唯一动画创作层。节点顺序决定当前时间：Lerp 在当前帧开始但不推进时间，Wait 推进时间，不同属性可以并行；后发的同属性 Lerp 从接管帧的当前值开始。typed tracks、节点起止帧、预览结果和 Lua 都由 C++ Core 随节点序列编译，不是第二份可编辑数据。
 
