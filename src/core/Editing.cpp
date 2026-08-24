@@ -1,6 +1,9 @@
 #include "Editing.hpp"
+#include "Nodes.hpp"
 #include "SketcherGeometry.hpp"
 #include "Timeline.hpp"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +12,7 @@
 
 namespace chem::core {
 namespace {
+using json = nlohmann::json;
 double distance(Point a, Point b) { return std::hypot(a.x - b.x, a.y - b.y); }
 double pointSegmentDistance(Point point, Point first, Point second) {
     const double dx = second.x - first.x, dy = second.y - first.y;
@@ -58,6 +62,10 @@ bool pointInPolygon(Point point, const std::vector<Point>& polygon) {
     }
     return inside;
 }
+BondType stableAromaticDisplay(const std::string& id) {
+    try { return (std::stoull(id.size()>1?id.substr(1):id)%2)?BondType::Double:BondType::Single; }
+    catch (...) { return BondType::Single; }
+}
 }  // namespace
 
 Point Viewport::modelToCanvas(Point value) const {
@@ -94,6 +102,7 @@ struct EditorSession::Impl {
         std::map<std::string, Point> original;
         std::vector<Point> lasso;
         std::map<std::string, Point> targetPositions;
+        GesturePreviewKind previewKind = GesturePreviewKind::None;
         bool changed = false;
     };
     std::optional<Gesture> gesture;
@@ -135,6 +144,7 @@ struct EditorSession::Impl {
         value.selectedBonds.assign(selectedBonds.begin(), selectedBonds.end());
         if (gesture) {
             value.preview.active = true;
+            value.preview.kind = gesture->previewKind;
             value.preview.start = gesture->startCanvas;
             value.preview.current = gesture->currentCanvas;
             value.preview.polygon = gesture->lasso;
@@ -238,13 +248,13 @@ struct EditorSession::Impl {
     }
 };
 
-EditorSession::EditorSession(Project project) : impl_(std::make_unique<Impl>()) { impl_->project = std::move(project); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
+EditorSession::EditorSession(Project project) : impl_(std::make_unique<Impl>()) { impl_->project = std::move(project); impl_->project.ensureDefaultNodes(); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
 EditorSession::~EditorSession() = default;
 EditorSession::EditorSession(EditorSession&&) noexcept = default;
 EditorSession& EditorSession::operator=(EditorSession&&) noexcept = default;
 Project& EditorSession::project() { return impl_->project; }
 const Project& EditorSession::project() const { return impl_->project; }
-void EditorSession::replaceProject(Project project) { impl_ = std::make_unique<Impl>(); impl_->project = std::move(project); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
+void EditorSession::replaceProject(Project project) { impl_ = std::make_unique<Impl>(); impl_->project = std::move(project); impl_->project.ensureDefaultNodes(); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
 void EditorSession::setActiveMolecule(const std::string& stableId) { if (!impl_->project.molecule(stableId)) throw std::runtime_error("Unknown molecule: " + stableId); impl_->activeMolecule = stableId; impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
 std::string EditorSession::activeMoleculeId() const { return impl_->activeMolecule; }
 void EditorSession::setTool(Tool tool) { impl_->tool = tool; impl_->gesture.reset(); }
@@ -264,17 +274,31 @@ void EditorSession::editPose(const std::string& moleculeId,const std::string& po
     if(!value->poses.contains(poseId)) value->poses.emplace(poseId,Pose{poseId,{}});
     impl_->activeMolecule=moleculeId; impl_->targetKind=EditTargetKind::Pose; impl_->targetId=poseId; impl_->previewFrame=previewFrame; impl_->tool=Tool::Move; impl_->gesture.reset();
 }
+void EditorSession::editScriptNode(const std::string& nodeId) {
+    const ScriptNode* node=impl_->project.node(nodeId); if(!node) throw std::runtime_error("Unknown script node: "+nodeId);
+    const json params=json::parse(node->paramsJson); const std::string moleculeId=params.value("target","");
+    if(impl_->project.molecule(moleculeId)) impl_->activeMolecule=moleculeId;
+    const auto timings=compileNodeTimings(impl_->project);
+    const auto found=std::find_if(timings.begin(),timings.end(),[&](const NodeTiming& value){return value.id==nodeId;});
+    impl_->previewFrame=found==timings.end()?0:found->endFrame; impl_->targetKind=EditTargetKind::ScriptNode; impl_->targetId=nodeId;
+    impl_->tool=Tool::SelectRectangle; impl_->gesture.reset();
+}
 EditTargetKind EditorSession::editTargetKind() const { return impl_->targetKind; }
 Molecule EditorSession::displayMolecule() const { if(!impl_->molecule()) throw std::runtime_error("No active molecule"); return impl_->displayed(); }
 Hit EditorSession::hitTest(Point canvasPoint) const { return impl_->hit(canvasPoint); }
 
-EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, bool) {
+EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, bool shift) {
     Molecule* molecule = impl_->molecule();
     if (!molecule) return impl_->result(canvasPoint);
     const Point pressModel = impl_->viewport.canvasToModel(canvasPoint);
     Impl::Gesture gesture{.before = impl_->project, .pressCanvas = canvasPoint, .pressModel = pressModel,
                           .startCanvas = canvasPoint, .currentCanvas = canvasPoint,
                           .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
+    if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
+    else if (isRingTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Ring;
+    else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind==HitKind::Atom?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
+    else if (impl_->tool==Tool::SelectRectangle) gesture.previewKind=gesture.startHit.kind==HitKind::Atom?GesturePreviewKind::Move:GesturePreviewKind::Rectangle;
+    else if (impl_->tool==Tool::Move) gesture.previewKind=GesturePreviewKind::Move;
     if (gesture.startHit.kind == HitKind::Atom) {
         const Molecule shown = impl_->displayed();
         if (const Atom* atom = shown.atom(gesture.startHit.id)) {
@@ -287,11 +311,13 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
         if (gesture.startHit.kind == HitKind::Atom) {
             if (control) {
                 if (impl_->selectedAtoms.contains(gesture.startHit.id)) impl_->selectedAtoms.erase(gesture.startHit.id); else impl_->selectedAtoms.insert(gesture.startHit.id);
+            } else if (shift) {
+                impl_->selectedAtoms.insert(gesture.startHit.id);
             } else if (!impl_->selectedAtoms.contains(gesture.startHit.id)) {
                 impl_->selectedAtoms = {gesture.startHit.id}; impl_->selectedBonds.clear();
             }
             if (impl_->targetKind != EditTargetKind::TimelinePreview) { const Molecule shown=impl_->displayed(); for (const std::string& id : impl_->selectedAtoms) if (const Atom* atom = shown.atom(id)) gesture.original[id] = atom->position; }
-        } else if (!control) { impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
+        } else if (!control && !shift) { impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
     }
     impl_->gesture = std::move(gesture);
     return impl_->result(canvasPoint);
@@ -302,7 +328,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     impl_->gesture->currentCanvas = canvasPoint;
     Molecule* molecule = impl_->molecule();
     if (!molecule) return impl_->result(canvasPoint);
-    if ((impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle) && !impl_->gesture->original.empty()) {
+    if ((impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) && !impl_->gesture->original.empty()) {
         const Point current = impl_->viewport.canvasToModel(canvasPoint);
         const Point delta{current.x - impl_->gesture->pressModel.x, current.y - impl_->gesture->pressModel.y};
         for (const auto& [id, position] : impl_->gesture->original) {
@@ -342,6 +368,13 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         } else if (impl_->gesture->changed && impl_->targetKind == EditTargetKind::Pose) {
             Pose& pose=molecule->poses[impl_->targetId]; pose.id=impl_->targetId;
             for(const auto& [atomId,target]:impl_->gesture->targetPositions) pose.atomPositions[atomId]=target;
+        } else if (impl_->gesture->changed && impl_->targetKind == EditTargetKind::ScriptNode) {
+            if (ScriptNode* node=impl_->project.node(impl_->targetId)) {
+                json params=json::parse(node->paramsJson); const std::string atomId=params.value("atom","");
+                if(const auto found=impl_->gesture->targetPositions.find(atomId);found!=impl_->gesture->targetPositions.end()){
+                    params["x"]=found->second.x;params["y"]=found->second.y;node->paramsJson=params.dump();
+                }
+            }
         }
     } else if (impl_->tool == Tool::SelectRectangle && impl_->gesture->original.empty()) {
         const double left = std::min(impl_->gesture->pressCanvas.x, canvasPoint.x), right = std::max(impl_->gesture->pressCanvas.x, canvasPoint.x);
@@ -354,7 +387,10 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
     } else if (isBondTool(impl_->tool)) {
         const auto [type, stereo] = bondStyle(impl_->tool);
         if (impl_->gesture->startHit.kind == HitKind::Bond && distance(impl_->gesture->startCanvas, canvasPoint) < 5.0) {
-            if (Bond* bond = molecule->bond(impl_->gesture->startHit.id)) { bond->type = type; bond->stereo = stereo; impl_->gesture->changed = true; }
+            if (Bond* bond = molecule->bond(impl_->gesture->startHit.id)) {
+                bond->type = type; bond->displayType = type==BondType::Aromatic ? std::optional<BondType>(stableAromaticDisplay(bond->id)) : std::nullopt;
+                bond->stereo = stereo; impl_->gesture->changed = true;
+            }
         } else {
             std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel);
             const Point endpoint = impl_->gestureEndpoint(alt);
@@ -378,10 +414,12 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             for (int i = 0; i < count; ++i) if (ids[i].empty()) ids[i] = molecule->addAtom(polygon[i]);
             for (int i = 0; i < count; ++i) {
                 if (impl_->gesture->startHit.kind == HitKind::Bond && i == 0) continue;
-                const BondType type = impl_->tool == Tool::Benzene && i % 2 ? BondType::Double : BondType::Single;
+                const BondType type = impl_->tool == Tool::Benzene ? BondType::Aromatic : BondType::Single;
                 const std::string bondId = molecule->addBond(ids[i], ids[(i + 1) % count], type);
+                if(impl_->tool==Tool::Benzene)if(Bond* bond=molecule->bond(bondId)){bond->displayType=i%2?BondType::Double:BondType::Single;bond->visible=true;}
                 (void)bondId;
             }
+            if(impl_->tool==Tool::Benzene)for(const std::string& id:ids)if(Atom* atom=molecule->atom(id))atom->aromatic=true;
             impl_->selectedAtoms = std::set<std::string>(ids.begin(), ids.end()); impl_->gesture->changed = true;
         }
     } else if (impl_->tool == Tool::AtomLabel) {
@@ -425,6 +463,46 @@ bool EditorSession::changeAtomCharge(const std::string& atomId, int delta) {
     Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || delta == 0) return false;
     Project before = impl_->project; atom->formalCharge += delta; impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
+}
+std::string EditorSession::addScriptNode(const std::string& type,const std::string& paramsJson,std::optional<std::size_t> index) {
+    Project before=impl_->project; const std::string id=impl_->project.addNode(type,paramsJson,index);
+    impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return id;
+}
+bool EditorSession::updateScriptNode(const std::string& nodeId,const std::string& paramsJson) {
+    ScriptNode* node=impl_->project.node(nodeId);if(!node)return false;const json value=json::parse(paramsJson);
+    if(!value.is_object())throw std::runtime_error("Node params must be an object");const std::string normalized=value.dump();
+    if(node->paramsJson==normalized)return false;Project before=impl_->project;node->paramsJson=normalized;
+    impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
+}
+bool EditorSession::setScriptNodeEnabled(const std::string& nodeId,bool enabled) {
+    ScriptNode* node=impl_->project.node(nodeId);if(!node||node->enabled==enabled)return false;Project before=impl_->project;node->enabled=enabled;
+    impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
+}
+bool EditorSession::moveScriptNode(const std::string& nodeId,std::size_t index) {
+    auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
+    if(found==impl_->project.nodes.end()||found->type=="scene")return false;const std::size_t old=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));
+    if(!impl_->project.nodes.empty()&&impl_->project.nodes.front().type=="scene")index=std::max<std::size_t>(1,index);
+    index=std::min(index,impl_->project.nodes.size()-1);if(old==index)return false;Project before=impl_->project;ScriptNode value=std::move(*found);
+    impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(old));
+    impl_->project.nodes.insert(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(index),std::move(value));
+    impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
+}
+std::string EditorSession::duplicateScriptNode(const std::string& nodeId) {
+    const ScriptNode* node=impl_->project.node(nodeId);if(!node||node->type=="scene")return{};const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
+    const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found))+1;return addScriptNode(node->type,node->paramsJson,index);
+}
+bool EditorSession::deleteScriptNode(const std::string& nodeId) {
+    const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
+    if(found==impl_->project.nodes.end()||found->type=="scene")return false;Project before=impl_->project;impl_->project.nodes.erase(found);
+    impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
+}
+bool EditorSession::updateScene(const std::string& sceneJson) {
+    const json value=json::parse(sceneJson);if(!value.is_object())throw std::runtime_error("Scene must be an object");Scene next=impl_->project.scene;
+    next.width=value.value("width",next.width);next.height=value.value("height",next.height);next.logicWidth=value.value("logic_width",next.logicWidth);
+    next.logicHeight=value.value("logic_height",next.logicHeight);next.fps=value.value("fps",next.fps);next.background=value.value("background",next.background);
+    next.title=value.value("title",next.title);next.viewZoom=value.value("view_zoom",next.viewZoom);
+    const Scene& old=impl_->project.scene;if(old.width==next.width&&old.height==next.height&&old.logicWidth==next.logicWidth&&old.logicHeight==next.logicHeight&&old.fps==next.fps&&old.background==next.background&&old.title==next.title&&old.viewZoom==next.viewZoom)return false;
+    Project before=impl_->project;impl_->project.scene=std::move(next);impl_->undo.push_back({std::move(before),impl_->project});impl_->redo.clear();return true;
 }
 bool EditorSession::canUndo() const { return !impl_->undo.empty(); }
 bool EditorSession::canRedo() const { return !impl_->redo.empty(); }

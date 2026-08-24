@@ -1,4 +1,5 @@
 #include "Timeline.hpp"
+#include "Nodes.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,12 @@ double easingValue(Easing easing, double t) {
 }
 
 Molecule evaluateMolecule(const Project& project, const std::string& moleculeId, int frame) {
+    if(!project.nodes.empty()){
+        EvaluatedScene scene=evaluateNodes(project,frame);
+        const auto found=scene.molecules.find(moleculeId);
+        if(found==scene.molecules.end())throw std::runtime_error("Unknown molecule: "+moleculeId);
+        return found->second;
+    }
     const Molecule* base = project.molecule(moleculeId);
     if (!base) throw std::runtime_error("Unknown molecule: " + moleculeId);
     Molecule result = *base;
@@ -68,6 +75,7 @@ Molecule evaluateMolecule(const Project& project, const std::string& moleculeId,
 }
 
 std::map<std::string, Molecule> evaluateProject(const Project& project, int frame) {
+    if(!project.nodes.empty())return evaluateNodes(project,frame).molecules;
     std::map<std::string, Molecule> result;
     for (const Molecule& molecule : project.molecules) result.emplace(molecule.id, evaluateMolecule(project,molecule.id,frame));
     return result;

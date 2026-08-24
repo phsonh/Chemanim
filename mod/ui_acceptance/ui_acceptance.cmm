@@ -1,0 +1,275 @@
+{
+  "format": "chemanim-native-2d",
+  "mod": "ui_acceptance",
+  "molecules": [
+    {
+      "alpha": 255,
+      "atoms": [
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A1",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 5.513354569958343,
+          "y": 3.491791227640284
+        },
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A2",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 4.763354569958343,
+          "y": 4.7908293333169425
+        },
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A3",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 5.513354569958342,
+          "y": 6.0898674389936005
+        },
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A4",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 7.013354569958342,
+          "y": 6.0898674389936005
+        },
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A5",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 7.763354569958343,
+          "y": 4.7908293333169425
+        },
+        {
+          "alias": "",
+          "aromatic": true,
+          "element": "C",
+          "formal_charge": 0,
+          "hidden": false,
+          "id": "A6",
+          "implicit_hydrogens": 0,
+          "isotope": 0,
+          "radical_electrons": 0,
+          "x": 7.013354569958343,
+          "y": 3.4917912276402836
+        }
+      ],
+      "bonds": [
+        {
+          "a": "A1",
+          "aromatic": false,
+          "b": "A2",
+          "id": "B1",
+          "order": 1.0,
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A2",
+          "aromatic": false,
+          "b": "A3",
+          "id": "B2",
+          "order": 1.0,
+          "stereo": "none",
+          "type": "single",
+          "visible": true
+        },
+        {
+          "a": "A3",
+          "aromatic": true,
+          "b": "A4",
+          "display_type": "single",
+          "id": "B3",
+          "order": 1.5,
+          "stereo": "none",
+          "type": "aromatic",
+          "visible": true
+        },
+        {
+          "a": "A4",
+          "aromatic": true,
+          "b": "A5",
+          "display_type": "double",
+          "id": "B4",
+          "order": 1.5,
+          "stereo": "none",
+          "type": "aromatic",
+          "visible": true
+        },
+        {
+          "a": "A5",
+          "aromatic": true,
+          "b": "A6",
+          "display_type": "single",
+          "id": "B5",
+          "order": 1.5,
+          "stereo": "none",
+          "type": "aromatic",
+          "visible": true
+        },
+        {
+          "a": "A6",
+          "aromatic": true,
+          "b": "A1",
+          "display_type": "double",
+          "id": "B6",
+          "order": 1.5,
+          "stereo": "none",
+          "type": "aromatic",
+          "visible": true
+        }
+      ],
+      "id": "molecule1",
+      "layer": 0,
+      "name": "molecule1",
+      "next_atom_id": 7,
+      "next_bond_id": 7,
+      "poses": {},
+      "reference_bond_length": 1.5,
+      "rotation": 0.0,
+      "scale": 2.2,
+      "source_smiles": "",
+      "visible": true,
+      "x": 0.0,
+      "y": 0.0
+    }
+  ],
+  "next_molecule_id": 2,
+  "next_node_id": 9,
+  "next_timeline_id": 1,
+  "nodes": [
+    {
+      "enabled": true,
+      "id": "N1",
+      "params": {},
+      "type": "scene"
+    },
+    {
+      "enabled": true,
+      "id": "N4",
+      "params": {
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "x": 360,
+        "y": 0
+      },
+      "type": "molecule_lerp_position"
+    },
+    {
+      "enabled": true,
+      "id": "N3",
+      "params": {
+        "frames": 30
+      },
+      "type": "wait"
+    },
+    {
+      "enabled": true,
+      "id": "N5",
+      "params": {
+        "atom": "A6",
+        "easing": "linear",
+        "frames": 30,
+        "target": "molecule1",
+        "x": 0,
+        "y": 0
+      },
+      "type": "atom_lerp_xy"
+    },
+    {
+      "enabled": true,
+      "id": "N6",
+      "params": {
+        "target": "arrow2"
+      },
+      "type": "arrow_new"
+    },
+    {
+      "enabled": true,
+      "id": "N7",
+      "params": {
+        "cx1": 80,
+        "cx2": -80,
+        "cy1": 80,
+        "cy2": 80,
+        "target": "arrow2",
+        "x1": 0,
+        "x2": 160,
+        "y1": 0,
+        "y2": 0
+      },
+      "type": "arrow_set_curve"
+    },
+    {
+      "enabled": true,
+      "id": "N8",
+      "params": {
+        "easing": "linear",
+        "frames": 30,
+        "target": "arrow2",
+        "value": 1
+      },
+      "type": "arrow_lerp_progress"
+    },
+    {
+      "enabled": true,
+      "id": "N2",
+      "params": {
+        "target": "molecule1"
+      },
+      "type": "molecule_create"
+    }
+  ],
+  "scene": {
+    "background": "E8EEF6FF",
+    "fps": 60,
+    "height": 1920,
+    "logic_height": 960,
+    "logic_width": 540,
+    "title": "ui_acceptance",
+    "view_zoom": 2.2,
+    "width": 1080
+  },
+  "style": {
+    "bond_length_pt": 14.4,
+    "double_bond_spacing": 0.18,
+    "font_family": "Arial",
+    "font_file": "C:/Windows/Fonts/arial.ttf",
+    "font_pt": 10.0,
+    "line_width_pt": 0.6,
+    "preset": "acs_document_1996"
+  },
+  "version": 4
+}

@@ -1,4 +1,5 @@
 #include "Document.hpp"
+#include "Nodes.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -83,11 +84,16 @@ std::string Molecule::addBond(const std::string& first, const std::string& secon
     if (first == second || !atom(first) || !atom(second)) return {};
     if (Bond* existing = bondBetween(first, second)) {
         existing->type = type;
+        existing->displayType = type == BondType::Aromatic
+            ? std::optional<BondType>((numericSuffix(existing->id,'B')%2)?BondType::Double:BondType::Single)
+            : std::nullopt;
         existing->stereo = stereo;
         return existing->id;
     }
     const std::string stableId = allocateBondId();
-    bonds.push_back(Bond{.id = stableId, .atomA = first, .atomB = second, .type = type, .stereo = stereo});
+    bonds.push_back(Bond{.id = stableId, .atomA = first, .atomB = second, .type = type,
+        .displayType = type == BondType::Aromatic ? std::optional<BondType>((numericSuffix(stableId,'B')%2)?BondType::Double:BondType::Single) : std::nullopt,
+        .stereo = stereo});
     return stableId;
 }
 bool Molecule::removeAtom(const std::string& stableId) {
@@ -133,6 +139,8 @@ std::string Project::addBlankMolecule(std::string name) {
     value.id = id;
     value.name = std::move(name);
     molecules.push_back(std::move(value));
+    const std::string createNodeId=addNode("molecule_create", json({{"target", id}}).dump());
+    (void)createNodeId;
     return id;
 }
 std::string Project::addAtomTween(const std::string& moleculeId, const std::string& atomId,
@@ -143,11 +151,46 @@ std::string Project::addAtomTween(const std::string& moleculeId, const std::stri
     atomTweens.push_back({id,moleculeId,atomId,startFrame,frames,target,easing});
     return id;
 }
+ScriptNode* Project::node(const std::string& stableId) {
+    const auto found=std::find_if(nodes.begin(),nodes.end(),[&](const ScriptNode& value){return value.id==stableId;});
+    return found==nodes.end()?nullptr:&*found;
+}
+const ScriptNode* Project::node(const std::string& stableId) const {
+    const auto found=std::find_if(nodes.begin(),nodes.end(),[&](const ScriptNode& value){return value.id==stableId;});
+    return found==nodes.end()?nullptr:&*found;
+}
+std::string Project::addNode(const std::string& type,std::string paramsJson,std::optional<std::size_t> index) {
+    if(paramsJson.empty()||paramsJson=="{}") paramsJson=defaultNodeParamsJson(type);
+    // Validate at the boundary; invalid JSON must never enter the C++ model.
+    const json parsed=json::parse(paramsJson); if(!parsed.is_object()) throw std::runtime_error("Node params must be a JSON object");
+    std::string id; do{id="N"+std::to_string(nextNodeId++);}while(node(id));
+    ScriptNode value{id,type,true,std::move(paramsJson)};
+    if(index&&*index<nodes.size()) {
+        const std::size_t safeIndex=(!nodes.empty()&&nodes.front().type=="scene"&&type!="scene")?std::max<std::size_t>(1,*index):*index;
+        nodes.insert(nodes.begin()+static_cast<std::ptrdiff_t>(safeIndex),std::move(value));
+    }
+    else nodes.push_back(std::move(value));
+    return id;
+}
+void Project::ensureDefaultNodes() {
+    if(!nodes.empty()) return;
+    const std::string sceneNodeId=addNode("scene");
+    (void)sceneNodeId;
+    for(const Molecule& molecule:molecules) {
+        const std::string createNodeId=addNode("molecule_create",json({{"target",molecule.id}}).dump());
+        (void)createNodeId;
+    }
+}
 void Project::validateIds() const {
     std::set<std::string> moleculeIds;
     for (const Molecule& value : molecules) {
         if (value.id.empty() || !moleculeIds.insert(value.id).second) throw std::runtime_error("Duplicate or empty molecule ID: " + value.id);
         value.validateIds();
+    }
+    std::set<std::string> nodeIds;
+    for(const ScriptNode& value:nodes){
+        if(value.id.empty()||!nodeIds.insert(value.id).second)throw std::runtime_error("Duplicate or empty node ID: "+value.id);
+        const json params=json::parse(value.paramsJson); if(!params.is_object())throw std::runtime_error("Node params are not an object: "+value.id);
     }
 }
 
@@ -183,7 +226,7 @@ BondStereo bondStereoFromString(const std::string& value) {
 }
 
 std::string toJson(const Project& project, int indent) {
-    json root{{"format", "chemanim-native-2d"}, {"version", 3}, {"mod", project.mod}, {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId}};
+    json root{{"format", "chemanim-native-2d"}, {"version", 4}, {"mod", project.mod}, {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId}, {"next_node_id",project.nextNodeId}};
     root["scene"] = {{"width", project.scene.width}, {"height", project.scene.height},
         {"logic_width", project.scene.logicWidth}, {"logic_height", project.scene.logicHeight},
         {"fps", project.scene.fps}, {"view_zoom", project.scene.viewZoom},
@@ -197,16 +240,20 @@ std::string toJson(const Project& project, int indent) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
             {"next_bond_id", molecule.nextBondId}, {"x", molecule.scenePosition.x}, {"y", molecule.scenePosition.y},
-            {"rotation", molecule.rotation}, {"scale", molecule.scale}, {"alpha", molecule.alpha}, {"layer", molecule.layer}};
+            {"rotation", molecule.rotation}, {"scale", molecule.scale}, {"alpha", molecule.alpha}, {"layer", molecule.layer}, {"visible",molecule.visible}};
         item["atoms"] = json::array();
         for (const Atom& atom : molecule.atoms) item["atoms"].push_back({{"id", atom.id}, {"element", atom.element},
             {"alias", atom.alias}, {"isotope", atom.isotope}, {"formal_charge", atom.formalCharge},
             {"radical_electrons", atom.radicalElectrons}, {"implicit_hydrogens", atom.implicitHydrogens},
             {"aromatic", atom.aromatic}, {"hidden", atom.hidden}, {"x", atom.position.x}, {"y", atom.position.y}});
         item["bonds"] = json::array();
-        for (const Bond& bond : molecule.bonds) item["bonds"].push_back({{"id", bond.id}, {"a", bond.atomA},
-            {"b", bond.atomB}, {"type", toString(bond.type)}, {"order", bond.type == BondType::Double ? 2.0 : bond.type == BondType::Triple ? 3.0 : bond.type == BondType::Aromatic ? 1.5 : 1.0},
-            {"aromatic", bond.type == BondType::Aromatic}, {"stereo", toString(bond.stereo)}, {"visible", bond.visible}});
+        for (const Bond& bond : molecule.bonds) {
+            json raw={{"id", bond.id}, {"a", bond.atomA}, {"b", bond.atomB}, {"type", toString(bond.type)},
+                {"order", bond.type == BondType::Double ? 2.0 : bond.type == BondType::Triple ? 3.0 : bond.type == BondType::Aromatic ? 1.5 : 1.0},
+                {"aromatic", bond.type == BondType::Aromatic}, {"stereo", toString(bond.stereo)}, {"visible", bond.visible}};
+            if(bond.displayType)raw["display_type"]=toString(*bond.displayType);
+            item["bonds"].push_back(std::move(raw));
+        }
         item["poses"] = json::object();
         for (const auto& [id, pose] : molecule.poses) {
             json positions = json::object();
@@ -215,13 +262,8 @@ std::string toJson(const Project& project, int indent) {
         }
         root["molecules"].push_back(std::move(item));
     }
-    root["timeline"] = {{"atom_tweens", json::array()}, {"pose_tweens", json::array()}};
-    for (const AtomTween& tween : project.atomTweens) root["timeline"]["atom_tweens"].push_back({
-        {"id", tween.id}, {"molecule", tween.moleculeId}, {"atom", tween.atomId}, {"start", tween.startFrame}, {"frames", tween.frames},
-        {"x", tween.target.x}, {"y", tween.target.y}, {"easing", static_cast<int>(tween.easing)}});
-    for (const PoseTween& tween : project.poseTweens) root["timeline"]["pose_tweens"].push_back({
-        {"id", tween.id}, {"molecule", tween.moleculeId}, {"pose", tween.poseId}, {"start", tween.startFrame}, {"frames", tween.frames},
-        {"easing", static_cast<int>(tween.easing)}});
+    root["nodes"]=json::array();
+    for(const ScriptNode& node:project.nodes)root["nodes"].push_back({{"id",node.id},{"type",node.type},{"enabled",node.enabled},{"params",json::parse(node.paramsJson)}});
     return root.dump(indent);
 }
 
@@ -229,11 +271,12 @@ Project fromJson(const std::string& source) {
     const json root = json::parse(source);
     if (root.value("format", "") != "chemanim-native-2d") throw std::runtime_error("Not a Chemanim native 2D project");
     const int version = root.value("version", 0);
-    if (version != 2 && version != 3) throw std::runtime_error("Unsupported Chemanim native 2D project version");
+    if (version != 2 && version != 3 && version != 4) throw std::runtime_error("Unsupported Chemanim native 2D project version");
     Project project;
     project.mod = root.value("mod", project.mod);
     project.nextMoleculeId = root.value("next_molecule_id", std::uint64_t{1});
     project.nextTimelineId = root.value("next_timeline_id", std::uint64_t{1});
+    project.nextNodeId = root.value("next_node_id", std::uint64_t{1});
     if (const auto found = root.find("scene"); found != root.end()) {
         project.scene.width = found->value("width", project.scene.width); project.scene.height = found->value("height", project.scene.height);
         project.scene.logicWidth = found->value("logic_width", project.scene.logicWidth); project.scene.logicHeight = found->value("logic_height", project.scene.logicHeight);
@@ -252,7 +295,7 @@ Project fromJson(const std::string& source) {
         molecule.referenceBondLength = raw.value("reference_bond_length", molecule.referenceBondLength);
         molecule.nextAtomId = raw.value("next_atom_id", std::uint64_t{1}); molecule.nextBondId = raw.value("next_bond_id", std::uint64_t{1});
         molecule.scenePosition = {raw.value("x", 0.0), raw.value("y", 0.0)}; molecule.rotation = raw.value("rotation", 0.0);
-        molecule.scale = raw.value("scale", 2.2); molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0);
+        molecule.scale = raw.value("scale", 2.2); molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0); molecule.visible=raw.value("visible",true);
         for (const json& value : raw.value("atoms", json::array())) {
             Atom atom; atom.id = value.value("id", ""); atom.element = value.value("element", "C"); atom.alias = value.value("alias", "");
             atom.isotope = value.value("isotope", 0); atom.formalCharge = value.value("formal_charge", 0); atom.radicalElectrons = value.value("radical_electrons", 0);
@@ -263,6 +306,8 @@ Project fromJson(const std::string& source) {
             Bond bond; bond.id = value.value("id", ""); bond.atomA = value.value("a", ""); bond.atomB = value.value("b", "");
             if (value.contains("type")) bond.type = bondTypeFromString(value.value("type", "single"));
             else { const double order = value.value("order", 1.0); bond.type = value.value("aromatic", false) ? BondType::Aromatic : order > 2.5 ? BondType::Triple : order > 1.5 ? BondType::Double : BondType::Single; }
+            if(value.contains("display_type"))bond.displayType=bondTypeFromString(value.value("display_type","single"));
+            else if(bond.type==BondType::Aromatic)bond.displayType=(numericSuffix(bond.id,'B')%2)?BondType::Double:BondType::Single;
             bond.stereo = bondStereoFromString(value.value("stereo", "none")); bond.visible = value.value("visible", true);
             molecule.nextBondId = std::max(molecule.nextBondId, numericSuffix(bond.id, 'B') + 1); molecule.bonds.push_back(std::move(bond));
         }
@@ -282,6 +327,21 @@ Project fromJson(const std::string& source) {
             id, value.value("molecule", ""), value.value("pose", ""), value.value("start", 0), value.value("frames", 30),
             static_cast<Easing>(value.value("easing", 0))}); }
     }
+    if(version>=4){
+        for(const json& value:root.value("nodes",json::array())){
+            ScriptNode node{value.value("id",""),value.value("type",""),value.value("enabled",true),value.value("params",json::object()).dump()};
+            project.nextNodeId=std::max(project.nextNodeId,numericSuffix(node.id,'N')+1);project.nodes.push_back(std::move(node));
+        }
+    } else {
+        project.ensureDefaultNodes();
+        struct LegacyCommand{int start;std::size_t order;std::string type;json params;};std::vector<LegacyCommand> commands;std::size_t order=0;
+        for(const AtomTween& tween:project.atomTweens)commands.push_back({tween.startFrame,order++,"atom_lerp_xy",{{"target",tween.moleculeId},{"atom",tween.atomId},{"x",tween.target.x},{"y",tween.target.y},{"frames",tween.frames},{"easing","linear"}}});
+        for(const PoseTween& tween:project.poseTweens)commands.push_back({tween.startFrame,order++,"atom_lerp_pose",{{"target",tween.moleculeId},{"pose",tween.poseId},{"frames",tween.frames},{"easing","linear"}}});
+        std::stable_sort(commands.begin(),commands.end(),[](const LegacyCommand& a,const LegacyCommand& b){return a.start!=b.start?a.start<b.start:a.order<b.order;});
+        int cursor=0;for(const LegacyCommand& command:commands){if(command.start>cursor){const std::string waitId=project.addNode("wait",json({{"frames",command.start-cursor}}).dump());(void)waitId;cursor=command.start;}const std::string migratedId=project.addNode(command.type,command.params.dump());(void)migratedId;}
+        project.atomTweens.clear();project.poseTweens.clear();
+    }
+    project.ensureDefaultNodes();
     project.validateIds();
     return project;
 }

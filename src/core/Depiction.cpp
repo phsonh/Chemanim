@@ -40,21 +40,25 @@ RDKit::Bond::BondType rdBondType(BondType value) {
 BuiltMolecule build(const Molecule& source) {
     BuiltMolecule result; result.value = std::make_unique<RDKit::RWMol>();
     std::unordered_map<std::string, unsigned int> indices;
+    const bool stableAromaticDisplay=std::all_of(source.bonds.begin(),source.bonds.end(),[](const Bond& bond){return bond.type!=BondType::Aromatic||bond.displayType.has_value();});
     for (const Atom& value : source.atoms) {
         auto* atom = new RDKit::Atom(value.element.empty() ? "C" : value.element);
         atom->setIsotope(std::max(0, value.isotope)); atom->setFormalCharge(value.formalCharge);
-        atom->setNumRadicalElectrons(std::max(0, value.radicalElectrons)); atom->setIsAromatic(value.aromatic);
+        atom->setNumRadicalElectrons(std::max(0, value.radicalElectrons)); atom->setIsAromatic(value.aromatic&&!stableAromaticDisplay);
         if (value.implicitHydrogens > 0) { atom->setNoImplicit(true); atom->setNumExplicitHs(value.implicitHydrogens); }
         const unsigned int index = result.value->addAtom(atom, true, true);
-        if (!value.alias.empty()) result.value->getAtomWithIdx(index)->setProp(RDKit::common_properties::atomLabel, value.alias);
+        if (value.hidden) result.value->getAtomWithIdx(index)->setProp(RDKit::common_properties::atomLabel, std::string{});
+        else if (!value.alias.empty()) result.value->getAtomWithIdx(index)->setProp(RDKit::common_properties::atomLabel, value.alias);
         indices[value.id] = index; result.atomIds.push_back(value.id);
     }
     for (const Bond& value : source.bonds) {
+        if(!value.visible)continue;
         const auto a = indices.find(value.atomA), b = indices.find(value.atomB);
         if (a == indices.end() || b == indices.end() || a->second == b->second) continue;
-        result.value->addBond(a->second, b->second, rdBondType(value.type));
+        const BondType depictedType=value.type==BondType::Aromatic&&value.displayType?*value.displayType:value.type;
+        result.value->addBond(a->second, b->second, rdBondType(depictedType));
         RDKit::Bond* bond = result.value->getBondBetweenAtoms(a->second, b->second);
-        if (value.type == BondType::Aromatic) { bond->setIsAromatic(true); result.value->getAtomWithIdx(a->second)->setIsAromatic(true); result.value->getAtomWithIdx(b->second)->setIsAromatic(true); }
+        if (value.type == BondType::Aromatic&&!value.displayType) { bond->setIsAromatic(true); result.value->getAtomWithIdx(a->second)->setIsAromatic(true); result.value->getAtomWithIdx(b->second)->setIsAromatic(true); }
         if (value.stereo == BondStereo::SolidWedge) bond->setBondDir(RDKit::Bond::BEGINWEDGE);
         else if (value.stereo == BondStereo::DashedWedge) bond->setBondDir(RDKit::Bond::BEGINDASH);
         else if (value.stereo == BondStereo::Wavy) bond->setBondDir(RDKit::Bond::UNKNOWN);
@@ -131,6 +135,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     result.bonds.reserve(molecule.bonds.size());
     for (std::size_t index = 0; index < molecule.bonds.size(); ++index) {
         const Bond& bond = molecule.bonds[index];
+        if(!bond.visible)continue;
         const auto a = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomA; });
         const auto b = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomB; });
         if (a != result.atoms.end() && b != result.atoms.end()) result.bonds.push_back({bond.id, a->center, b->center, bondHitPolygon(a->center, b->center, 7.0)});
@@ -173,7 +178,12 @@ Molecule moleculeFromSmiles(const std::string& stableId, const std::string& name
         BondType type = source->getIsAromatic() ? BondType::Aromatic : source->getBondType() == RDKit::Bond::DOUBLE ? BondType::Double : source->getBondType() == RDKit::Bond::TRIPLE ? BondType::Triple : BondType::Single;
         const RDKit::Bond* depictedBond = preparedForStereo.getBondWithIdx(source->getIdx());
         BondStereo stereo = depictedBond->getBondDir() == RDKit::Bond::BEGINWEDGE ? BondStereo::SolidWedge : depictedBond->getBondDir() == RDKit::Bond::BEGINDASH ? BondStereo::DashedWedge : depictedBond->getBondDir() == RDKit::Bond::UNKNOWN ? BondStereo::Wavy : BondStereo::None;
-        result.bonds.push_back({"B" + std::to_string(result.nextBondId++), ids[source->getBeginAtomIdx()], ids[source->getEndAtomIdx()], type, stereo, true});
+        std::optional<BondType> displayType;
+        if(type==BondType::Aromatic){
+            const RDKit::Bond* kekuleBond=preparedForStereo.getBondWithIdx(source->getIdx());
+            displayType=kekuleBond->getBondType()==RDKit::Bond::DOUBLE?BondType::Double:BondType::Single;
+        }
+        result.bonds.push_back({"B" + std::to_string(result.nextBondId++), ids[source->getBeginAtomIdx()], ids[source->getEndAtomIdx()], type, displayType, stereo, true});
     }
     result.referenceBondLength = RDKit::MolDraw2DUtils::meanBondLength(*parsed);
     return result;

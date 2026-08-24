@@ -91,6 +91,14 @@ private:
     static int mSetAtomXY(lua_State* state);
     static int mLerpAtomXY(lua_State* state);
     static int mLerpAtomsXY(lua_State* state);
+    static int mSetAtomElement(lua_State* state);
+    static int mSetAtomCharge(lua_State* state);
+    static int mSetAtomHidden(lua_State* state);
+    static int mFormBond(lua_State* state);
+    static int mDeleteBond(lua_State* state);
+    static int mSetBondOrder(lua_State* state);
+    static int mSetBondStereo(lua_State* state);
+    static int mSetBondVisible(lua_State* state);
 };
 
 } // namespace chem

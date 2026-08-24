@@ -25,7 +25,7 @@ def atom_motion() -> None:
     atoms = core.project()["molecules"][0]["atoms"]
     movable = [atoms[0], atoms[1], atoms[-1]]
     for index, atom in enumerate(movable):
-        core.add_atom_tween(atom["id"], 0, 60, atom["x"] + .55 * (index + 1), atom["y"] + (-.45 if index % 2 else .4))
+        core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + .55 * (index + 1), "y": atom["y"] + (-.45 if index % 2 else .4), "frames": 60, "easing": "linear"}))
     directory = ROOT / "mod" / "atom_motion"
     directory.mkdir(parents=True, exist_ok=True)
     core.save(str(directory / "atom_motion.cmm"))
@@ -37,7 +37,7 @@ def static_cache_benchmark() -> None:
     document = json.loads(core.json()); document["mod"] = "static_cache"; document["scene"]["title"] = "static_cache"; document["molecules"][0]["scale"] = 4.0
     core.replace_json(json.dumps(document, ensure_ascii=False))
     atom = core.project()["molecules"][0]["atoms"][0]
-    core.add_atom_tween(atom["id"], 0, 60, atom["x"], atom["y"])
+    core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"], "y": atom["y"], "frames": 60, "easing": "linear"}))
     directory = ROOT / "mod" / "static_cache"; directory.mkdir(parents=True, exist_ok=True)
     core.save(str(directory / "static_cache.cmm")); core.write_mod(str(ROOT))
 
@@ -53,7 +53,7 @@ def medium_motion_benchmark() -> None:
     atoms = core.project()["molecules"][0]["atoms"]
     for index in (0, len(atoms) // 2, len(atoms) - 1):
         atom = atoms[index]
-        core.add_atom_tween(atom["id"], 0, 60, atom["x"] + .5, atom["y"] + .35)
+        core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + .5, "y": atom["y"] + .35, "frames": 60, "easing": "linear"}))
     directory = ROOT / "mod" / "medium_motion"
     directory.mkdir(parents=True, exist_ok=True)
     core.save(str(directory / "medium_motion.cmm"))

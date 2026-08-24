@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.24)
 project(Chemanim VERSION 0.1.0 LANGUAGES C CXX)
 
+find_package(Git QUIET)
+set(CHEMANIM_BUILD_COMMIT "unknown")
+if(Git_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE CHEMANIM_BUILD_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+
 if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
 endif()
@@ -103,6 +112,7 @@ target_include_directories(lua PUBLIC ${LUA_DIR})
 
 add_library(chemanim_core_lib STATIC
     src/core/Document.cpp
+    src/core/Nodes.cpp
     src/core/Editing.cpp
     src/core/SketcherGeometry.cpp
     src/core/Depiction.cpp
@@ -119,9 +129,12 @@ target_link_libraries(chemanim_core_lib
 
 pybind11_add_module(chemanim_core MODULE WITHOUT_SOABI src/core/Bindings.cpp)
 target_link_libraries(chemanim_core PRIVATE chemanim_core_lib nlohmann_json::nlohmann_json)
+target_compile_definitions(chemanim_core PRIVATE CHEMANIM_BUILD_COMMIT="${CHEMANIM_BUILD_COMMIT}")
+set(CHEMANIM_PYTHON_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/tools" CACHE PATH
+    "Output directory for the chemanim_core Python module")
 set_target_properties(chemanim_core PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/tools"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/tools"
+    LIBRARY_OUTPUT_DIRECTORY "${CHEMANIM_PYTHON_OUTPUT_DIRECTORY}"
+    RUNTIME_OUTPUT_DIRECTORY "${CHEMANIM_PYTHON_OUTPUT_DIRECTORY}"
 )
 
 add_executable(chemanim

@@ -69,7 +69,7 @@ def test_manual_ibuprofen_uses_ring_double_element_and_wedge():
     core.set_element("O"); gesture(core, "atom_label", canvas_point(core, o2))
     assert any(bond["stereo"] == "wedge" for bond in bonds(core))
     assert sum(atom["element"] == "O" for atom in atoms(core)) == 2
-    assert sum(bond["type"] == "double" for bond in bonds(core)) >= 4
+    assert sum(bond["type"] == "double" or bond.get("display_type") == "double" for bond in bonds(core)) >= 4
 
 
 def test_stable_ids_survive_save_close_reopen_and_are_not_reused(tmp_path: Path):
@@ -90,22 +90,77 @@ def test_project_overwrite_and_molecule_ids_continue_after_reopen(tmp_path: Path
 def test_tween_target_drag_does_not_modify_base_structure():
     core = CoreSession(); core.import_smiles("ethanol", "CCO"); core.set_viewport(960, 540, 48, 0, 0)
     atom = core.project()["molecules"][0]["atoms"][-1]; original = (atom["x"], atom["y"])
-    tween = core.add_atom_tween(atom["id"], 10, 30, atom["x"] + 2, atom["y"]); core.edit_atom_tween(tween)
+    core.add_node("wait", json.dumps({"frames": 10}))
+    tween = core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + 2, "y": atom["y"], "frames": 30, "easing": "linear"}))
+    core.edit_node(tween)
     point = canvas_point(core, atom["id"]); core.pointer_down(*point); core.pointer_move(point[0], point[1] - 40); assert core.pointer_up(point[0], point[1] - 40)["changed"]
     after = next(item for item in core.project()["molecules"][0]["atoms"] if item["id"] == atom["id"])
     assert (after["x"], after["y"]) == original
-    assert core.project()["timeline"]["atom_tweens"][0]["y"] != original[1]
+    node = next(item for item in core.project()["nodes"] if item["id"] == tween)
+    assert node["params"]["y"] != original[1]
 
 
 def test_later_overlapping_tween_starts_from_current_state():
     core = CoreSession(); core.import_smiles("ethanol", "CCO"); core.set_viewport(960, 540, 48, 0, 0)
     atom = core.project()["molecules"][0]["atoms"][-1]
-    core.add_atom_tween(atom["id"], 0, 60, atom["x"] + 6, atom["y"])
-    core.add_atom_tween(atom["id"], 30, 30, atom["x"] - 2, atom["y"])
+    core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + 6, "y": atom["y"], "frames": 60, "easing": "linear"}))
+    core.add_node("wait", json.dumps({"frames": 30}))
+    core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] - 2, "y": atom["y"], "frames": 30, "easing": "linear"}))
     d29 = core.depict_at(29); d30 = core.depict_at(30)
     p29 = next(item["center"] for item in d29["atoms"] if item["id"] == atom["id"])
     p30 = next(item["center"] for item in d30["atoms"] if item["id"] == atom["id"])
     assert abs(p30["x"] - p29["x"]) < 10
+
+
+def test_linear_nodes_are_the_only_serialized_authoring_timeline(tmp_path: Path):
+    core = CoreSession(); molecule = core.add_blank_molecule("authoring")
+    move = core.add_node("molecule_lerp_position", json.dumps({"target": molecule, "x": 120, "y": -40, "frames": 60, "easing": "linear"}))
+    wait = core.add_node("wait", json.dumps({"frames": 30}))
+    alpha = core.add_node("molecule_lerp_alpha", json.dumps({"target": molecule, "value": 0, "frames": 30, "easing": "linear"}))
+    project = core.project()
+    assert "timeline" not in project
+    timings = {item["id"]: item for item in core.node_timings()}
+    assert timings[move]["start"] == 0 and timings[move]["end"] == 60
+    assert timings[wait]["start"] == 0 and timings[wait]["end"] == 30
+    assert timings[alpha]["start"] == 30 and timings[alpha]["end"] == 60
+    path = tmp_path / "nodes.cmm"; core.save(str(path)); raw = json.loads(path.read_text(encoding="utf-8"))
+    assert [node["id"] for node in raw["nodes"]] == [node["id"] for node in project["nodes"]]
+    assert "timeline" not in raw
+
+
+def test_reordering_nodes_recompiles_typed_track_timing():
+    core = CoreSession(); core.add_blank_molecule("order")
+    first = core.add_node("wait", json.dumps({"frames": 20}))
+    second = core.add_node("wait", json.dumps({"frames": 40}))
+    lerp = core.add_node("molecule_lerp_position", "{}")
+    assert next(item for item in core.node_timings() if item["id"] == lerp)["start"] == 60
+    core.move_node(second, len(core.project()["nodes"])-1)
+    assert next(item for item in core.node_timings() if item["id"] == lerp)["start"] == 20
+    scene=core.project()["nodes"][0]["id"]
+    assert not core.move_node(scene,3) and not core.delete_node(scene)
+
+
+def test_benzene_display_assignment_survives_substitution_motion_and_reopen(tmp_path: Path):
+    core = session(); gesture(core, "benzene", (480, 270))
+    ring_atoms = list(atoms(core)); original = {bond["id"]: bond.get("display_type") for bond in bonds(core)}
+    assert list(original.values()).count("double") == 3
+    for atom in ring_atoms:
+        point = canvas_point(core, atom["id"]); core.set_tool("single_bond"); core.pointer_down(*point); core.pointer_up(*point)
+        current = {bond["id"]: bond.get("display_type") for bond in bonds(core) if bond["id"] in original}
+        assert current == original
+    core.set_atom_position(ring_atoms[0]["id"], ring_atoms[0]["x"]+.2, ring_atoms[0]["y"]-.1)
+    path=tmp_path/"stable-benzene.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
+    current={bond["id"]:bond.get("display_type") for bond in restored.project()["molecules"][0]["bonds"] if bond["id"] in original}
+    assert current==original
+
+
+def test_imported_pyridine_display_assignment_is_persisted(tmp_path: Path):
+    core=CoreSession();core.import_smiles("pyridine","n1ccccc1")
+    aromatic={bond["id"]:bond.get("display_type") for bond in bonds(core) if bond["type"]=="aromatic"}
+    assert len(aromatic)==6 and list(aromatic.values()).count("double")==3
+    path=tmp_path/"pyridine.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
+    reopened={bond["id"]:bond.get("display_type") for bond in restored.project()["molecules"][0]["bonds"] if bond["type"]=="aromatic"}
+    assert reopened==aromatic
 
 
 def test_lua_uses_authoritative_tables_and_no_embedded_svg():

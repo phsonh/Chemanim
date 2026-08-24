@@ -1,5 +1,7 @@
 #include "Codegen.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -8,56 +10,80 @@
 
 namespace chem::core {
 namespace {
+using json=nlohmann::json;
 std::string quote(const std::string& value) {
     std::string result = "\"";
     for (char c : value) { if (c == '\\' || c == '"') result.push_back('\\'); if (c == '\n') result += "\\n"; else result.push_back(c); }
     return result + "\"";
 }
-const char* easeName(Easing value) {
-    switch (value) { case Easing::InQuad:return "inquad"; case Easing::OutQuad:return "outquad"; case Easing::InOutQuad:return "inoutquad"; case Easing::SmoothStep:return "smoothstep"; case Easing::Step:return "step"; default:return "linear"; }
-}
 double orderValue(BondType type) { return type == BondType::Double ? 2.0 : type == BondType::Triple ? 3.0 : type == BondType::Aromatic ? 1.5 : 1.0; }
 std::string number(double value) { std::ostringstream out; out << std::setprecision(12) << value; return out.str(); }
+std::string moleculeDeclaration(const Molecule& molecule) {
+    std::ostringstream out;out<<std::setprecision(12);
+    out<<"local "<<molecule.id<<" = chem.NewMol {\n"
+       <<"    source_smiles = "<<quote(molecule.sourceSmiles)<<",\n"
+       <<"    reference_bond_length = "<<molecule.referenceBondLength<<",\n    atoms = {\n";
+    for(const Atom& atom:molecule.atoms)out<<"        { id="<<quote(atom.id)<<", element="<<quote(atom.element)
+       <<", alias="<<quote(atom.alias)<<", isotope="<<atom.isotope<<", formal_charge="<<atom.formalCharge
+       <<", radical_electrons="<<atom.radicalElectrons<<", implicit_hydrogens="<<atom.implicitHydrogens
+       <<", aromatic="<<(atom.aromatic?"true":"false")<<", hidden="<<(atom.hidden?"true":"false")
+       <<", x="<<atom.position.x<<", y="<<atom.position.y<<" },\n";
+    out<<"    },\n    bonds = {\n";
+    for(const Bond& bond:molecule.bonds)out<<"        { id="<<quote(bond.id)<<", a="<<quote(bond.atomA)<<", b="<<quote(bond.atomB)
+       <<", order="<<orderValue(bond.type)<<", aromatic="<<(bond.type==BondType::Aromatic?"true":"false")
+       <<", display_order="<<(bond.displayType?orderValue(*bond.displayType):orderValue(bond.type))
+       <<", stereo="<<quote(toString(bond.stereo))<<", visible="<<(bond.visible?"true":"false")<<" },\n";
+    out<<"    }\n}\n"<<molecule.id<<".SetPos("<<molecule.scenePosition.x<<", "<<molecule.scenePosition.y<<")\n"
+       <<molecule.id<<".SetScale("<<molecule.scale<<")\n"<<molecule.id<<".SetRotation("<<molecule.rotation<<")\n"
+       <<molecule.id<<".SetAlpha("<<molecule.alpha<<")\n"<<molecule.id<<".SetLayer("<<molecule.layer<<")\n"
+       <<molecule.id<<".SetVisible("<<(molecule.visible?"true":"false")<<")";
+    return out.str();
+}
 }  // namespace
 
 std::string compileLua(const Project& project) {
-    std::ostringstream out; out << std::setprecision(12);
-    const Scene& s = project.scene;
-    out << "local chem = require(\"chem\")\n\nchem.scene {\n"
-        << "    width = " << s.width << ", height = " << s.height << ",\n"
-        << "    logic_width = " << s.logicWidth << ", logic_height = " << s.logicHeight << ",\n"
-        << "    fps = " << s.fps << ", view_zoom = " << s.viewZoom << ",\n"
-        << "    background = " << quote(s.background) << ", title = " << quote(s.title) << "\n}\n\n";
-    for (const Molecule& molecule : project.molecules) {
-        out << "local " << molecule.id << " = chem.NewMol {\n"
-            << "    source_smiles = " << quote(molecule.sourceSmiles) << ",\n"
-            << "    reference_bond_length = " << molecule.referenceBondLength << ",\n    atoms = {\n";
-        for (const Atom& atom : molecule.atoms) out << "        { id=" << quote(atom.id) << ", element=" << quote(atom.element)
-            << ", alias=" << quote(atom.alias) << ", isotope=" << atom.isotope << ", formal_charge=" << atom.formalCharge
-            << ", radical_electrons=" << atom.radicalElectrons << ", implicit_hydrogens=" << atom.implicitHydrogens
-            << ", aromatic=" << (atom.aromatic?"true":"false") << ", hidden=" << (atom.hidden?"true":"false")
-            << ", x=" << atom.position.x << ", y=" << atom.position.y << " },\n";
-        out << "    },\n    bonds = {\n";
-        for (const Bond& bond : molecule.bonds) out << "        { id=" << quote(bond.id) << ", a=" << quote(bond.atomA) << ", b=" << quote(bond.atomB)
-            << ", order=" << orderValue(bond.type) << ", aromatic=" << (bond.type==BondType::Aromatic?"true":"false")
-            << ", stereo=" << quote(toString(bond.stereo)) << ", visible=" << (bond.visible?"true":"false") << " },\n";
-        out << "    }\n}\n" << molecule.id << ".SetPos(" << molecule.scenePosition.x << ", " << molecule.scenePosition.y << ")\n"
-            << molecule.id << ".SetScale(" << molecule.scale << ")\n" << molecule.id << ".SetRotation(" << molecule.rotation << ")\n"
-            << molecule.id << ".SetAlpha(" << molecule.alpha << ")\n" << molecule.id << ".SetLayer(" << molecule.layer << ")\n\n";
+    std::ostringstream out;out<<std::setprecision(12)<<"local chem = require(\"chem\")\n\n";std::set<std::string> declaredMolecules,declaredArrows;
+    for(const ScriptNode& node:project.nodes){if(!node.enabled)continue;const json p=json::parse(node.paramsJson);const std::string target=p.value("target","");std::string line;
+        if(node.type=="scene"){const Scene& s=project.scene;std::ostringstream value;value<<"chem.scene {\n    width = "<<s.width<<", height = "<<s.height<<",\n    logic_width = "<<s.logicWidth<<", logic_height = "<<s.logicHeight<<",\n    fps = "<<s.fps<<", view_zoom = "<<s.viewZoom<<",\n    background = "<<quote(s.background)<<", title = "<<quote(s.title)<<"\n}";line=value.str();}
+        else if(node.type=="wait")line="chem.Wait("+std::to_string(std::max(0,p.value("frames",30)))+")";
+        else if(node.type=="raw_lua")line=p.value("code","");
+        else if(node.type=="molecule_create"){if(const Molecule* molecule=project.molecule(target);molecule&&!declaredMolecules.contains(target)){line=moleculeDeclaration(*molecule);declaredMolecules.insert(target);}}
+        else if(node.type=="molecule_set_position")line=target+".SetPos("+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+")";
+        else if(node.type=="molecule_lerp_position")line=target+".LerpPos("+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="molecule_set_scale")line=target+".SetScale("+number(p.value("value",1.0))+")";
+        else if(node.type=="molecule_lerp_scale")line=target+".LerpScale("+number(p.value("value",1.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="molecule_set_rotation")line=target+".SetRotation("+number(p.value("value",0.0))+")";
+        else if(node.type=="molecule_lerp_rotation")line=target+".LerpRotation("+number(p.value("value",0.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="molecule_set_alpha")line=target+".SetAlpha("+std::to_string(p.value("value",255))+")";
+        else if(node.type=="molecule_lerp_alpha")line=target+".LerpAlpha("+std::to_string(p.value("value",255))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="molecule_set_layer")line=target+".SetLayer("+std::to_string(p.value("value",0))+")";
+        else if(node.type=="molecule_set_visible")line=target+".SetVisible("+std::string(p.value("value",true)?"true":"false")+")";
+        else if(node.type=="molecule_delete")line=target+".Delete()";
+        else if(node.type=="atom_set_xy")line=target+".SetAtomXY("+quote(p.value("atom",""))+", "+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+")";
+        else if(node.type=="atom_lerp_xy")line=target+".LerpAtomXY("+quote(p.value("atom",""))+", "+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="atom_lerp_pose"){if(const Molecule* molecule=project.molecule(target);molecule){if(auto pose=molecule->poses.find(p.value("pose",""));pose!=molecule->poses.end()){std::ostringstream value;value<<target<<".LerpAtomsXY({";for(const auto& [id,point]:pose->second.atomPositions)value<<" ["<<quote(id)<<"]={"<<point.x<<","<<point.y<<"},";value<<" }, "<<p.value("frames",30)<<", "<<quote(p.value("easing","linear"))<<")";line=value.str();}}}
+        else if(node.type=="atom_set_element")line=target+".SetAtomElement("+quote(p.value("atom",""))+", "+quote(p.value("value","C"))+")";
+        else if(node.type=="atom_set_charge")line=target+".SetAtomCharge("+quote(p.value("atom",""))+", "+std::to_string(p.value("value",0))+")";
+        else if(node.type=="atom_set_hidden")line=target+".SetAtomHidden("+quote(p.value("atom",""))+", "+std::string(p.value("value",true)?"true":"false")+")";
+        else if(node.type=="bond_form")line=target+".FormBond("+quote(p.value("bond",""))+", "+quote(p.value("a",""))+", "+quote(p.value("b",""))+", "+quote(p.value("order","single"))+", "+quote(p.value("stereo","none"))+")";
+        else if(node.type=="bond_delete")line=target+".DeleteBond("+quote(p.value("bond",""))+")";
+        else if(node.type=="bond_set_order")line=target+".SetBondOrder("+quote(p.value("bond",""))+", "+quote(p.value("value","single"))+")";
+        else if(node.type=="bond_set_stereo")line=target+".SetBondStereo("+quote(p.value("bond",""))+", "+quote(p.value("value","none"))+")";
+        else if(node.type=="bond_set_visible")line=target+".SetBondVisible("+quote(p.value("bond",""))+", "+std::string(p.value("value",true)?"true":"false")+")";
+        else if(node.type=="arrow_new"){if(!declaredArrows.contains(target)){line="local "+target+" = chem.NewArrow()";declaredArrows.insert(target);}}
+        else if(node.type=="arrow_delete")line=target+".Delete()";
+        else if(node.type=="arrow_set_curve")line=target+".SetCurve("+number(p.value("x1",0.0))+", "+number(p.value("y1",0.0))+", "+number(p.value("cx1",80.0))+", "+number(p.value("cy1",80.0))+", "+number(p.value("cx2",-80.0))+", "+number(p.value("cy2",80.0))+", "+number(p.value("x2",160.0))+", "+number(p.value("y2",0.0))+")";
+        else if(node.type=="arrow_set_position")line=target+".SetPos("+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+")";
+        else if(node.type=="arrow_lerp_position")line=target+".LerpPos("+number(p.value("x",0.0))+", "+number(p.value("y",0.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="arrow_set_progress")line=target+".SetProgress("+number(p.value("value",0.0))+")";
+        else if(node.type=="arrow_lerp_progress")line=target+".LerpProgress("+number(p.value("value",1.0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="arrow_set_alpha")line=target+".SetAlpha("+std::to_string(p.value("value",255))+")";
+        else if(node.type=="arrow_lerp_alpha")line=target+".LerpAlpha("+std::to_string(p.value("value",0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="arrow_set_color")line=target+".SetColor("+std::to_string(p.value("r",25))+", "+std::to_string(p.value("g",25))+", "+std::to_string(p.value("b",25))+")";
+        else if(node.type=="arrow_lerp_color")line=target+".LerpColor("+std::to_string(p.value("r",25))+", "+std::to_string(p.value("g",25))+", "+std::to_string(p.value("b",25))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
+        else if(node.type=="arrow_set_width")line=target+".SetWidth("+number(p.value("value",3.0))+")";
+        if(!line.empty())out<<line<<"\n\n";
     }
-    struct Command { int frame; std::size_t order; std::string text; };
-    std::vector<Command> commands; std::size_t order = 0;
-    for (const AtomTween& tween : project.atomTweens) commands.push_back({tween.startFrame,order++,tween.moleculeId+".LerpAtomXY("+quote(tween.atomId)+", "+number(tween.target.x)+", "+number(tween.target.y)+", "+std::to_string(tween.frames)+", "+quote(easeName(tween.easing))+")"});
-    for (const PoseTween& tween : project.poseTweens) {
-        const Molecule* molecule = project.molecule(tween.moleculeId); const auto pose = molecule ? molecule->poses.find(tween.poseId) : std::map<std::string,Pose>::const_iterator{};
-        if (!molecule || pose == molecule->poses.end()) continue;
-        std::ostringstream line; line << tween.moleculeId << ".LerpAtomsXY({";
-        for (const auto& [atomId, target] : pose->second.atomPositions) line << " [" << quote(atomId) << "]={" << target.x << "," << target.y << "},";
-        line << " }, " << tween.frames << ", " << quote(easeName(tween.easing)) << ")";
-        commands.push_back({tween.startFrame,order++,line.str()});
-    }
-    std::stable_sort(commands.begin(),commands.end(),[](const Command& a,const Command& b){return a.frame!=b.frame?a.frame<b.frame:a.order<b.order;});
-    for (const Command& command : commands) out << "chem.SetFrame(" << command.frame << ")\n" << command.text << "\n";
     return out.str();
 }
 

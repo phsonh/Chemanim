@@ -44,7 +44,8 @@ struct Viewport {
 };
 
 enum class HitKind { None, Atom, Bond };
-enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose };
+enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose, ScriptNode };
+enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Move, Pan };
 
 struct Hit {
     HitKind kind = HitKind::None;
@@ -54,6 +55,7 @@ struct Hit {
 
 struct GesturePreview {
     bool active = false;
+    GesturePreviewKind kind = GesturePreviewKind::None;
     Point start;
     Point current;
     std::vector<Point> polygon;
@@ -92,6 +94,7 @@ public:
     void previewTimeline(int frame);
     void editAtomTween(const std::string& tweenId);
     void editPose(const std::string& moleculeId, const std::string& poseId, int previewFrame);
+    void editScriptNode(const std::string& nodeId);
     [[nodiscard]] EditTargetKind editTargetKind() const;
     [[nodiscard]] Molecule displayMolecule() const;
 
@@ -104,6 +107,14 @@ public:
     bool setAtomPosition(const std::string& atomId, Point position);
     bool setAtomElement(const std::string& atomId, std::string element);
     bool changeAtomCharge(const std::string& atomId, int delta);
+    [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,
+                                            std::optional<std::size_t> index = std::nullopt);
+    bool updateScriptNode(const std::string& nodeId, const std::string& paramsJson);
+    bool setScriptNodeEnabled(const std::string& nodeId, bool enabled);
+    bool moveScriptNode(const std::string& nodeId, std::size_t index);
+    [[nodiscard]] std::string duplicateScriptNode(const std::string& nodeId);
+    bool deleteScriptNode(const std::string& nodeId);
+    bool updateScene(const std::string& sceneJson);
 
     [[nodiscard]] bool canUndo() const;
     [[nodiscard]] bool canRedo() const;

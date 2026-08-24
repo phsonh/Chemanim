@@ -224,6 +224,7 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         const double order = numberField(state_, -1, "order", 1);
         bond.type = numberField(state_, -1, "aromatic", 0) != 0 ? core::BondType::Aromatic :
                     order > 2.5 ? core::BondType::Triple : order > 1.5 ? core::BondType::Double : core::BondType::Single;
+        if(bond.type==core::BondType::Aromatic){const double display=numberField(state_,-1,"display_order",1);bond.displayType=display>1.5?core::BondType::Double:core::BondType::Single;}
         bond.stereo = core::bondStereoFromString(stringField(state_, -1, "stereo", "none"));
         bond.visible = numberField(state_, -1, "visible", 1) != 0;
         if (bond.id.empty() || bond.atomA.empty() || bond.atomB.empty()) {
@@ -262,6 +263,9 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     } else if (object.kind == "molecule") {
         bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
         bind("LerpAtomsXY", mLerpAtomsXY);
+        bind("SetAtomElement",mSetAtomElement);bind("SetAtomCharge",mSetAtomCharge);bind("SetAtomHidden",mSetAtomHidden);
+        bind("FormBond",mFormBond);bind("DeleteBond",mDeleteBond);bind("SetBondOrder",mSetBondOrder);
+        bind("SetBondStereo",mSetBondStereo);bind("SetBondVisible",mSetBondVisible);
     } else if (object.kind == "arrow") {
         bind("SetProgress", mSetProgress); bind("LerpProgress", mLerpProgress);
         bind("SetCurve", mSetCurve);
@@ -511,6 +515,7 @@ int LuaRuntime::returnBoundObject(lua_State* state, Object& object) {
 }
 
 Ease LuaRuntime::boundEase(lua_State* state, int modeIndex) {
+    if(lua_isstring(state,modeIndex)) return Engine::parseEase(lua_tostring(state,modeIndex));
     const int mode = lua_isnumber(state, modeIndex) ? static_cast<int>(lua_tointeger(state, modeIndex)) : 0;
     switch (mode) {
         case 1: return Ease::InQuad;
@@ -770,5 +775,32 @@ int LuaRuntime::mLerpAtomsXY(lua_State* state) {
     }
     return returnBoundObject(state, object);
 }
+
+int LuaRuntime::mSetAtomElement(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
+    if(!object.molecule)return luaL_error(state,"SetAtomElement requires a molecule");const std::string id=luaL_checkstring(state,a);
+    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addStringKey(object,"atom:"+id+":element",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);
+}
+int LuaRuntime::mSetAtomCharge(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
+    if(!object.molecule)return luaL_error(state,"SetAtomCharge requires a molecule");const std::string id=luaL_checkstring(state,a);
+    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addNumericTween(object,"atom:"+id+":charge",runtime.cursor_,0,luaL_checknumber(state,a+1),Ease::Step);return returnBoundObject(state,object);
+}
+int LuaRuntime::mSetAtomHidden(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
+    if(!object.molecule)return luaL_error(state,"SetAtomHidden requires a molecule");const std::string id=luaL_checkstring(state,a);
+    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addNumericTween(object,"atom:"+id+":hidden",runtime.cursor_,0,lua_toboolean(state,a+1)?1:0,Ease::Step);return returnBoundObject(state,object);
+}
+int LuaRuntime::mFormBond(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
+    if(!object.molecule)return luaL_error(state,"FormBond requires a molecule");const std::string id=luaL_checkstring(state,a),first=luaL_checkstring(state,a+1),second=luaL_checkstring(state,a+2);
+    if(!object.molecule->atom(first)||!object.molecule->atom(second))return luaL_error(state,"Unknown bond atom ID");
+    if(!object.molecule->bond(id)){object.molecule->bonds.push_back(core::Bond{.id=id,.atomA=first,.atomB=second,.visible=false});}
+    runtime.engine_->addStringKey(object,"bond:"+id+":type",runtime.cursor_,luaL_checkstring(state,a+3));runtime.engine_->addStringKey(object,"bond:"+id+":stereo",runtime.cursor_,luaL_checkstring(state,a+4));runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,1,Ease::Step);return returnBoundObject(state,object);
+}
+int LuaRuntime::mDeleteBond(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,0,Ease::Step);return returnBoundObject(state,object);}
+int LuaRuntime::mSetBondOrder(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addStringKey(object,"bond:"+id+":type",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);}
+int LuaRuntime::mSetBondStereo(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addStringKey(object,"bond:"+id+":stereo",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);}
+int LuaRuntime::mSetBondVisible(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,lua_toboolean(state,a+1)?1:0,Ease::Step);return returnBoundObject(state,object);}
 
 } // namespace chem

@@ -1,6 +1,7 @@
 #include "Depiction.hpp"
 #include "Document.hpp"
 #include "Editing.hpp"
+#include "Nodes.hpp"
 #include "Timeline.hpp"
 #include "Codegen.hpp"
 
@@ -17,6 +18,10 @@ namespace {
 py::object jsonObject(const std::string& source) {
     return py::module_::import("json").attr("loads")(source);
 }
+std::filesystem::path pathFromUtf8(const std::string& value) {
+    return std::filesystem::path(std::u8string(
+        reinterpret_cast<const char8_t*>(value.data()), value.size()));
+}
 
 py::dict point(const core::Point& value) {
     py::dict result; result["x"] = value.x; result["y"] = value.y; return result;
@@ -31,7 +36,8 @@ py::dict hit(const core::Hit& value) {
 py::dict editResult(const core::EditResult& value) {
     py::dict result; result["changed"] = value.changed; result["message"] = value.message;
     result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds;
-    py::dict preview; preview["active"] = value.preview.active; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
+    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","move","pan"};
+    py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
     preview["snap_atom"] = value.preview.snapAtomId ? py::cast(*value.preview.snapAtomId) : py::none(); result["preview"] = preview;
     return result;
@@ -42,8 +48,8 @@ public:
     CoreSession() = default;
 
     void newProject() { session_.replaceProject({}); }
-    void load(const std::string& path) { session_.replaceProject(core::loadProject(std::filesystem::u8path(path))); }
-    void save(const std::string& path) const { core::saveProject(session_.project(), std::filesystem::u8path(path)); }
+    void load(const std::string& path) { session_.replaceProject(core::loadProject(pathFromUtf8(path))); }
+    void save(const std::string& path) const { core::saveProject(session_.project(), pathFromUtf8(path)); }
     std::string json() const { return core::toJson(session_.project()); }
     py::object project() const { return jsonObject(json()); }
     void replaceJson(const std::string& source) { session_.replaceProject(core::fromJson(source)); }
@@ -80,13 +86,21 @@ public:
     bool canRedo() const { return session_.canRedo(); }
     bool undo() { return session_.undo(); }
     bool redo() { return session_.redo(); }
-    std::string addAtomTween(const std::string& atomId,int start,int frames,double x,double y) {
-        return session_.project().addAtomTween(session_.activeMoleculeId(),atomId,start,frames,{x,y});
-    }
     void editBase(int frame) { session_.editBaseStructure(frame); }
     void previewTimeline(int frame) { session_.previewTimeline(frame); }
-    void editAtomTween(const std::string& id) { session_.editAtomTween(id); }
-    void editPose(const std::string& moleculeId,const std::string& poseId,int frame) { session_.editPose(moleculeId,poseId,frame); }
+    void editNode(const std::string& id){session_.editScriptNode(id);}
+    py::object nodeRegistry() const{return jsonObject(core::nodeRegistryJson());}
+    py::list nodeTimings() const{py::list result;for(const auto& timing:core::compileNodeTimings(session_.project())){py::dict item;item["id"]=timing.id;item["type"]=timing.type;item["target"]=timing.target;item["start"]=timing.startFrame;item["end"]=timing.endFrame;item["enabled"]=timing.enabled;result.append(item);}return result;}
+    std::string addNode(const std::string& type,const std::string& params,int index){return session_.addScriptNode(type,params,index<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(index)));}
+    bool updateNode(const std::string& id,const std::string& params){return session_.updateScriptNode(id,params);}
+    bool enableNode(const std::string& id,bool enabled){return session_.setScriptNodeEnabled(id,enabled);}
+    bool moveNode(const std::string& id,int index){return index>=0&&session_.moveScriptNode(id,static_cast<std::size_t>(index));}
+    std::string duplicateNode(const std::string& id){return session_.duplicateScriptNode(id);}
+    bool deleteNode(const std::string& id){return session_.deleteScriptNode(id);}
+    bool updateScene(const std::string& value){return session_.updateScene(value);}
+    int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
+    py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;item["exists"]=true;item["visible"]=molecule.visible;item["x"]=molecule.scenePosition.x;item["y"]=molecule.scenePosition.y;item["scale"]=molecule.scale;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
+    py::dict evaluatedArrows(int frame)const{py::dict result;for(const auto& [id,arrow]:core::evaluateNodes(session_.project(),frame).arrows){py::dict item;item["exists"]=arrow.exists;item["visible"]=arrow.visible;item["position"]=point(arrow.position);item["start"]=point(arrow.start);item["control1"]=point(arrow.control1);item["control2"]=point(arrow.control2);item["end"]=point(arrow.end);item["progress"]=arrow.progress;item["alpha"]=arrow.alpha;item["width"]=arrow.width;item["r"]=arrow.red;item["g"]=arrow.green;item["b"]=arrow.blue;result[py::str(id)]=item;}return result;}
 
     py::dict depict(bool finalEffect) {
         const core::Molecule molecule = session_.displayMolecule();
@@ -121,6 +135,12 @@ private:
 
 PYBIND11_MODULE(chemanim_core, module) {
     module.doc() = "Shared Chemanim native 2D document, editing, timeline and ACS depiction core";
+#ifdef CHEMANIM_BUILD_COMMIT
+    module.attr("BUILD_COMMIT")=CHEMANIM_BUILD_COMMIT;
+#else
+    module.attr("BUILD_COMMIT")="unknown";
+#endif
+    module.attr("DOCUMENT_VERSION")=4;
     py::class_<CoreSession>(module, "CoreSession")
         .def(py::init<>()).def("new_project", &CoreSession::newProject).def("load", &CoreSession::load)
         .def("save", &CoreSession::save).def("json", &CoreSession::json).def("project", &CoreSession::project)
@@ -137,9 +157,14 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
         .def("change_atom_charge", &CoreSession::changeAtomCharge).def_property_readonly("can_undo", &CoreSession::canUndo)
         .def_property_readonly("can_redo", &CoreSession::canRedo).def("undo", &CoreSession::undo).def("redo", &CoreSession::redo)
-        .def("add_atom_tween", &CoreSession::addAtomTween).def("edit_base", &CoreSession::editBase, py::arg("frame")=0)
+        .def("edit_base", &CoreSession::editBase, py::arg("frame")=0)
         .def("preview_timeline", &CoreSession::previewTimeline)
-        .def("edit_atom_tween", &CoreSession::editAtomTween).def("edit_pose", &CoreSession::editPose)
+        .def("edit_node",&CoreSession::editNode)
+        .def("node_registry",&CoreSession::nodeRegistry).def("node_timings",&CoreSession::nodeTimings)
+        .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
+        .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
+        .def("duplicate_node",&CoreSession::duplicateNode).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
+        .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)
         .def("depict_at", &CoreSession::depictAt, py::arg("frame"), py::arg("final_effect")=false);
 }

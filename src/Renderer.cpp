@@ -172,10 +172,22 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
         if (x != object.numericTracks.end()) atom.position.x = x->second.valueAt(currentFrame_);
         if (y != object.numericTracks.end()) atom.position.y = y->second.valueAt(currentFrame_);
+        if(const auto value=object.stringTracks.find("atom:"+atom.id+":element");value!=object.stringTracks.end())atom.element=value->second.valueAt(currentFrame_);
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":charge");value!=object.numericTracks.end())atom.formalCharge=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
+        if(const auto value=object.numericTracks.find("atom:"+atom.id+":hidden");value!=object.numericTracks.end())atom.hidden=value->second.valueAt(currentFrame_)>.5;
+    }
+    for(auto& bond:currentMolecule.bonds){
+        if(const auto value=object.stringTracks.find("bond:"+bond.id+":type");value!=object.stringTracks.end()){
+            bond.type=core::bondTypeFromString(value->second.valueAt(currentFrame_));
+            if(bond.type==core::BondType::Aromatic){unsigned suffix=0;for(const char ch:bond.id)if(ch>='0'&&ch<='9')suffix=suffix*10+static_cast<unsigned>(ch-'0');bond.displayType=suffix%2==0?core::BondType::Double:core::BondType::Single;}
+            else bond.displayType.reset();
+        }
+        if(const auto value=object.stringTracks.find("bond:"+bond.id+":stereo");value!=object.stringTracks.end())bond.stereo=core::bondStereoFromString(value->second.valueAt(currentFrame_));
+        if(const auto value=object.numericTracks.find("bond:"+bond.id+":visible");value!=object.numericTracks.end())bond.visible=value->second.valueAt(currentFrame_)>.5;
     }
     std::ostringstream geometry; geometry << std::setprecision(12);
     for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.formalCharge << ':' << atom.position.x << ':' << atom.position.y << ';';
-    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.stereo) << ';';
+    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << (bond.displayType?static_cast<int>(*bond.displayType):-1) << ':' << static_cast<int>(bond.stereo) << ';';
     const std::string geometryKey = geometry.str();
     const bool geometryChanged = cache.geometryKey != geometryKey;
     if (geometryChanged) {

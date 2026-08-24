@@ -46,6 +46,9 @@ struct Bond {
     std::string atomA;
     std::string atomB;
     BondType type = BondType::Single;
+    // Chemical aromaticity remains in `type`.  `displayType` is the stable
+    // Kekule assignment used only for depiction and is persisted by bond ID.
+    std::optional<BondType> displayType;
     BondStereo stereo = BondStereo::None;
     bool visible = true;
 };
@@ -70,6 +73,7 @@ struct Molecule {
     double scale = 2.2;
     int alpha = 255;
     int layer = 0;
+    bool visible = true;
 
     [[nodiscard]] Atom* atom(const std::string& stableId);
     [[nodiscard]] const Atom* atom(const std::string& stableId) const;
@@ -129,13 +133,26 @@ struct PoseTween {
     Easing easing = Easing::Linear;
 };
 
+struct ScriptNode {
+    std::string id;
+    std::string type;
+    bool enabled = true;
+    // Kept as JSON text so the C++ document remains the sole owner while the
+    // node registry can evolve without a parallel Python dataclass hierarchy.
+    std::string paramsJson = "{}";
+};
+
 struct Project {
     std::string mod = "native2d_demo";
     Scene scene;
     Style style;
     std::uint64_t nextMoleculeId = 1;
     std::uint64_t nextTimelineId = 1;
+    std::uint64_t nextNodeId = 1;
     std::vector<Molecule> molecules;
+    std::vector<ScriptNode> nodes;
+    // v2/v3 compatibility input only.  v4 serialization and authoring use
+    // `nodes`; typed tracks are compiled from that ordered sequence.
     std::vector<AtomTween> atomTweens;
     std::vector<PoseTween> poseTweens;
 
@@ -146,6 +163,11 @@ struct Project {
                                            const std::string& atomId,
                                            int startFrame, int frames,
                                            Point target, Easing easing = Easing::Linear);
+    [[nodiscard]] ScriptNode* node(const std::string& stableId);
+    [[nodiscard]] const ScriptNode* node(const std::string& stableId) const;
+    [[nodiscard]] std::string addNode(const std::string& type, std::string paramsJson = "{}",
+                                      std::optional<std::size_t> index = std::nullopt);
+    void ensureDefaultNodes();
     void validateIds() const;
 };
 
