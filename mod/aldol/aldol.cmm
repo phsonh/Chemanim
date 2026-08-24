@@ -1,0 +1,1160 @@
+{
+  "format": "chemanim-linear-nodes",
+  "version": 1,
+  "mod": "aldol",
+  "nodes": [
+    {
+      "id": "aldol-001-module",
+      "type": "module",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "aldol-002-scene",
+      "type": "scene",
+      "enabled": true,
+      "params": {
+        "width": 1920,
+        "height": 1080,
+        "logic_width": 960,
+        "logic_height": 540,
+        "fps": 60,
+        "background": "FFFFFFFF",
+        "title": "aldol"
+      }
+    },
+    {
+      "id": "aldol-003-h20",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "h20",
+        "file": "h20.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      }
+    },
+    {
+      "id": "aldol-004-oh",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "oh-",
+        "file": "oh-.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      }
+    },
+    {
+      "id": "aldol-005-phco",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcho",
+        "file": "phcho.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-006-phcoch",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcoch=chph",
+        "file": "phcoch=chph.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-007-phcoch2",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcoch2-",
+        "file": "phcoch2-.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-008-phcoch2chohph",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcoch2chohph",
+        "file": "phcoch2chohph.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-009-phcoch2choph",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcoch2cho-ph",
+        "file": "phcoch2cho-ph.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-010-phcome",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcome",
+        "file": "phcome.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-011-phcome-th",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "phcome_th",
+        "file": "phcome_th.png",
+        "anchor_x": 0,
+        "anchor_y": 0
+      }
+    },
+    {
+      "id": "aldol-012-new-phcome",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "phcome"
+      }
+    },
+    {
+      "id": "aldol-013-pos-phcome",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "x": -300.0,
+        "y": -150.0
+      }
+    },
+    {
+      "id": "aldol-014-image-phcome",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "texture": "phcome"
+      }
+    },
+    {
+      "id": "aldol-015-alpha-phcome",
+      "type": "set_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "value": 0
+      }
+    },
+    {
+      "id": "aldol-020-fadein-phcome",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "aldol-021-wait-60",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "aldol-022-change-phcome-th",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "texture": "phcome_th",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "ad501781350f48d694fc6e2f5258e2aa",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "aldol-024-new-oh",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "oh_"
+      }
+    },
+    {
+      "id": "aldol-025-pos-oh",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "x": 300.0,
+        "y": 200.0
+      }
+    },
+    {
+      "id": "aldol-026-image-oh",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "texture": "oh-"
+      }
+    },
+    {
+      "id": "aldol-027-alpha-oh",
+      "type": "set_alpha",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "value": 0
+      }
+    },
+    {
+      "id": "aldol-028-fadein-oh",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "aldol-029-move-oh",
+      "type": "lerp_pos_x",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "value": 180.0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "6e2c57174e8e4a4db9f4f631646ba985",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 60
+      }
+    },
+    {
+      "id": "7cdfc0317a3b4324a9e0803250bee30f",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow"
+      }
+    },
+    {
+      "id": "a7642cb624784bbfacd5213adcdc4ce1",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow2"
+      }
+    },
+    {
+      "id": "ca2f31ad2b5e4fe89ec89dea73850e95",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "x1": 123.99,
+        "y1": 219.094,
+        "cx1": -58.241,
+        "cy1": 212.532,
+        "cx2": -126.572,
+        "cy2": 77.962,
+        "x2": -46.572,
+        "y2": -2.038
+      }
+    },
+    {
+      "id": "b1e5c0077da74c999a7d99d6d7eb54d4",
+      "type": "arrow_width",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 3.0
+      }
+    },
+    {
+      "id": "14254fcadd2840e59ddec147b89e6144",
+      "type": "arrow_progress",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 0
+      }
+    },
+    {
+      "id": "87320469eba74ae38bd9de503f540f4f",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "x1": -68.212,
+        "y1": -27.497,
+        "cx1": -63.316,
+        "cy1": 18.133,
+        "cx2": -121.479,
+        "cy2": 4.13,
+        "x2": -83.487,
+        "y2": -44.046
+      }
+    },
+    {
+      "id": "10f75721b2484d77a12eb10547c059c6",
+      "type": "arrow_width",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 3.0
+      }
+    },
+    {
+      "id": "9054323d516d43c7848a2268ad5e9cb1",
+      "type": "arrow_progress",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 0
+      }
+    },
+    {
+      "id": "3b012a1637924033a84fc9425c3d5ef7",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "a8d716d53d064a859ee15f3014775092",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "2a705086fb9549a3bd11d1b16bde7178",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "be9836ba3b2248c0a7cc87c5a4b5714b",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "aldol-change-oh-to-h2o",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "texture": "h20",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "dbd0cac1cc944704a91e7cba91d9225b",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "texture": "phcoch2-",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "cc7880fba8404c3989c84f7e7aa24f1f",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "942c8714ffc9416c9b2cf0e333046d21",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "0da9e866fa58439780a4065a1e83d019",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 60
+      }
+    },
+    {
+      "id": "e6c59824aa3142ab9798dc4aa37feeb3",
+      "type": "lerp_scale_x",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "value": 3.0,
+        "frames": 15,
+        "mode": 0
+      }
+    },
+    {
+      "id": "57f8689f87694f06b2a5f8112a5b378f",
+      "type": "lerp_scale_y",
+      "enabled": true,
+      "params": {
+        "object": "oh_",
+        "value": 0.0,
+        "frames": 15,
+        "mode": 0
+      }
+    },
+    {
+      "id": "f6e1bd8018a14caca62651e5940e0cd2",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "ad8dab06b91e46ab86ad907e65b27502",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "oh_"
+      }
+    },
+    {
+      "id": "a331d6a3a6ef405885d966b5b10256a3",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow2"
+      }
+    },
+    {
+      "id": "3600ac6d3ceb4b87afa2d31676a995e8",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow"
+      }
+    },
+    {
+      "id": "d7c5d9b387f84761bf7475c3b90e1a39",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "phcho"
+      }
+    },
+    {
+      "id": "5a981160172945b9b5284b09dd1edbf4",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "texture": "phcho"
+      }
+    },
+    {
+      "id": "632f1bec18584ef19c11f26f6d3c0da0",
+      "type": "set_scale_x",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "value": -1.0
+      }
+    },
+    {
+      "id": "d00e2511f8a84b5bbe7b8d15c494ce55",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "x": 360.0,
+        "y": -81.47
+      }
+    },
+    {
+      "id": "7265de1618c84c62a7c5aa4f377336c1",
+      "type": "set_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "value": 0
+      }
+    },
+    {
+      "id": "d0f151d8d2a745eb8230ad7c5f970ff0",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "value": 255,
+        "frames": 60,
+        "mode": 0
+      }
+    },
+    {
+      "id": "86c98b4d7c9f45bbb2e7c48eb10f0bf1",
+      "type": "lerp_pos_x",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "value": 315.0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "dd2ed032071442e1955db8abe07d054e",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 60
+      }
+    },
+    {
+      "id": "e71acd9ce733452a9c8e24ca0b2ad30f",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow3"
+      }
+    },
+    {
+      "id": "8b746024bba24980bc0eb9a7cff5770d",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow4"
+      }
+    },
+    {
+      "id": "b450e6ab6c4440ea80a30730fd92f46d",
+      "type": "arrow_progress",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "value": 0
+      }
+    },
+    {
+      "id": "63fe649b7e83467a80a73bd9466616f5",
+      "type": "arrow_progress",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "value": 0
+      }
+    },
+    {
+      "id": "b25dbed41f6f4ae3b8e5478de5bf5daa",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "x1": -35.079,
+        "y1": -68.74,
+        "cx1": 103.661,
+        "cy1": -159.684,
+        "cx2": 55.459,
+        "cy2": -4.383,
+        "x2": 139.462,
+        "y2": 40.735
+      }
+    },
+    {
+      "id": "6ef87e7c944441219ce17d5f911e9c32",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "x1": 136.249,
+        "y1": 67.75,
+        "cx1": 92.691,
+        "cy1": 43.363,
+        "cx2": 52.197,
+        "cy2": 99.366,
+        "x2": 125.67,
+        "y2": 109.008
+      }
+    },
+    {
+      "id": "6fff0eb7c1d44be390b83ed4a613e107",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "b63be76008854f0eb9393b8d00fb5570",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "9c89846ae1bb4b789d0df14e2f56f02f",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "670698bcb7054712a4adb35a5de1e21b",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "320010c2d4ad43ce92ce8041d15d0116",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "87f81f6abeb3413b8919df66fde679a0",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "ea140a00841e4717896008c3172c4570",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "03efced9a0cb49d294c7d9ed28c81b26",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow3"
+      }
+    },
+    {
+      "id": "794ef55907534f3886cc9fd47b7281ad",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow4"
+      }
+    },
+    {
+      "id": "1feaa5d546b843bd8c326bd3c4bf7029",
+      "type": "lerp_pos",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "x": -120.679,
+        "y": -81.562,
+        "frames": 15,
+        "mode": 0
+      }
+    },
+    {
+      "id": "7f745b2fae654c0da0ae23fbec80ef7c",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 5
+      }
+    },
+    {
+      "id": "e34566fccc8448158cca542f49cf2d3c",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "object"
+      }
+    },
+    {
+      "id": "a62d9797151a4a61b14493ce9ccc84a7",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "texture": "phcoch2cho-ph"
+      }
+    },
+    {
+      "id": "73ed0837c4f840b987eef6324907846d",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "x": -120.465,
+        "y": -81.605
+      }
+    },
+    {
+      "id": "1706238aec8141e2932b41448fb6c349",
+      "type": "set_alpha",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "value": 0
+      }
+    },
+    {
+      "id": "063f5cfc0297483682094ab1047d8d81",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "0508baa729704a4a96f96ba04be9ceba",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcome",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "aff5c7432f9244e6a666288de6a101bb",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "phcho",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "b693232e25ee49278ac4acaa5a343da9",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "3518bddcf36a4f75a688c035f292594b",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "phcho"
+      }
+    },
+    {
+      "id": "0d52bc4406e242838a2370fb7dc0a0c9",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "phcome"
+      }
+    },
+    {
+      "id": "b09b5d64f4ec49b095c328add5d53c2b",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "h2o"
+      }
+    },
+    {
+      "id": "cd5937e7b0a346d39c2102211ad30f83",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "texture": "h20"
+      }
+    },
+    {
+      "id": "905191dee30a48078351374b94b6746b",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "x": 309.474,
+        "y": 188.211
+      }
+    },
+    {
+      "id": "0fca6e69bcef404896f527cdb0bc12b2",
+      "type": "set_alpha",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "value": 0
+      }
+    },
+    {
+      "id": "6642c8d443ee459cbb4b73bfbff87787",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "65141dd3e0c9460798123dabb3baadc1",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "772ec1eeba2341df958bab853785e80a",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow"
+      }
+    },
+    {
+      "id": "0f005d4a10784c2d9d176bf90665e985",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "x1": 166.526,
+        "y1": 165.474,
+        "cx1": 115.263,
+        "cy1": 221.263,
+        "cx2": 192.947,
+        "cy2": 233.895,
+        "x2": 246.527,
+        "y2": 202.105
+      }
+    },
+    {
+      "id": "6d3a2209171a45a3814a50e9c4f09d92",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "f98c758e89044f0fa389b9caf7e13728",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "e001d6410b3e4fbfb031f47e5b73839a",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "d208b8a8e7d74b659c19da5293689687",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "fb3fe4ed4f2f4108b6152b6a8596b22b",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow"
+      }
+    },
+    {
+      "id": "5cd88f2ceb954d8680c7a2e0a5afb994",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "texture": "phcoch2chohph",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "5997ac10525248489586d3f3ddfaa4c2",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "texture": "oh-",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "815adabf2191426c91d957103c779da0",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "34e2779329e14d59b55973c6b740f27a",
+      "type": "lerp_pos_y",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "value": 305.684,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "7a137d4160974c0d9be5f8660bbd920a",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "h2o",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "dd3071755add447abeffb093e48321cd",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "f59537d5ff284d15afc514a283b60cae",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "h2o"
+      }
+    },
+    {
+      "id": "58928028004e4f668509110ae8aa0986",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow"
+      }
+    },
+    {
+      "id": "5a4949ebbb8d4a1cb40beecded1c4aaa",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "x1": 108.421,
+        "y1": -5.053,
+        "cx1": 136.498,
+        "cy1": -25.667,
+        "cx2": 150.543,
+        "cy2": -2.143,
+        "x2": 130.356,
+        "y2": 27.075
+      }
+    },
+    {
+      "id": "07eac2491f3e4f9a9be5955831d1be9d",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "9df6f251f85e48a3ae0ade1564035ee3",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "e42bde29d76e423aa08583ab2e0df57f",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow2"
+      }
+    },
+    {
+      "id": "23eafe7985af46a5ab4f3a10abae6b8c",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "x1": 135.332,
+        "y1": 66.635,
+        "cx1": 62.783,
+        "cy1": 73.008,
+        "cx2": 85.67,
+        "cy2": 114.339,
+        "x2": 127.835,
+        "y2": 107.123
+      }
+    },
+    {
+      "id": "069793a19d464f038401e23d2d880a6b",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "12e629f27fd544b3bdd6b78cc54c6563",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "8a3dbd3cb2344202b4ff478258cb8960",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "1664c2ac49bc49979083df22279d2bb5",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "749686ae70e14dcb8a609d7633eaf83c",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "object",
+        "texture": "phcoch=chph",
+        "frames": 60,
+        "mode": 0
+      }
+    },
+    {
+      "id": "1fd09338f9cf4affb4f46abaead322dd",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "aldol-031-wait-120",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 120
+      }
+    }
+  ]
+}

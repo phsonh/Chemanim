@@ -1,0 +1,1125 @@
+{
+  "format": "chemanim-linear-nodes",
+  "version": 1,
+  "mod": "a001",
+  "nodes": [
+    {
+      "id": "98d9addcc9834442aa3470d7075f8820",
+      "type": "module",
+      "enabled": true,
+      "params": {}
+    },
+    {
+      "id": "67f888a94a3046ed80a871ce20a975bf",
+      "type": "scene",
+      "enabled": true,
+      "params": {
+        "width": 1920,
+        "height": 1080,
+        "logic_width": 960,
+        "logic_height": 540,
+        "fps": 60,
+        "background": "000000FF",
+        "title": "a001"
+      }
+    },
+    {
+      "id": "52106baef35542918d2bb5141f36477e",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "t1",
+        "file": "t1.png",
+        "anchor_x": 1.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "e1bb111f478940dba616fda2b9d56edd",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "t2",
+        "file": "t2.png",
+        "anchor_x": 1.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "d1d5434416cd459ab0a49097d71b635e",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "1",
+        "file": "1.png",
+        "anchor_x": 0.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "a3f15752c1b94ff9a4f62cf12f7af189",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "2",
+        "file": "2.png",
+        "anchor_x": 0.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "7db3d83085944563a31db5c2c07f3fea",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "3",
+        "file": "3.png",
+        "anchor_x": 0.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "1fbc8ba6ed3c43208034b47b83967fb7",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "4",
+        "file": "4.png",
+        "anchor_x": 0.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "6f42240490494c2d8ca3859b8f0ce934",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "5",
+        "file": "5.png",
+        "anchor_x": 0.0,
+        "anchor_y": 0.0
+      }
+    },
+    {
+      "id": "c591de8049ee43c49c30b1a401483d9a",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "6",
+        "file": "6.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      }
+    },
+    {
+      "id": "e690c052cdd14fd9a056b5881a94291e",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "7",
+        "file": "7.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      }
+    },
+    {
+      "id": "bdb49a0bf3b64792897ebeb2c2f6f127",
+      "type": "load_texture",
+      "enabled": true,
+      "params": {
+        "name": "8",
+        "file": "8.png",
+        "anchor_x": 0.5,
+        "anchor_y": 0.5
+      }
+    },
+    {
+      "id": "c5e099eebd64474798d75321285b44b0",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule4"
+      }
+    },
+    {
+      "id": "cc2ebbff95ca4e02bea69ee9fb189650",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule4",
+        "texture": "t1"
+      }
+    },
+    {
+      "id": "4df1e6abeabd494abc7fbab366fbaf31",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule4",
+        "x": 480.0,
+        "y": -270.0
+      }
+    },
+    {
+      "id": "3e82123c1c5e413c859707c217699f19",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule4",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "715700a931a5426d9965b8c1f0eec5ff",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule1"
+      }
+    },
+    {
+      "id": "f855ac0c5f6e493b8d34a92033623d0f",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "texture": "1"
+      }
+    },
+    {
+      "id": "61f3b35819b746f486dd0fffafc7d69a",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "x": -208.0,
+        "y": -109.0
+      }
+    },
+    {
+      "id": "f31940f713af4c378b3927c5fdfee9d2",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "1bee9652ce8c4bbeb39d56fa9f41bbff",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 60
+      }
+    },
+    {
+      "id": "f3a0c24e2e2a4d2aae00323dd28e49a2",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule4",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "8ec3ddd611e24acf8eacf26c84a41fe7",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule2"
+      }
+    },
+    {
+      "id": "6630894b784846b9a52c2417e9ff5c49",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "texture": "7"
+      }
+    },
+    {
+      "id": "9ab1e02873174440812644de28b0d4c8",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "x": 360.0,
+        "y": -148.848
+      }
+    },
+    {
+      "id": "cd1027e8ecfb40508aa50c506e94863f",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "acd18347cd0541e6b5da8cdb2e096ba5",
+      "type": "lerp_pos_x",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "value": 246.528,
+        "frames": 15,
+        "mode": 0
+      }
+    },
+    {
+      "id": "508e7f0c262a4482b9e23e3a48f10a05",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "5288d82ca1524852b89384f7833b04fe",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "molecule4"
+      }
+    },
+    {
+      "id": "51337a9abe764254bd7e9f1bfb9797ff",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow1"
+      }
+    },
+    {
+      "id": "212c1db96e93444fa6e9a169f2bebf37",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow1",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "733c2b210adb493fa1cbb8133f30e9d8",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow1",
+        "x1": 190.752,
+        "y1": -130.515,
+        "cx1": 129.243,
+        "cy1": -150.572,
+        "cx2": 65.659,
+        "cy2": -103.72,
+        "x2": 72.509,
+        "y2": -0.0,
+        "initialized": true
+      }
+    },
+    {
+      "id": "7be53849e95741d4b2bc088434923a26",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow1",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "644252f51c7048d18b8931e383bbbcb1",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "32349526cdd84dd1a78af50209797220",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow2"
+      }
+    },
+    {
+      "id": "4ea416f00c8040f7adff5cb3949dfa19",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "x1": 55.776,
+        "y1": 43.505,
+        "cx1": 37.057,
+        "cy1": 56.689,
+        "cx2": 36.313,
+        "cy2": 70.818,
+        "x2": 53.544,
+        "y2": 85.894,
+        "initialized": true
+      }
+    },
+    {
+      "id": "c22a535df231429580e53d7df770da1f",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "d1663a80e7fe410d840c09f25805d4a0",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "e97ee97261934606a2ad784d0f136e8c",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "551117656a9941de953946b3d47d9ecc",
+      "type": "lerp_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "x": 74.405,
+        "y": -29.505,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "a148a946621241139aa90cd43af655c5",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule2",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "45a608b7e9f54c2489790f132cbfb52b",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow1",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "296fd6b1b27b4d569bb54ee70e382b1a",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow2",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "13f98c38309d41c6a6a89c0a65117c92",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 15
+      }
+    },
+    {
+      "id": "8211c4cdbadf49a4b7f204bb6b41f7fa",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "texture": "2",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "59d1310de24e413d8a40a0504a3411d0",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "1a9a0e788c194c5ab8ca668a850606e8",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "molecule2"
+      }
+    },
+    {
+      "id": "e759bbc112d646c8a6152de741ce9254",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow2"
+      }
+    },
+    {
+      "id": "affc9a4cd8824596a2a57d136e29eaba",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow1"
+      }
+    },
+    {
+      "id": "2cdf7e3377a54fedb54556d6db4231c7",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow3"
+      }
+    },
+    {
+      "id": "a231204546894f51ad619e0dd07eab9b",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "x1": 52.548,
+        "y1": 80.552,
+        "cx1": 20.3,
+        "cy1": 61.781,
+        "cx2": 13.692,
+        "cy2": 46.048,
+        "x2": 58.526,
+        "y2": 39.017,
+        "initialized": true
+      }
+    },
+    {
+      "id": "1161c07e3a154c548c480ed2538bde0c",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "095fd85f1d4e4892a397d3c15cd6b85c",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "16b394e8a35b45e0b0fcef45354b9341",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "fa2ed60bac834a41a791b64cee0ea116",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow4"
+      }
+    },
+    {
+      "id": "fa485bf7db4f4f86a32fea9ac9dab472",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "69d50f6c270d485d82ca38e93fb8ea63",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "x1": 93.007,
+        "y1": 18.161,
+        "cx1": 108.074,
+        "cy1": 33.898,
+        "cx2": 120.181,
+        "cy2": 31.88,
+        "x2": 129.329,
+        "y2": 12.107,
+        "initialized": true
+      }
+    },
+    {
+      "id": "97835424c47d419b9e45cc33e7b89400",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "b452a80212e5427692de719b336d8feb",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "c1cab6a02f08425fb56951130f7b1a9b",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow4",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "e10997262216473eb9c766cb7fbcc6f2",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow3",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "56006b92bce242c792a364d90a0c052a",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "texture": "3",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "d50452338cce49d0957a850c7751ef27",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "f16f5007b319482086d3feebe9f8c5a2",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow4"
+      }
+    },
+    {
+      "id": "1cf6aa5331b349e19a24f2b66b921b28",
+      "type": "delete_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow3"
+      }
+    },
+    {
+      "id": "7352935556af4363bb249c677e1f1f8a",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule3"
+      }
+    },
+    {
+      "id": "18fe33d16e0147679015435787f6b2f1",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule3",
+        "texture": "7"
+      }
+    },
+    {
+      "id": "301ffac21d0643c8abdb79075ee762f4",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule3",
+        "x": 408.373,
+        "y": -227.772
+      }
+    },
+    {
+      "id": "33bca7452ae641c881818ee524391fbc",
+      "type": "lerp_pos_y",
+      "enabled": true,
+      "params": {
+        "object": "molecule3",
+        "value": -85.288,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "ff4d2c6e529749038f52f6952ef60be4",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule3",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "fdebd050dfcd4a5593801ed6e95e6acd",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "fc3bff5d1ae8457da339a8ebc84064fa",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow5"
+      }
+    },
+    {
+      "id": "f99abf31f49a4e09a9ad8be8c2ee5fd3",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow5",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "254f5797515946afa859c447e109f03e",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow5",
+        "x1": 361.521,
+        "y1": -71.286,
+        "cx1": 277.174,
+        "cy1": -111.13,
+        "cx2": 233.894,
+        "cy2": -53.846,
+        "x2": 189.671,
+        "y2": 1.273,
+        "initialized": true
+      }
+    },
+    {
+      "id": "1fc4058ad23d4117b3c3d9f6d29575d7",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow5",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "9d1ec9656e944e5ba5990ff17da22d6d",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "2b580a2fd30345a298d125dde0eddbbb",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow6"
+      }
+    },
+    {
+      "id": "271c39dcf18e49eb86f31dd9d06d64ca",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow6",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "9c646fc2a909420a9233eb6904b81f99",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow6",
+        "x1": 146.208,
+        "y1": 16.286,
+        "cx1": 137.097,
+        "cy1": 34.707,
+        "cx2": 124.289,
+        "cy2": 33.853,
+        "x2": 120.955,
+        "y2": 12.992,
+        "initialized": true
+      }
+    },
+    {
+      "id": "0dc2e3ccd222482a83f3f7f4bcf42327",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow6",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "d8d5ae701fac4c1fafd3a6ee5c5a0ee8",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "4a05b451a8c84e698ce05533fa39e5f0",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "texture": "4",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "d414f108aa2c4abdb1a8e5dbf6c2de0e",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow5",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "651ea2e241494be888873407c24a727e",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow6",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "cdb0d03f13054c7481da06a8f2372fcf",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule3",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "f99eac62a4654bf7b28d025ab4f81132",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "03e43228f52644699492cc7195558108",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "molecule3"
+      }
+    },
+    {
+      "id": "118e5b24abd042a3ab89bae2b99fc2d6",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule5"
+      }
+    },
+    {
+      "id": "74324534b50e4b9684fd3e7c9351e2e0",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule5",
+        "texture": "t2"
+      }
+    },
+    {
+      "id": "5d33a3966f254a1292c537ba5dbdb3ee",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule5",
+        "x": 480.0,
+        "y": -270.0
+      }
+    },
+    {
+      "id": "b7d565f687934b73abf73fb32bdcdc9e",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule5",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "c7567ea073b0485a965afe6a49104626",
+      "type": "new_object",
+      "enabled": true,
+      "params": {
+        "name": "molecule6"
+      }
+    },
+    {
+      "id": "191bd8bb380d406389cc6143fba4b69e",
+      "type": "set_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "texture": "8"
+      }
+    },
+    {
+      "id": "10d39878adaa459fb987a5a88504bd44",
+      "type": "set_pos",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "x": 348.969,
+        "y": 78.423
+      }
+    },
+    {
+      "id": "6bd92d56bfeb499e857b96403546f274",
+      "type": "set_scale",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "x": 2.0,
+        "y": 2.0
+      }
+    },
+    {
+      "id": "dced136b1ade4faab4faca3392481163",
+      "type": "lerp_scale",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "x": 1.0,
+        "y": 1.0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "6aabbe6431ab4fe2b0257d1d61725f76",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "value": 255,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "27ab616d648e405d8d30971f2abe715f",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "4c5c4aa365574124a9637a4d168412e6",
+      "type": "new_arrow",
+      "enabled": true,
+      "params": {
+        "name": "arrow7"
+      }
+    },
+    {
+      "id": "6ea0db367db14661a77548e585da6cfd",
+      "type": "arrow_color",
+      "enabled": true,
+      "params": {
+        "object": "arrow7",
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 255
+      }
+    },
+    {
+      "id": "e2d07a7aa0c148638f626342771c4e7f",
+      "type": "arrow_curve",
+      "enabled": true,
+      "params": {
+        "object": "arrow7",
+        "x1": 164.036,
+        "y1": 43.617,
+        "cx1": 187.055,
+        "cy1": 100.614,
+        "cx2": 250.112,
+        "cy2": 91.797,
+        "x2": 308.764,
+        "y2": 73.886,
+        "initialized": true
+      }
+    },
+    {
+      "id": "df8b470a18d140b0bd0ba338c99adfd7",
+      "type": "lerp_arrow",
+      "enabled": true,
+      "params": {
+        "object": "arrow7",
+        "value": 1,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "d84aa86ef4584d8bb35e4d1b0e6087bc",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 30
+      }
+    },
+    {
+      "id": "642fb075f0704d0984fd4e335eb56af5",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule5",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "8d01f71b076d4d4781aaa67060b876a8",
+      "type": "lerp_arrow_alpha",
+      "enabled": true,
+      "params": {
+        "object": "arrow7",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "19dc91d793e2475284411730c550b442",
+      "type": "lerp_alpha",
+      "enabled": true,
+      "params": {
+        "object": "molecule6",
+        "value": 0,
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "cc4e31dccfe74f3590830dd3435265e6",
+      "type": "change_image",
+      "enabled": true,
+      "params": {
+        "object": "molecule1",
+        "texture": "5",
+        "frames": 30,
+        "mode": 0
+      }
+    },
+    {
+      "id": "c531a2befa2847aeacd98fc40c953025",
+      "type": "wait",
+      "enabled": true,
+      "params": {
+        "frames": 60
+      }
+    },
+    {
+      "id": "8db8a1349815460f815baa9772dac26d",
+      "type": "delete",
+      "enabled": true,
+      "params": {
+        "object": "molecule5"
+      }
+    }
+  ]
+}
