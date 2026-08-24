@@ -11,9 +11,8 @@ if ($Document) {
     $editorArguments += $Document
 }
 
-$python = Get-Command py -ErrorAction SilentlyContinue
-if ($python) {
-    & py -3 @editorArguments
-} else {
-    & python @editorArguments
+$venvPython = Join-Path $root '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $venvPython)) {
+    throw 'Editor environment is missing. Run .\tools\setup_editor.ps1 first.'
 }
+& $venvPython @editorArguments
