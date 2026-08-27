@@ -1,53 +1,51 @@
 # Chemanim
 
-Chemanim 是我用来做有机反应机理动画的个人工具。它原来依赖 ChemDraw 导出的整张 PNG；现在正在改成原生二维结构式，让原子、键和 XY 直接参与逐帧动画。
+Chemanim 是我用来制作有机反应机理动画的个人工具。它现在直接保存原子、显式键型和二维坐标，不再依赖整张 ChemDraw PNG，也不会在编辑或播放时替我“纠正”结构。
 
-当前的核心是一个真正共享的 C++ 模块：分子文档、稳定 ID、编辑 transaction、线性节点、typed track 编译、15° 吸附、环模板、撤销重做、RDKit `MolDraw2D` ACS1996 描绘和 NanoSVG 最终栅格化都在这里。C++ 引擎直接链接它，PyQt6 编辑器通过 `chemanim_core.pyd` 调用它；Python 只负责窗口、工具状态和输入事件，没有第二套化学模型、时间轴或绘制规则。
+工程只有一套共享 C++ Core：文档、稳定 ID、画布手势、撤销重做、线性节点、逐帧求值和描绘都在 Core 中。C++ 引擎直接链接它，PyQt6 编辑器通过 `chemanim_core.pyd` 调用它；Python 只负责界面与输入事件。
 
-## 已经能做什么
+## 现在能做什么
 
-- 从 SMILES 生成起稿，或从空白分子开始手画；SMILES 不会在保存后重新决定拓扑。
-- 框选、套索、移动、删除、橡皮、元素和正负电荷。
-- 单键、双键、三键、芳香键、实楔键、虚楔键和波浪键。
-- 空白、单原子和稠合键上的 3–8 元环模板及苯环模板。
-- 键手势按 15° 吸附，Alt 临时关闭；靠近已有原子时连接吸附优先。
-- `.cmm` v4 保存稳定的 molecule/atom/bond/node ID、有序线性节点和稳定芳香显示键级，关闭重开不重编号。
-- 线性节点是唯一创作层：Lerp 在当前帧并行启动，Wait 推进时间；typed tracks、预览帧和 Lua 都由 Core 从同一节点顺序编译。
-- 分子变换、`Set/LerpAtomXY`、Pose、成键/断键/键级、曲箭头 Progress/Alpha/Color 等节点可在底部列表中重排、禁用、复制和检查起止帧；同属性的后发插值从接管帧当前值继续。
-- 基础结构编辑和动画节点目标编辑相互分开。
-- 编辑器普通预览显示共享 Core 的 SVG；“最终效果预览”显示与引擎相同的 NanoSVG RGBA。
-- 画布具有明确 Artboard 和外部 pasteboard；中键或 Space+左键平移，滚轮围绕鼠标缩放，`F`/`Shift+F` 分别适配 Artboard/全部内容。工作区 pan/zoom 不进入工程数据。
-- Scene Inspector 直接编辑输出/逻辑尺寸、FPS、RGBA 背景、标题和真实渲染缩放，预览与 Lua 使用同一份 `Project.scene`。
-- 引擎按当前帧 atom/bond/XY 动态生成 SVG；静止结构命中缓存，不再把整分子 `acs_svg` 编译进 Lua。
+- 从空白画布手画，或用 SMILES 生成一次性起稿。导入时 RDKit 会把芳香表示展平成明确的单、双键，保存后不再做芳香性、价态或 Kekulé 推断。
+- 绘制单、双、三、实楔、虚楔和波浪键；双键副线方向是持久化的 `left/right/center` 视觉数据，不会因取代、拖动或播放而跳动。
+- 使用 3–8 元环及“六元环加三根显式双键”的苯环模板；点击键生成稠环，点击原子生成螺环，拖动时可自由旋转整个模板。
+- 框选、套索、直接拖动选区和连续橡皮擦；一整段手势只产生一次撤销记录。
+- 用结构工具放置带圈的形式电荷 `⊕`、`⊖`。它们跟随锚定原子，也可单独移动、变色和做透明度动画。
+- `.cmm` v5 保存稳定 atom/bond/adornment/node ID、单调不复用的 `creationSerial`、显式视觉键型和 ordered node sequence。
+- 分子坐标由当前最早创建且仍存活的原子派生。分子移动、旋转和缩放围绕该锚点；锚点删除或转移不会让其余内容跳动。
+- 线性节点是唯一创作层。Lerp 在当前帧启动，Wait 推进时间；同属性后发插值从接管帧的当前状态继续。typed tracks、预览和 Lua 都由 Core 从同一节点序列求值。
+- 基础视觉事件包括选择淡入淡出、显式成键/断键、基团转移、分子合并和分子内成键；预览可以任意向前或向后拖动，不会破坏基础工程。
+- 画布右键分子、原子、键或形式电荷即可建立对应 Set/Lerp 节点；绘制模式修改基础结构，脚本模式只修改节点目标。
+- 明确区分 Artboard 与外部工作区；中键或 Space+左键平移，滚轮围绕鼠标缩放，最小倍率自动居中。最终预览和 MP4 只输出 Artboard 内部。
+- 普通预览使用共享 Core SVG，“最终效果预览”和引擎都使用 NanoSVG 栅格化结果。
 
-## Windows 上启动
+## Windows 启动
 
-需要 Visual Studio 的“使用 C++ 的桌面开发”和 Python 3.14。首次准备会在仓库的 `.deps` 中安装 RDKit 2026.03.5 C++ 开发包：
+需要 Visual Studio 的“使用 C++ 的桌面开发”和 Python 3.14。首次准备会在仓库 `.deps` 中安装 RDKit C++ 开发包：
 
 ```powershell
 .\tools\setup_editor.ps1
-.\build.ps1
+.\build.ps1 -Configuration Release
 .\tools\run_editor.ps1
 ```
 
-打开现有工程：
+打开工程：
 
 ```powershell
-.\tools\run_editor.ps1 .\mod\atom_motion\atom_motion.cmm
+.\tools\run_editor.ps1 .\mod\visual_events\visual_events.cmm
 ```
 
-直接渲染 MP4、单帧和性能报告：
+渲染 MP4 或检查单帧：
 
 ```powershell
-.\build\release\chemanim.exe atom_motion --no-open
-.\build\release\chemanim.exe atom_motion --frame 30 --no-open
-.\build\release\chemanim.exe atom_motion --no-open --profile
+.\build\release\chemanim.exe visual_events --no-open
+.\build\release\chemanim.exe visual_events --frame 75 --no-open
 ```
 
-MP4 和检查帧写入 `media/<mod>/`。构建会递归复制 RDKit 的运行时 DLL，所以生成的 EXE 不要求手工设置 `PATH`。
+结果写入 `media/<mod>/`。编辑器会核对 `chemanim_core.pyd` 内置提交号与当前源码；不一致时会要求先重建，避免旧二进制造成假通过。
 
 ## 目前还不能做什么
 
-这还不是 ChemDraw 的完整替代品。当前没有反应物自动对齐、键角/分支旋转助手、力场、自动价态修复、自由基工具或可用的基团库；基团 registry 入口存在，但空 registry 不显示假工具。价态异常允许存在，还没有完善的诊断面板。编辑器当前重点仍是单个活动分子的结构编辑和线性动画编排，多分子同时选择、完整箭头操作柄和更丰富的节点分组还需要继续打磨。
+这不是化学验证器，也还不是 ChemDraw 的完整替代品。当前没有自动价态修复、芳香性运行时语义、反应知识库、力场、键角助手或可用的基团库。多分子联合选择、曲箭头完整画布操作柄，以及复杂拓扑转移与同时进行的多重分子变换仍需要更多实用项目检验。
 
-格式说明见 [tools/CMM_FORMAT.md](tools/CMM_FORMAT.md)，实现边界见 [docs/native-2d-status.md](docs/native-2d-status.md)，Sketcher 集成验证见 [docs/sketcher-integration-validation.md](docs/sketcher-integration-validation.md)。第三方代码来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+格式见 [tools/CMM_FORMAT.md](tools/CMM_FORMAT.md)，实现边界见 [docs/native-2d-status.md](docs/native-2d-status.md)，第三方来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

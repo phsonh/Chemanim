@@ -36,9 +36,10 @@ py::dict hit(const core::Hit& value) {
 py::dict editResult(const core::EditResult& value) {
     py::dict result; result["changed"] = value.changed; result["message"] = value.message;
     result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds;
-    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","move","pan"};
+    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","move","pan"};
     py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
+    preview["text"] = value.preview.text;
     preview["snap_atom"] = value.preview.snapAtomId ? py::cast(*value.preview.snapAtomId) : py::none(); result["preview"] = preview;
     return result;
 }
@@ -136,7 +137,22 @@ public:
     py::dict depictAt(int frame, bool finalEffect) const {
         const core::EvaluatedScene evaluated=core::evaluateNodes(session_.project(),frame);core::DepictionResult composite;composite.width=session_.viewport().width;composite.height=session_.viewport().height;
         composite.svg="<svg xmlns='http://www.w3.org/2000/svg' width='"+std::to_string(composite.width)+"px' height='"+std::to_string(composite.height)+"px' viewBox='0 0 "+std::to_string(composite.width)+" "+std::to_string(composite.height)+"'>\n";
-        for(const auto& [id,molecule]:evaluated.molecules){if(!molecule.visible||molecule.retired)continue;const core::DepictionResult depiction=depiction_.depict(molecule,session_.project().style,session_.viewport());const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");if(start!=std::string::npos&&end!=std::string::npos)composite.svg.append(depiction.svg.substr(start+1,end-start-1));if(id==session_.activeMoleculeId()){composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;}}
+        for(const auto& [id,molecule]:evaluated.molecules){
+            if(!molecule.visible||molecule.retired)continue;
+            const core::DepictionResult depiction=depiction_.depict(molecule,session_.project().style,session_.viewport());
+            const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");
+            if(start!=std::string::npos&&end!=std::string::npos){
+                const double viewWidth=depiction.viewBox.right-depiction.viewBox.left;
+                const double viewHeight=depiction.viewBox.bottom-depiction.viewBox.top;
+                if(viewWidth>0.0&&viewHeight>0.0){
+                    const double sx=static_cast<double>(composite.width)/viewWidth,sy=static_cast<double>(composite.height)/viewHeight;
+                    composite.svg.append("<g transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
+                    composite.svg.append(depiction.svg.substr(start+1,end-start-1));
+                    composite.svg.append("\n</g>\n");
+                }
+            }
+            if(id==session_.activeMoleculeId()){composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;}
+        }
         composite.svg+="</svg>";
         py::dict result; result["width"] = composite.width; result["height"] = composite.height; result["svg"] = composite.svg;
         py::list atoms; for (const auto& atom : composite.atoms) { py::dict item; item["id"] = atom.id; item["center"] = point(atom.center); atoms.append(item); } result["atoms"] = atoms;

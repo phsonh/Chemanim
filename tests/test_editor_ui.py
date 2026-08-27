@@ -6,12 +6,13 @@ import sys
 
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QToolButton
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
 
 from chemanim2d.app import MainWindow
+from chemanim2d.periodic_table import PeriodicTableDialog
 
 
 _APP=None
@@ -90,4 +91,39 @@ def test_script_molecule_position_drag_changes_node_target_not_base():
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_move(point["x"]+40,point["y"]-20);assert value.session.pointer_up(point["x"]+40,point["y"]-20)["changed"]
     unchanged=value.session.project()["molecules"][0]["atoms"][0];assert (unchanged["x"],unchanged["y"])==(base["x"],base["y"])
     params=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"];assert (params["x"],params["y"])!=(base["x"],base["y"])
+    value.close()
+
+
+def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
+    value=window();value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
+    buttons={button.text():button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
+    buttons["O"].click();value.canvas._sync_core_viewport()
+    center=(value.canvas.width()*.5,value.canvas.height()*.5)
+    value.session.pointer_down(*center);value.session.pointer_up(*center)
+    atom=value.session.project()["molecules"][0]["atoms"][0];assert atom["element"]=="O"
+    buttons["N"].click();point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
+    value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"])
+    atoms=value.session.project()["molecules"][0]["atoms"]
+    assert len(atoms)==1 and atoms[0]["alive"] and atoms[0]["element"]=="N"
+    assert value.session.depict(False)["svg"]
+    value.close()
+
+
+def test_periodic_table_uses_real_layout_and_folds_later_periods():
+    application();dialog=PeriodicTableDialog()
+    assert len(dialog.buttons)==118
+    assert dialog.expanded.isHidden()
+    assert dialog.table_layout.itemAtPosition(1,1).widget()==dialog.buttons["H"]
+    assert dialog.table_layout.itemAtPosition(1,18).widget()==dialog.buttons["He"]
+    dialog.expand_button.click();assert not dialog.expanded.isHidden()
+    dialog.buttons["Og"].click();assert dialog.selected_element=="Og"
+
+
+def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
+    value=window();value.mode_panel.set_mode("绘制")
+    assert value.mode_panel.DRAW_CATEGORIES==("工具","结构","元素")
+    value.mode_panel.set_category("结构")
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
+    assert "charge_positive" in buttons and "charge_negative" in buttons
+    assert buttons["charge_positive"].toolTip()=="形式正电荷（带圈 +）"
     value.close()

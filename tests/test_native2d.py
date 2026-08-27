@@ -234,7 +234,7 @@ def test_clicking_ring_bond_fuses_on_empty_side_and_preserves_shared_bond():
     transform = core.depict(False)["transform"]
     click = (transform["origin"]["x"] + midpoint[0] * transform["pixels_per_unit"],
              transform["origin"]["y"] - midpoint[1] * transform["pixels_per_unit"])
-    gesture(core, "ring6", click)
+    gesture(core, "ring5", click)
 
     new_atoms = [atom for atom in atoms(core) if atom["id"] not in {item["id"] for item in original_atoms}]
     new_center = (sum(atom["x"] for atom in new_atoms) / len(new_atoms),
@@ -243,7 +243,30 @@ def test_clicking_ring_bond_fuses_on_empty_side_and_preserves_shared_bond():
             (new_center[1] - midpoint[1]) * (center[1] - midpoint[1])) < 0
     restored_shared = next(bond for bond in bonds(core) if bond["id"] == shared["id"])
     assert restored_shared["type"] == shared["type"]
-    assert len(bonds(core)) == len(original_bonds) + 5
+    by_id={atom["id"]:atom for atom in atoms(core)}
+    shared_length=math.dist((first["x"],first["y"]),(second["x"],second["y"]))
+    new_edges=bonds(core)[len(original_bonds):]
+    assert len(new_atoms)==3 and len(new_edges)==4
+    for edge in new_edges:
+        a,b=by_id[edge["a"]],by_id[edge["b"]]
+        assert abs(math.dist((a["x"],a["y"]),(b["x"],b["y"]))-shared_length)<1e-8
+    assert len(bonds(core)) == len(original_bonds) + 4
+
+
+def test_clicking_five_ring_bond_creates_regular_fused_eight_ring():
+    core=session();gesture(core,"ring5",(480,270))
+    original_atoms=list(atoms(core));original_bonds=list(bonds(core));shared=original_bonds[0]
+    by_id={atom["id"]:atom for atom in original_atoms};first,second=by_id[shared["a"]],by_id[shared["b"]]
+    midpoint=((first["x"]+second["x"])*.5,(first["y"]+second["y"])*.5)
+    transform=core.depict(False)["transform"]
+    click=(transform["origin"]["x"]+midpoint[0]*transform["pixels_per_unit"],transform["origin"]["y"]-midpoint[1]*transform["pixels_per_unit"])
+    gesture(core,"ring8",click)
+    current_atoms=atoms(core);current_bonds=bonds(core);by_id={atom["id"]:atom for atom in current_atoms}
+    new_atoms=[atom for atom in current_atoms if atom["id"] not in {item["id"] for item in original_atoms}]
+    new_edges=current_bonds[len(original_bonds):]
+    shared_length=math.dist((first["x"],first["y"]),(second["x"],second["y"]))
+    assert len(new_atoms)==6 and len(new_edges)==7
+    assert all(abs(math.dist((by_id[edge["a"]]["x"],by_id[edge["a"]]["y"]),(by_id[edge["b"]]["x"],by_id[edge["b"]]["y"]))-shared_length)<1e-8 for edge in new_edges)
 
 
 def test_blank_bond_uses_15_degree_snap_and_alt_disables_it():
@@ -347,6 +370,34 @@ def test_spiro_ring_click_is_symmetric_and_shares_exactly_one_atom():
     assert abs(lengths[0]-lengths[1])<1e-9
 
 
+def test_ring_on_terminal_atom_is_centered_on_existing_bond_axis():
+    core=session();gesture(core,"atom_label",(420,270));start=atoms(core)[0]
+    gesture(core,"single_bond",canvas_point(core,start["id"]),(510,270));terminal=atoms(core)[-1]
+    before_ids={value["id"] for value in atoms(core)}
+    gesture(core,"ring5",canvas_point(core,terminal["id"]));created=[value for value in atoms(core) if value["id"] not in before_ids]
+    assert len(created)==4
+    ring=[terminal,*created]
+    center=(sum(value["x"] for value in ring)/5,sum(value["y"] for value in ring)/5)
+    existing=(start["x"]-terminal["x"],start["y"]-terminal["y"])
+    outward=(center[0]-terminal["x"],center[1]-terminal["y"])
+    cross=existing[0]*outward[1]-existing[1]*outward[0]
+    dot=existing[0]*outward[0]+existing[1]*outward[1]
+    assert abs(cross)<1e-9
+    assert dot<0
+
+
+def test_attached_ring_drag_snaps_relative_to_empty_sector_bisector():
+    core=session();gesture(core,"atom_label",(420,270));start=atoms(core)[0]
+    gesture(core,"single_bond",canvas_point(core,start["id"]),(510,270));terminal=atoms(core)[-1]
+    point=canvas_point(core,terminal["id"]);angle=math.radians(22);distance_px=90
+    end=(point[0]+distance_px*math.cos(angle),point[1]-distance_px*math.sin(angle))
+    before={value["id"] for value in atoms(core)};gesture(core,"ring5",point,end)
+    ring=[terminal,*[value for value in atoms(core) if value["id"] not in before]]
+    center=(sum(value["x"] for value in ring)/5,sum(value["y"] for value in ring)/5)
+    snapped=math.degrees(math.atan2(center[1]-terminal["y"],center[0]-terminal["x"]))
+    assert abs(snapped-15)<1e-9
+
+
 def test_continuous_eraser_is_one_undo_transaction():
     core=session();gesture(core,"ring6",(480,270));original=[atom["id"] for atom in atoms(core)];points=[canvas_point(core,atom_id) for atom_id in original[:3]]
     core.set_tool("eraser");core.pointer_down(*points[0])
@@ -358,10 +409,25 @@ def test_continuous_eraser_is_one_undo_transaction():
 
 def test_charge_adornment_follows_atom_and_lerps_local_offset():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];gesture(core,"charge_positive",canvas_point(core,atom["id"]));adornment=core.project()["molecules"][0]["adornments"][0]
-    core.set_atom_position(atom["id"],10,20);molecule=core.project()["molecules"][0];moved=next(value for value in molecule["atoms"] if value["id"]==atom["id"]);assert (moved["x"]+adornment["x"],moved["y"]+adornment["y"])==(28,38)
+    assert adornment["text"]=="⊕"
+    core.set_atom_position(atom["id"],10,20);molecule=core.project()["molecules"][0];moved=next(value for value in molecule["atoms"] if value["id"]==atom["id"]);assert (moved["x"]+adornment["x"],moved["y"]+adornment["y"])==(10+adornment["x"],20+adornment["y"])
     core.add_node("adornment_lerp_offset",json.dumps({"target":core.active_molecule,"adornment":adornment["id"],"x":30,"y":-10,"frames":30,"easing":"linear"}))
     mid=core.evaluated_project(15)["molecules"][0]["adornments"][0];end=core.evaluated_project(30)["molecules"][0]["adornments"][0]
-    assert (mid["x"],mid["y"])==(24,4) and (end["x"],end["y"])==(30,-10)
+    assert abs(mid["x"]-(adornment["x"]+30)*.5)<1e-9 and abs(mid["y"]-(adornment["y"]-10)*.5)<1e-9
+    assert (end["x"],end["y"])==(30,-10)
+
+
+def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
+    core.set_tool("charge_positive");down=core.pointer_down(*point)
+    assert down["preview"]["kind"]=="adornment" and down["preview"]["text"]=="⊕"
+    angle=math.radians(22);end=(point[0]+80*math.cos(angle),point[1]-80*math.sin(angle))
+    moved=core.pointer_move(*end);assert moved["preview"]["kind"]=="adornment"
+    assert core.pointer_up(*end)["changed"]
+    charge=core.project()["molecules"][0]["adornments"][0]
+    snapped=math.degrees(math.atan2(charge["y"],charge["x"]));assert abs(snapped-15)<1e-9
+    svg=core.depict(False)["svg"]
+    assert "class='formal-charge'" in svg and "<circle" in svg
 
 
 def test_anchor_deletion_and_detach_preserve_world_coordinates():
@@ -399,3 +465,13 @@ def test_visual_events_generate_runtime_lua_without_chemical_fields():
     core.add_node("merge_molecules",json.dumps({"target":first,"source":second,"bond":"B999","a":a,"b":b,"order":"single","frames":30,"easing":"linear"}))
     lua=core.generate_lua();assert "LerpAtomAlpha" in lua and ".DetachSubgraph(" in lua and ".MergeFrom(" in lua
     assert "aromatic" not in lua and "formal_charge" not in lua and "displayType" not in lua
+
+
+def test_script_preview_preserves_each_depiction_viewbox_transform():
+    core=session();gesture(core,"ring6",(480,270))
+    core.add_node("atom_lerp_xy",json.dumps({"target":core.active_molecule,"atom":atoms(core)[0]["id"],"x":12,"y":5,"frames":30,"easing":"linear"}))
+    core.set_viewport(960,540,1.0,0,0)
+    drawing=core.depict_at(15,True)
+    assert "transform='matrix(" in drawing["svg"]
+    rgba=drawing["rgba"]
+    assert any(rgba[index+3] for index in range(0,len(rgba),4))

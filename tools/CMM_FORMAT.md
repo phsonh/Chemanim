@@ -1,14 +1,15 @@
-# `.cmm` v4
+# `.cmm` v5
 
-`.cmm` 是 UTF-8 JSON。共享 C++ Core 读写工程、执行编辑 transaction，并把有序节点编译为 typed tracks；PyQt 只显示 Core 返回的文档和求值结果。
+`.cmm` 是 UTF-8 JSON。共享 C++ Core 读写工程、执行 transaction，并把有序节点求值为 typed tracks；PyQt 只显示 Core 返回的快照。
 
 ```json
 {
   "format": "chemanim-native-2d",
-  "version": 4,
-  "mod": "atom_motion",
-  "next_molecule_id": 2,
-  "next_node_id": 8,
+  "version": 5,
+  "mod": "visual_events",
+  "next_molecule_id": 3,
+  "next_node_id": 12,
+  "next_creation_serial": 20,
   "scene": {},
   "style": {},
   "molecules": [],
@@ -19,12 +20,25 @@
 }
 ```
 
-Core 可以读取 v2/v3 原生二维工程，并在内存中一次性迁移为 ordered node sequence；下次保存只写 v4，不再持久化旧 `timeline.atom_tweens`。
+## 权威数据
 
-## 权威层
+`source_smiles` 只记录导入来源。权威画面由 atom、bond、adornment 及其 XY 决定：
 
-`source_smiles` 只记录导入来源；`atoms`、`bonds` 和 XY 决定拓扑与初始画面。SMILES 导入只做一次 Kekulé 展平，保存后只剩显式单、双、三键。双键的 `secondary_line_side`（`left/right/center`）是持久化视觉数据，编辑与播放都不会自动重排。每个原子的 `creation_serial` 单调递增且不因删除、撤销或重开复用；最早存活原子就是分子锚点。
+- Atom 没有 `aromatic` 或 `formalCharge`。`creation_serial` 在整个工程内单调递增，删除、撤销和重开都不复用。
+- Bond 只有显式 `single/double/triple` 视觉类型、楔键样式和持久化 `secondary_line_side`。Core 不会因价态、成环或增加取代基改写它。
+- AtomAdornment 是形式电荷的内部保存结构，默认显示 `⊕`/`⊖`，并保存锚定 atom、本地偏移、颜色、透明度和存活状态；编辑器不暴露这个内部类型名。
+- 当前最早创建且仍存活的 atom 是分子锚点；分子坐标从该 atom 的当前世界 XY 派生，不单独存一份可能失配的位置。
 
-`nodes` 是唯一动画创作层。节点顺序决定当前时间：Lerp 在当前帧开始但不推进时间，Wait 推进时间，不同属性可以并行；后发的同属性 Lerp 从接管帧的当前值开始。typed tracks、节点起止帧、预览结果和 Lua 都由 C++ Core 随节点序列编译，不是第二份可编辑数据。
+SMILES 导入可以调用 RDKit 解析并 Kekulé 化一次，再立即展平为上述显式数据。保存的 v5 文档不含芳香性语义。
 
-画布 pan/zoom 仅为编辑器工作区状态，不进入 `.cmm`。Scene 输出/逻辑尺寸、背景、FPS 和标题属于工程；基础结构 XY 与动画节点目标坐标也严格分开。
+## 动画语义
+
+`nodes` 是唯一创作层。Lerp 从当前时间启动但不推进时间，Wait 推进时间，不同属性可以并行；后发的同属性 Lerp 从接管帧的当前值开始。typed tracks、节点起止帧、逐帧预览和 Lua 都由 C++ Core 从节点序列生成。
+
+拓扑事件以稳定 ID 转移所有权而不是复制：`FormBond`、`BreakBond`、`DetachSubgraph`、`MergeMolecules` 和 `FadeSelection` 都可在任意帧重新求值，拖动时间轴不会破坏基础工程。
+
+## 旧格式迁移
+
+Core 可读取 v2–v4。旧 `display_type` 优先转换为显式单/双键，旧芳香键在没有显示类型时只做一次确定性展平；旧 formal charge 转成带圈形式电荷。下次保存只写 v5，并删除 aromatic、displayType、formalCharge 和旧 timeline 字段。
+
+工作区 pan/zoom 不进入 `.cmm`。Scene 输出/逻辑尺寸、背景、FPS 和标题属于工程；基础结构 XY 与动画节点目标坐标严格分开。

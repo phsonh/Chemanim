@@ -245,7 +245,7 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         const int adornmentsTable=lua_gettop(state_);const std::size_t count=lua_rawlen(state_,adornmentsTable);
         for(std::size_t i=1;i<=count;++i){lua_rawgeti(state_,adornmentsTable,static_cast<lua_Integer>(i));if(lua_istable(state_,-1)){
             core::AtomAdornment value;value.id=stringField(state_,-1,"id","");value.creationSerial=static_cast<std::uint64_t>(numberField(state_,-1,"creation_serial",atomCount+i));
-            value.atomId=stringField(state_,-1,"atom","");value.text=stringField(state_,-1,"text","+");
+            value.atomId=stringField(state_,-1,"atom","");value.text=stringField(state_,-1,"text","⊕");
             value.offset={numberField(state_,-1,"x",0),numberField(state_,-1,"y",0)};
             value.alpha=static_cast<int>(numberField(state_,-1,"alpha",255));value.alive=numberField(state_,-1,"alive",1)!=0;
             value.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};

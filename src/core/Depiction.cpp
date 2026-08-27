@@ -23,6 +23,7 @@
 
 namespace chem::core {
 namespace {
+double pointDistance(Point first,Point second){return std::hypot(first.x-second.x,first.y-second.y);}
 struct BuiltMolecule {
     std::unique_ptr<RDKit::RWMol> value;
     std::vector<std::string> atomIds;
@@ -63,7 +64,6 @@ BuiltMolecule build(const Molecule& source) {
         else if (value.stereo == BondStereo::Wavy) bond->setBondDir(RDKit::Bond::UNKNOWN);
         result.bondIds.push_back(value.id);
     }
-    for(const AtomAdornment& adornment:source.adornments){const Atom* owner=source.atom(adornment.atomId);if(!adornment.alive||!owner||!owner->alive)continue;auto* label=new RDKit::Atom("C");label->setNoImplicit(true);label->setProp(RDKit::common_properties::atomLabel,adornment.text);result.value->addAtom(label,true,true);result.positions.push_back({owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y});}
     auto* conformer = new RDKit::Conformer(static_cast<unsigned int>(result.positions.size())); conformer->set3D(false);
     for (unsigned int index = 0; index < result.positions.size(); ++index) {
         const Point point = result.positions[index];
@@ -93,6 +93,32 @@ std::string rgb(const Color& local, const Color& molecule) {
 }
 std::string hexColor(const Color& local,const Color& molecule){const int r=std::clamp(local.red*molecule.red/255,0,255),g=std::clamp(local.green*molecule.green/255,0,255),b=std::clamp(local.blue*molecule.blue/255,0,255);std::ostringstream stream;stream<<'#'<<std::uppercase<<std::hex<<std::setfill('0')<<std::setw(2)<<r<<std::setw(2)<<g<<std::setw(2)<<b;return stream.str();}
 
+template <typename Drawer>
+std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& drawer) {
+    std::ostringstream svg; svg << std::setprecision(12);
+    const double radius=style.fontPt*.38;
+    const double stroke=std::max(style.lineWidthPt,style.fontPt*.065);
+    const double arm=radius*.48;
+    for(const AtomAdornment& adornment:molecule.adornments){
+        const Atom* owner=molecule.atom(adornment.atomId);
+        if(!adornment.alive||!owner||!owner->alive)continue;
+        const auto center=drawer.getDrawCoords(RDGeom::Point2D(
+            owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y));
+        const std::string color=rgb(adornment.color,molecule.color);
+        const double opacity=std::clamp(adornment.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
+        const bool negative=adornment.text.find("⊖")!=std::string::npos||
+                            adornment.text.find("−")!=std::string::npos||
+                            adornment.text.find('-')!=std::string::npos;
+        svg<<"<g class='formal-charge' fill='none' stroke='"<<color
+           <<"' stroke-width='"<<stroke<<"' stroke-linecap='round' opacity='"<<opacity<<"'>\n"
+           <<"<circle cx='"<<center.x<<"' cy='"<<center.y<<"' r='"<<radius<<"'/>\n"
+           <<"<path d='M "<<center.x-arm<<','<<center.y<<" L "<<center.x+arm<<','<<center.y<<"'/>\n";
+        if(!negative)svg<<"<path d='M "<<center.x<<','<<center.y-arm<<" L "<<center.x<<','<<center.y+arm<<"'/>\n";
+        svg<<"</g>\n";
+    }
+    return svg.str();
+}
+
 void appendLine(std::ostringstream& svg, RDGeom::Point2D first, RDGeom::Point2D second,
                 double width, const std::string& color, double opacity) {
     svg << "<path d='M " << first.x << ',' << first.y << " L " << second.x << ',' << second.y
@@ -106,6 +132,29 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
     const double reference = std::max(.01, molecule.referenceBondLength);
     const double modelSpacing = style.bondLengthPt * style.doubleBondSpacing / (style.bondLengthPt / reference);
     const double halfCentered = modelSpacing * .5;
+    const double modelPerPoint=reference/std::max(.01,style.bondLengthPt);
+    const auto labelExtents=[&](const Atom* atom)->Point{
+        if(!atom||atom->hidden||(atom->element=="C"&&atom->alias.empty()))return {};
+        std::size_t glyphs=(atom->alias.empty()?atom->element:atom->alias).size();
+        if(atom->implicitHydrogens>0)glyphs+=1+(atom->implicitHydrogens>1?1:0);
+        return {(std::max(style.fontPt*.38,style.fontPt*.28*glyphs)+style.lineWidthPt)*modelPerPoint,
+                (style.fontPt*.50+style.lineWidthPt)*modelPerPoint};
+    };
+    const auto clipped=[&](const Atom* atom,Point toward,Point offset,double minimum=0.0){
+        const double vx=toward.x-atom->position.x,vy=toward.y-atom->position.y;
+        const double magnitude=std::max(1e-9,std::hypot(vx,vy));const Point direction{vx/magnitude,vy/magnitude};
+        double amount=minimum;const Point extents=labelExtents(atom);
+        if(extents.x>0.0&&extents.y>0.0){
+            const double hx=extents.x,hy=extents.y;
+            const double qa=direction.x*direction.x/(hx*hx)+direction.y*direction.y/(hy*hy);
+            const double qb=2.0*(offset.x*direction.x/(hx*hx)+offset.y*direction.y/(hy*hy));
+            const double qc=offset.x*offset.x/(hx*hx)+offset.y*offset.y/(hy*hy)-1.0;
+            const double discriminant=std::max(0.0,qb*qb-4.0*qa*qc);
+            amount=std::max(amount,(-qb+std::sqrt(discriminant))/(2.0*qa));
+        }
+        return Point{atom->position.x+offset.x+direction.x*amount,
+                     atom->position.y+offset.y+direction.y*amount};
+    };
     for (const Bond& bond : molecule.bonds) {
         const Atom* a=molecule.atom(bond.atomA); const Atom* b=molecule.atom(bond.atomB);
         if (!bond.alive || !bond.visible || !a || !b || !a->alive || !b->alive) continue;
@@ -115,31 +164,35 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
         const std::string color=rgb(bond.color,molecule.color);
         const double opacity=std::clamp(bond.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
         const double lineWidth=style.lineWidthPt;
+        const auto line=[&](Point offset,double minimum=0.0){
+            appendLine(svg,point(clipped(a,b->position,offset,minimum)),
+                       point(clipped(b,a->position,offset,minimum)),lineWidth,color,opacity);
+        };
         if (bond.stereo==BondStereo::SolidWedge) {
             const Point n{normal.x*modelSpacing,normal.y*modelSpacing};
-            const auto p0=point(a->position), p1=point({b->position.x+n.x,b->position.y+n.y}), p2=point({b->position.x-n.x,b->position.y-n.y});
+            const auto p0=point(clipped(a,b->position,{})),p1=point(clipped(b,a->position,n)),p2=point(clipped(b,a->position,{-n.x,-n.y}));
             svg<<"<path d='M "<<p0.x<<','<<p0.y<<" L "<<p1.x<<','<<p1.y<<" L "<<p2.x<<','<<p2.y<<" Z' fill='"<<color<<"' opacity='"<<opacity<<"'/>\n";
             continue;
         }
         if (bond.stereo==BondStereo::DashedWedge) {
-            for(int i=1;i<=7;++i){const double t=i/8.0;const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth,color,opacity);} continue;
+            const double t0=pointDistance(a->position,clipped(a,b->position,{}))/length,t1=1.0-pointDistance(b->position,clipped(b,a->position,{}))/length;
+            for(int i=1;i<=7;++i){const double t=t0+(t1-t0)*i/8.0;const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth,color,opacity);} continue;
         }
         if (bond.stereo==BondStereo::Wavy) {
-            svg<<"<path d='";for(int i=0;i<=16;++i){const double t=i/16.0;const double w=std::sin(t*8.0*std::numbers::pi)*modelSpacing*.25;const auto p=point({a->position.x+dx*t+normal.x*w,a->position.y+dy*t+normal.y*w});svg<<(i?" L ":"M ")<<p.x<<','<<p.y;}svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<lineWidth<<"' stroke-linecap='round' opacity='"<<opacity<<"'/>\n";continue;
+            const double t0=pointDistance(a->position,clipped(a,b->position,{}))/length,t1=1.0-pointDistance(b->position,clipped(b,a->position,{}))/length;
+            svg<<"<path d='";for(int i=0;i<=16;++i){const double t=t0+(t1-t0)*i/16.0;const double w=std::sin(i/16.0*8.0*std::numbers::pi)*modelSpacing*.25;const auto p=point({a->position.x+dx*t+normal.x*w,a->position.y+dy*t+normal.y*w});svg<<(i?" L ":"M ")<<p.x<<','<<p.y;}svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<lineWidth<<"' stroke-linecap='round' opacity='"<<opacity<<"'/>\n";continue;
         }
-        if (bond.type==BondType::Single) {appendLine(svg,point(a->position),point(b->position),lineWidth,color,opacity);continue;}
+        if (bond.type==BondType::Single) {line({});continue;}
         if (bond.type==BondType::Triple) {
-            appendLine(svg,point(a->position),point(b->position),lineWidth,color,opacity);
-            for(double sign:{-1.0,1.0})appendLine(svg,point({a->position.x+normal.x*modelSpacing*sign,a->position.y+normal.y*modelSpacing*sign}),point({b->position.x+normal.x*modelSpacing*sign,b->position.y+normal.y*modelSpacing*sign}),lineWidth,color,opacity);
+            line({});for(double sign:{-1.0,1.0})line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign});
             continue;
         }
         if (bond.secondaryLineSide==SecondaryLineSide::Center) {
-            for(double sign:{-1.0,1.0})appendLine(svg,point({a->position.x+normal.x*halfCentered*sign,a->position.y+normal.y*halfCentered*sign}),point({b->position.x+normal.x*halfCentered*sign,b->position.y+normal.y*halfCentered*sign}),lineWidth,color,opacity);
+            for(double sign:{-1.0,1.0})line({normal.x*halfCentered*sign,normal.y*halfCentered*sign});
         } else {
-            appendLine(svg,point(a->position),point(b->position),lineWidth,color,opacity);
+            line({});
             const double sign=bond.secondaryLineSide==SecondaryLineSide::Left?1.0:-1.0;
-            const double trim=.16;Point aa{a->position.x+dx*trim+normal.x*modelSpacing*sign,a->position.y+dy*trim+normal.y*modelSpacing*sign};Point bb{b->position.x-dx*trim+normal.x*modelSpacing*sign,b->position.y-dy*trim+normal.y*modelSpacing*sign};
-            appendLine(svg,point(aa),point(bb),lineWidth,color,opacity);
+            line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign},length*.16);
         }
     }
     return svg.str();
@@ -150,6 +203,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     DepictionResult result; result.width = viewport.width; result.height = viewport.height;
     if (std::none_of(molecule.atoms.begin(),molecule.atoms.end(),[](const Atom& atom){return atom.alive;})) {
         result.svg = "<svg xmlns='http://www.w3.org/2000/svg' width='" + std::to_string(viewport.width) + "px' height='" + std::to_string(viewport.height) + "px'></svg>";
+        result.viewBox = {0.0, 0.0, static_cast<double>(viewport.width), static_cast<double>(viewport.height)};
         return result;
     }
     BuiltMolecule built = build(molecule);
@@ -174,6 +228,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     const double viewHeight = viewport.height / uniformScale;
     const double viewLeft=origin.x+canonicalModelScale*viewport.center.x-viewWidth*.5;
     const double viewTop=origin.y-canonicalModelScale*viewport.center.y-viewHeight*.5;
+    result.viewBox = {viewLeft, viewTop, viewLeft + viewWidth, viewTop + viewHeight};
     result.modelScale = canonicalModelScale * uniformScale;
     result.modelOrigin = {viewport.width * .5 - viewport.center.x * viewport.pixelsPerUnit,
                           viewport.height * .5 + viewport.center.y * viewport.pixelsPerUnit};
@@ -195,12 +250,12 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     unsigned labelIndex=0;
     for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule.color)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
-    for(const AtomAdornment& adornment:molecule.adornments){const Atom* owner=molecule.atom(adornment.atomId);if(!adornment.alive||!owner||!owner->alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(adornment.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(adornment.color,molecule.color)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
     result.svg=std::regex_replace(result.svg,std::regex("<path class='bond-[^>]*?(?:/>|></path>)"),"");
     const std::string explicitBonds=explicitBondSvg(molecule,style,drawer);
+    const std::string formalCharges=adornmentSvg(molecule,style,drawer);
     const std::size_t svgRoot=result.svg.find("<svg");
     const std::size_t rootEnd=svgRoot==std::string::npos?std::string::npos:result.svg.find('>',svgRoot);
-    if(rootEnd!=std::string::npos)result.svg.insert(rootEnd+1,"\n<g id='explicit-visual-bonds'>\n"+explicitBonds+"</g>\n");
+    if(rootEnd!=std::string::npos)result.svg.insert(rootEnd+1,"\n<g id='explicit-visual-bonds'>\n"+explicitBonds+"</g>\n<g id='formal-charges'>\n"+formalCharges+"</g>\n");
     result.svg=std::regex_replace(result.svg,std::regex("width='[0-9.]+px'"),"width='"+std::to_string(viewport.width)+"px'",std::regex_constants::format_first_only);
     result.svg=std::regex_replace(result.svg,std::regex("height='[0-9.]+px'"),"height='"+std::to_string(viewport.height)+"px'",std::regex_constants::format_first_only);
     std::ostringstream viewBox; viewBox<<std::setprecision(12)<<"viewBox='"<<viewLeft<<' '<<viewTop<<' '<<viewWidth<<' '<<viewHeight<<"'";
@@ -239,7 +294,7 @@ Molecule moleculeFromSmiles(const std::string& stableId, const std::string& name
             .radicalElectrons=static_cast<int>(source->getNumRadicalElectrons()),
             .implicitHydrogens=static_cast<int>(source->getTotalNumHs(false)),
             .position={point.x*coordinateScale,point.y*coordinateScale}});
-        if(source->getFormalCharge()!=0){const int charge=source->getFormalCharge();const std::string text=std::abs(charge)==1?(charge>0?"+":"−"):std::to_string(std::abs(charge))+(charge>0?"+":"−");result.adornments.push_back({"D"+std::to_string(result.nextAdornmentId++),static_cast<std::uint64_t>(parsed->getNumAtoms()+result.adornments.size()+1),id,text,{18.0,18.0},{},255,true});}
+        if(source->getFormalCharge()!=0){const int charge=source->getFormalCharge();const std::string text=std::abs(charge)==1?(charge>0?"⊕":"⊖"):std::to_string(std::abs(charge))+(charge>0?"⊕":"⊖");result.adornments.push_back({"D"+std::to_string(result.nextAdornmentId++),static_cast<std::uint64_t>(parsed->getNumAtoms()+result.adornments.size()+1),id,text,{18.0,18.0},{},255,true});}
     }
     for (const RDKit::Bond* source : flattened.bonds()) {
         BondType type = source->getBondType() == RDKit::Bond::DOUBLE ? BondType::Double : source->getBondType() == RDKit::Bond::TRIPLE ? BondType::Triple : BondType::Single;

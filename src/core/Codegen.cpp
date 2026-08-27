@@ -42,7 +42,9 @@ std::string moleculeDeclaration(const Molecule& molecule) {
        <<molecule.id<<".SetAlpha("<<molecule.alpha<<")\n"<<molecule.id<<".SetLayer("<<molecule.layer<<")\n"
        <<molecule.id<<".SetColor("<<molecule.color.red<<", "<<molecule.color.green<<", "<<molecule.color.blue<<")\n"
        <<molecule.id<<".SetVisible("<<(molecule.visible?"true":"false")<<")";
-    return out.str();
+    std::string result=out.str();
+    while(result.size()>1&&result.back()=='\n'&&result[result.size()-2]=='\n')result.pop_back();
+    return result;
 }
 }  // namespace
 
@@ -95,7 +97,7 @@ std::string compileLua(const Project& project) {
         else if(node.type=="adornment_lerp_alpha")line=target+".LerpAdornmentAlpha("+quote(p.value("adornment",""))+", "+std::to_string(p.value("value",255))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
         else if(node.type=="adornment_set_color")line=target+".SetAdornmentColor("+quote(p.value("adornment",""))+", "+std::to_string(p.value("r",0))+", "+std::to_string(p.value("g",0))+", "+std::to_string(p.value("b",0))+")";
         else if(node.type=="adornment_lerp_color")line=target+".LerpAdornmentColor("+quote(p.value("adornment",""))+", "+std::to_string(p.value("r",0))+", "+std::to_string(p.value("g",0))+", "+std::to_string(p.value("b",0))+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";
-        else if(node.type=="adornment_set_text")line=target+".SetAdornmentText("+quote(p.value("adornment",""))+", "+quote(p.value("value","+"))+")";
+        else if(node.type=="adornment_set_text")line=target+".SetAdornmentText("+quote(p.value("adornment",""))+", "+quote(p.value("value","⊕"))+")";
         else if(node.type=="arrow_new"){if(!declaredArrows.contains(target)){line="local "+target+" = chem.NewArrow()";declaredArrows.insert(target);}}
         else if(node.type=="arrow_delete")line=target+".Delete()";
         else if(node.type=="arrow_set_curve")line=target+".SetCurve("+number(p.value("x1",0.0))+", "+number(p.value("y1",0.0))+", "+number(p.value("cx1",80.0))+", "+number(p.value("cy1",80.0))+", "+number(p.value("cx2",-80.0))+", "+number(p.value("cy2",80.0))+", "+number(p.value("x2",160.0))+", "+number(p.value("y2",0.0))+")";
@@ -110,7 +112,9 @@ std::string compileLua(const Project& project) {
         else if(node.type=="arrow_set_width")line=target+".SetWidth("+number(p.value("value",3.0))+")";
         if(!line.empty())out<<line<<"\n\n";
     }
-    return out.str();
+    std::string result=out.str();
+    while(result.size()>1&&result.back()=='\n'&&result[result.size()-2]=='\n')result.pop_back();
+    return result;
 }
 
 std::filesystem::path writeMod(const Project& project, const std::filesystem::path& repositoryRoot) {

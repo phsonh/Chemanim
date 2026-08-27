@@ -67,7 +67,7 @@ struct AtomAdornment {
     std::string id;
     std::uint64_t creationSerial = 0;
     std::string atomId;
-    std::string text = "+";
+    std::string text = "⊕";
     Point offset;
     Color color;
     int alpha = 255;

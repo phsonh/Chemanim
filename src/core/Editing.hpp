@@ -44,7 +44,7 @@ struct Viewport {
 
 enum class HitKind { None, Atom, Bond, Adornment };
 enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose, ScriptNode };
-enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Move, Pan };
+enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Move, Pan };
 
 struct Hit {
     HitKind kind = HitKind::None;
@@ -58,6 +58,7 @@ struct GesturePreview {
     Point start;
     Point current;
     std::vector<Point> polygon;
+    std::string text;
     std::optional<std::string> snapAtomId;
 };
 

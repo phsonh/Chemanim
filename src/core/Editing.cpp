@@ -41,6 +41,18 @@ Point snappedDirection(Point start, Point raw, double length, bool disableAngle)
     if (disableAngle) return raw;
     return sketcher_geometry::roundedDirection(start, raw, length, 24);
 }
+Point snappedDirectionFromBaseline(Point start, Point raw, double length,
+                                   Point baseline, bool disableAngle) {
+    const double rawLength = std::hypot(raw.x - start.x, raw.y - start.y);
+    if (rawLength <= 1e-9) return {start.x + baseline.x, start.y + baseline.y};
+    if (disableAngle) return {start.x + (raw.x - start.x) * length / rawLength,
+                              start.y + (raw.y - start.y) * length / rawLength};
+    constexpr double increment = 2.0 * std::numbers::pi / 24.0;
+    const double baseAngle = std::atan2(baseline.y, baseline.x);
+    const double rawAngle = std::atan2(raw.y - start.y, raw.x - start.x);
+    const double angle = baseAngle + std::round((rawAngle - baseAngle) / increment) * increment;
+    return {start.x + length * std::cos(angle), start.y + length * std::sin(angle)};
+}
 std::vector<Point> neighborOffsets(const Molecule& molecule, const Atom& atom) {
     std::vector<Point> result;
     for (const Bond& bond : molecule.bonds) {
@@ -103,6 +115,7 @@ struct EditorSession::Impl {
         std::map<std::string, Point> originalAdornments;
         std::set<std::string> erasedAtoms;
         std::set<std::string> erasedBonds;
+        std::string previewText;
         GesturePreviewKind previewKind = GesturePreviewKind::None;
         bool changed = false;
     };
@@ -132,6 +145,14 @@ struct EditorSession::Impl {
             if (d <= 14.0 && d < best.distance) best = {HitKind::Atom, atom.id, d};
         }
         if (best.kind == HitKind::Atom) return best;
+        for (const AtomAdornment& adornment : value->adornments) {
+            const Atom* atom = value->atom(adornment.atomId);
+            if (!adornment.alive || !atom || !atom->alive) continue;
+            const Point point{atom->position.x + adornment.offset.x, atom->position.y + adornment.offset.y};
+            const double d = distance(canvasPoint, viewport.modelToCanvas(point));
+            if (d <= 14.0 && d < best.distance) best = {HitKind::Adornment, adornment.id, d};
+        }
+        if (best.kind == HitKind::Adornment) return best;
         for (const Bond& bond : value->bonds) {
             if (!bond.alive || !bond.visible) continue;
             const Atom* a = value->atom(bond.atomA); const Atom* b = value->atom(bond.atomB);
@@ -140,13 +161,6 @@ struct EditorSession::Impl {
             if (d <= 9.0 && d < best.distance) best = {HitKind::Bond, bond.id, d};
         }
         if (best.kind == HitKind::Bond) return best;
-        for (const AtomAdornment& adornment : value->adornments) {
-            const Atom* atom = value->atom(adornment.atomId);
-            if (!adornment.alive || !atom || !atom->alive) continue;
-            const Point point{atom->position.x + adornment.offset.x, atom->position.y + adornment.offset.y};
-            const double d = distance(canvasPoint, viewport.modelToCanvas(point));
-            if (d <= 14.0 && d < best.distance) best = {HitKind::Adornment, adornment.id, d};
-        }
         if (best.distance == 1e9) best.distance = 0.0;
         return best;
     }
@@ -162,6 +176,7 @@ struct EditorSession::Impl {
             value.preview.start = gesture->startCanvas;
             value.preview.current = gesture->currentCanvas;
             value.preview.polygon = gesture->lasso;
+            value.preview.text = gesture->previewText;
             const Hit snap = hit(gesture->currentCanvas, gesture->startHit.kind == HitKind::Atom ? std::optional(gesture->startHit.id) : std::nullopt);
             if (snap.kind == HitKind::Atom) value.preview.snapAtomId = snap.id;
         }
@@ -194,11 +209,25 @@ struct EditorSession::Impl {
         return candidate;
     }
 
-    std::vector<Point> ringPolygon(int count, Point cursor) const {
+    Point adornmentEndpoint(bool alt) const {
+        if (!gesture || gesture->startHit.kind != HitKind::Atom || !molecule()) return {};
+        const Atom* atom = molecule()->atom(gesture->startHit.id);
+        if (!atom) return {};
+        const double length = molecule()->referenceBondLength * .78;
+        if (distance(gesture->pressCanvas, gesture->currentCanvas) <= 12.0) {
+            const Point offset = sketcher_geometry::bestPlacementAroundOrigin(
+                neighborOffsets(*molecule(), *atom), length);
+            return {atom->position.x + offset.x, atom->position.y + offset.y};
+        }
+        return snappedDirection(atom->position, viewport.canvasToModel(gesture->currentCanvas),
+                                length, alt);
+    }
+
+    std::vector<Point> ringPolygon(int count, Point cursor, bool disableAngle = false) const {
         const Molecule* value = molecule();
         if (!value || !gesture) return {};
         const double side = value->referenceBondLength;
-        const double radius = side / (2.0 * std::sin(std::numbers::pi / count));
+        double radius = side / (2.0 * std::sin(std::numbers::pi / count));
         std::vector<Point> result;
         if (gesture->startHit.kind == HitKind::Bond) {
             const Bond* bond = value->bond(gesture->startHit.id); const Atom* a = bond ? value->atom(bond->atomA) : nullptr; const Atom* b = bond ? value->atom(bond->atomB) : nullptr;
@@ -206,6 +235,11 @@ struct EditorSession::Impl {
             const Point mid{(a->position.x + b->position.x) * .5, (a->position.y + b->position.y) * .5};
             const Point delta{b->position.x - a->position.x, b->position.y - a->position.y};
             const double actual = std::max(1e-9, std::hypot(delta.x, delta.y));
+            // The shared bond is one exact side of the new polygon.  Derive
+            // both radius and apothem from its real length; using the template
+            // bond length here creates a distorted ring when the existing
+            // structure was freely edited.
+            radius = actual / (2.0 * std::sin(std::numbers::pi / count));
             const Point normal{-delta.y / actual, delta.x / actual};
             const double apothem = actual * .5 / std::tan(std::numbers::pi / count);
             const Point modelCursor = viewport.canvasToModel(cursor);
@@ -231,7 +265,11 @@ struct EditorSession::Impl {
             }
             const Point center{mid.x + normal.x * apothem * sign, mid.y + normal.y * apothem * sign};
             double startAngle = std::atan2(a->position.y - center.y, a->position.x - center.x);
-            const double direction = sign > 0 ? -1.0 : 1.0;
+            // With the center on the positive normal side, B is the next
+            // counter-clockwise vertex after A.  Reversing this sign and then
+            // forcibly replacing vertex 1 with B produced the crossing,
+            // collapsed fused rings seen in the editor.
+            const double direction = sign > 0 ? 1.0 : -1.0;
             for (int i = 0; i < count; ++i) result.push_back({center.x + radius * std::cos(startAngle + direction * i * 2 * std::numbers::pi / count), center.y + radius * std::sin(startAngle + direction * i * 2 * std::numbers::pi / count)});
             result[0] = a->position; result[1] = b->position;
             return result;
@@ -239,15 +277,26 @@ struct EditorSession::Impl {
         Point vertex = gesture->startModel;
         if (gesture->startHit.kind == HitKind::Atom) vertex = value->atom(gesture->startHit.id)->position;
         Point centerDirection;
-        if (gesture->startHit.kind == HitKind::Atom && distance(gesture->pressCanvas, cursor) <= 12.0) {
+        Point baseline{radius, 0.0};
+        if (gesture->startHit.kind == HitKind::Atom) {
             const Atom* atom = value->atom(gesture->startHit.id);
-            centerDirection = sketcher_geometry::bestPlacementAroundOrigin(neighborOffsets(*value, *atom), radius);
+            baseline = sketcher_geometry::bestPlacementAroundOrigin(
+                neighborOffsets(*value, *atom), radius, false);
+        }
+        if (gesture->startHit.kind == HitKind::Atom && distance(gesture->pressCanvas, cursor) <= 12.0) {
+            // A ring attached through one atom is a whole geometric template,
+            // not one newly placed bond.  Its centre must lie on the bisector
+            // of the largest empty sector so the two new bonds adjacent to
+            // the shared atom are mirror images.  In particular, a terminal
+            // atom's ring centre is exactly opposite its existing bond.  The
+            // 120-degree single-neighbour limit is useful for the bond tool,
+            // but applying it here visibly pushes a spiro ring to one side.
+            centerDirection = baseline;
         } else {
             const Point raw = viewport.canvasToModel(cursor);
-            const double rawLength = std::hypot(raw.x - vertex.x, raw.y - vertex.y);
-            centerDirection = rawLength > 1e-9
-                ? Point{(raw.x - vertex.x) * radius / rawLength, (raw.y - vertex.y) * radius / rawLength}
-                : Point{radius, 0.0};
+            const Point center = snappedDirectionFromBaseline(
+                vertex, raw, radius, baseline, disableAngle);
+            centerDirection = {center.x - vertex.x, center.y - vertex.y};
         }
         Point center{vertex.x + centerDirection.x, vertex.y + centerDirection.y};
         const double startAngle = std::atan2(vertex.y - center.y, vertex.x - center.x);
@@ -312,6 +361,10 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
                           .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
     if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
     else if (isRingTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Ring;
+    else if ((impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative)&&gesture.startHit.kind==HitKind::Atom) {
+        gesture.previewKind=GesturePreviewKind::Adornment;
+        gesture.previewText=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
+    }
     else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
     else if (impl_->tool==Tool::SelectRectangle) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Rectangle;
     else if (impl_->tool==Tool::Move) gesture.previewKind=GesturePreviewKind::Move;
@@ -350,6 +403,9 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
         else if(node&&(node->type=="adornment_set_offset"||node->type=="adornment_lerp_offset")&&gesture.startHit.kind==HitKind::Adornment&&gesture.startHit.id==params.value("adornment","")){const Molecule shown=impl_->displayed();if(const AtomAdornment* value=shown.adornment(gesture.startHit.id))gesture.originalAdornments[value->id]=value->offset;}
     }
     impl_->gesture = std::move(gesture);
+    if (impl_->gesture->previewKind==GesturePreviewKind::Adornment) {
+        impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->adornmentEndpoint(false));
+    }
     if (impl_->tool == Tool::Eraser && impl_->gesture) {
         const Hit hit = impl_->gesture->startHit;
         if (hit.kind == HitKind::Atom && impl_->gesture->erasedAtoms.insert(hit.id).second)
@@ -384,7 +440,10 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
         impl_->gesture->currentCanvas = impl_->viewport.modelToCanvas(impl_->gestureEndpoint(alt));
     } else if (isRingTool(impl_->tool)) {
         impl_->gesture->lasso.clear();
-        for (Point point : impl_->ringPolygon(ringSize(impl_->tool), canvasPoint)) impl_->gesture->lasso.push_back(impl_->viewport.modelToCanvas(point));
+        for (Point point : impl_->ringPolygon(ringSize(impl_->tool), canvasPoint, alt)) impl_->gesture->lasso.push_back(impl_->viewport.modelToCanvas(point));
+    } else if (impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative) {
+        if (impl_->gesture->startHit.kind==HitKind::Atom)
+            impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->adornmentEndpoint(alt));
     } else if (impl_->tool == Tool::Eraser) {
         const Hit hit = impl_->hit(canvasPoint);
         if (hit.kind == HitKind::Atom && impl_->gesture->erasedAtoms.insert(hit.id).second)
@@ -442,8 +501,16 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         const auto [type, stereo] = bondStyle(impl_->tool);
         if (impl_->gesture->startHit.kind == HitKind::Bond && distance(impl_->gesture->startCanvas, canvasPoint) < 5.0) {
             if (Bond* bond = molecule->bond(impl_->gesture->startHit.id)) {
-                bond->type = type;
-                bond->stereo = stereo; impl_->gesture->changed = true;
+                if (impl_->tool==Tool::SingleBond) {
+                    bond->type=bond->type==BondType::Single?BondType::Double:
+                        bond->type==BondType::Double?BondType::Triple:BondType::Single;
+                    bond->stereo=BondStereo::None;
+                    if(bond->type==BondType::Double)bond->secondaryLineSide=SecondaryLineSide::Center;
+                } else {
+                    bond->type = type;
+                    bond->stereo = stereo;
+                }
+                impl_->gesture->changed = true;
             }
         } else {
             std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel, "C", impl_->project.allocateCreationSerial());
@@ -460,7 +527,7 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             }
         }
     } else if (isRingTool(impl_->tool)) {
-        const int count = ringSize(impl_->tool); const std::vector<Point> polygon = impl_->ringPolygon(count, canvasPoint);
+        const int count = ringSize(impl_->tool); const std::vector<Point> polygon = impl_->ringPolygon(count, canvasPoint, alt);
         if (static_cast<int>(polygon.size()) == count) {
             std::vector<std::string> ids(count);
             if (impl_->gesture->startHit.kind == HitKind::Atom) ids[0] = impl_->gesture->startHit.id;
@@ -491,8 +558,12 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         impl_->gesture->changed = true;
     } else if (impl_->tool == Tool::ChargePositive || impl_->tool == Tool::ChargeNegative) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) {
+            const Atom* owner=molecule->atom(impl_->gesture->startHit.id);
+            const Point endpoint=impl_->adornmentEndpoint(alt);
             const std::string id=molecule->addAdornment(impl_->gesture->startHit.id,
-                impl_->tool == Tool::ChargePositive ? "+" : "−", {18.0,18.0}, impl_->project.allocateCreationSerial());
+                impl_->tool == Tool::ChargePositive ? "⊕" : "⊖",
+                {endpoint.x-owner->position.x,endpoint.y-owner->position.y},
+                impl_->project.allocateCreationSerial());
             impl_->gesture->changed = !id.empty();
         }
     }
@@ -524,8 +595,8 @@ bool EditorSession::addChargeAdornment(const std::string& atomId, int delta) {
     Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || delta == 0) return false;
     Project before = impl_->project;
-    const std::string text = std::abs(delta) == 1 ? (delta > 0 ? "+" : "−")
-        : std::to_string(std::abs(delta)) + (delta > 0 ? "+" : "−");
+    const std::string text = std::abs(delta) == 1 ? (delta > 0 ? "⊕" : "⊖")
+        : std::to_string(std::abs(delta)) + (delta > 0 ? "⊕" : "⊖");
     const std::string id=molecule->addAdornment(atomId,text,{18.0,18.0},impl_->project.allocateCreationSerial());
     if(id.empty())return false;
     impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;

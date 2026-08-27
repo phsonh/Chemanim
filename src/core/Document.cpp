@@ -452,8 +452,8 @@ Project fromJson(const std::string& source) {
             molecule.atoms.push_back(std::move(atom));
             if (legacyCharge != 0) {
                 const std::string text = std::abs(legacyCharge) == 1
-                    ? (legacyCharge > 0 ? "+" : "−")
-                    : std::to_string(std::abs(legacyCharge)) + (legacyCharge > 0 ? "+" : "−");
+                    ? (legacyCharge > 0 ? "⊕" : "⊖")
+                    : std::to_string(std::abs(legacyCharge)) + (legacyCharge > 0 ? "⊕" : "⊖");
                 const std::string adornmentId = "D" + std::to_string(molecule.nextAdornmentId++);
                 molecule.adornments.push_back({adornmentId, project.allocateCreationSerial(), molecule.atoms.back().id,
                                                 text, {18.0, 18.0}, {}, 255, true});
@@ -479,7 +479,7 @@ Project fromJson(const std::string& source) {
             adornment.id = value.value("id", ""); adornment.creationSerial = value.value("creation_serial", std::uint64_t{0});
             if (!adornment.creationSerial) adornment.creationSerial = project.allocateCreationSerial();
             project.nextCreationSerial = std::max(project.nextCreationSerial, adornment.creationSerial + 1);
-            adornment.atomId = value.value("atom", ""); adornment.text = value.value("text", "+");
+            adornment.atomId = value.value("atom", ""); adornment.text = value.value("text", "⊕");
             adornment.offset = {value.value("x", 0.0), value.value("y", 0.0)};
             adornment.alpha = value.value("alpha", 255); adornment.alive = value.value("alive", true);
             if (const auto color = value.find("color"); color != value.end()) adornment.color = colorFromJson(*color);

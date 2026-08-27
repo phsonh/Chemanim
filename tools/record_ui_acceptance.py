@@ -32,6 +32,14 @@ def main():
     project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard();capture("干净布局")
 
     # All structure operations below are real QTest mouse gestures on the PyQt canvas.
+    window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("ring5")
+    center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QTest.qWait(80)
+    shared=window.session.depict(False)["bonds"][0];mid=QPoint(round((shared["first"]["x"]+shared["second"]["x"])/2),round((shared["first"]["y"]+shared["second"]["y"])/2))
+    window._set_tool("ring8");QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);QTest.qWait(100)
+    assert len(window.session.project()["molecules"][0]["atoms"])==11
+    capture("点击五元环键生成规则并八元环")
+
+    window.new_project();project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard()
     window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("benzene")
     center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QTest.qWait(100)
     molecule=window.session.project()["molecules"][0];ring_atoms=list(molecule["atoms"]);original={b["id"]:(b["type"],b["secondary_line_side"]) for b in molecule["bonds"]};capture("显式单双键苯环")
@@ -41,13 +49,26 @@ def main():
     current={b["id"]:(b["type"],b["secondary_line_side"]) for b in window.session.project()["molecules"][0]["bonds"] if b["id"] in original};assert current==original
     capture("连续取代且副线不跳")
 
+    substituted=window.session.project()["molecules"][0];ring_ids={value["id"] for value in ring_atoms}
+    terminal=next(value for value in substituted["atoms"] if value["id"] not in ring_ids)
+    terminal_point=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==terminal["id"])
+    before_ids={value["id"] for value in substituted["atoms"]};window._set_tool("ring5")
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(terminal_point["x"]),round(terminal_point["y"])));QTest.qWait(80)
+    after=window.session.project()["molecules"][0];created=[value for value in after["atoms"] if value["id"] not in before_ids]
+    assert len(created)==4
+    ring=[terminal,*created];ring_center=(sum(value["x"] for value in ring)/5,sum(value["y"] for value in ring)/5)
+    owner=next(value for value in ring_atoms if any(bond["alive"] and {bond["a"],bond["b"]}=={value["id"],terminal["id"]} for bond in after["bonds"]))
+    existing=(owner["x"]-terminal["x"],owner["y"]-terminal["y"]);outward=(ring_center[0]-terminal["x"],ring_center[1]-terminal["y"])
+    assert abs(existing[0]*outward[1]-existing[1]*outward[0])<1e-8 and existing[0]*outward[0]+existing[1]*outward[1]<0
+    capture("终端原子上的环沿角平分线对称")
+
     window._set_tool("ring5");shared=window.session.depict(False)["bonds"][0];mid=QPoint(round((shared["first"]["x"]+shared["second"]["x"])/2),round((shared["first"]["y"]+shared["second"]["y"])/2));before_atoms=len(window.session.project()["molecules"][0]["atoms"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);QTest.qWait(80);assert len(window.session.project()["molecules"][0]["atoms"])==before_atoms+3;capture("点击键生成稠合五元环")
     window._set_tool("ring5");p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==ring_atoms[4]["id"]);before_atoms=len(window.session.project()["molecules"][0]["atoms"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(80);assert len(window.session.project()["molecules"][0]["atoms"])==before_atoms+4;capture("点击原子生成对称螺环")
 
-    window.mode_panel.set_category("电荷");window._set_tool("charge_positive");anchor=ring_atoms[5]
-    p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==anchor["id"]);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(80)
-    adornment=window.session.project()["molecules"][0]["adornments"][-1];start=canvas.world_to_screen(QPointF(anchor["x"]+adornment["x"],anchor["y"]+adornment["y"])).toPoint();end=start+QPoint(32,-24)
-    window.mode_panel.set_category("工具");window._set_tool("select_rectangle");QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,80);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);capture("视觉电荷自由拖动")
+    window.mode_panel.set_category("结构");window._set_tool("charge_positive");anchor=ring_atoms[5]
+    p=next(x["center"] for x in window.session.depict(False)["atoms"] if x["id"]==anchor["id"]);start=QPoint(round(p["x"]),round(p["y"]));end=start+QPoint(54,-24)
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,80);QTest.qWait(60);capture("形式电荷蓝色轮廓预览")
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QTest.qWait(80);capture("带圈形式电荷")
 
     all_atoms=window.session.project()["molecules"][0]["atoms"];points=[]
     for atom in all_atoms[-3:]:
@@ -76,14 +97,14 @@ def main():
                     if index+1<len(path):menu=action.menu()
                     else:QTimer.singleShot(120,close_dialogs);action.trigger()
             except Exception as exc:
-                error.append(str(exc))
+                error.append(f"{'/'.join(path)}: {type(exc).__name__}: {exc}")
                 if isinstance(menu,QMenu):menu.close()
         QTimer.singleShot(80,choose);QTest.mouseClick(canvas,Qt.MouseButton.RightButton,pos=position);QTest.qWait(180)
         if error:raise RuntimeError(error[0])
 
     canvas.fit_artboard();QTest.qWait(80);drawing=window.session.depict(False);atom_p=drawing["atoms"][0]["center"];atom_p=QPoint(round(atom_p["x"]),round(atom_p["y"]));bond=drawing["bonds"][0];bond_p=QPoint(round((bond["first"]["x"]+bond["second"]["x"])/2),round((bond["first"]["y"]+bond["second"]["y"])/2))
     mol=window.session.project()["molecules"][0];ad=mol["adornments"][0];owner=next(a for a in mol["atoms"] if a["id"]==ad["atom"]);ad_p=canvas.world_to_screen(QPointF(owner["x"]+ad["x"],owner["y"]+ad["y"])).toPoint()
-    actions=((atom_p,["分子","设定","坐标"]),(atom_p,["分子","插值","坐标"]),(atom_p,["原子","设定","透明度"]),(atom_p,["原子","插值","坐标"]),(bond_p,["键","设定","视觉键型"]),(bond_p,["键","插值","透明度"]),(ad_p,["电荷标记","设定","文字"]),(ad_p,["电荷标记","插值","坐标"]))
+    actions=((atom_p,["分子","设定","坐标"]),(atom_p,["分子","插值","坐标"]),(atom_p,["原子","设定","透明度"]),(atom_p,["原子","插值","坐标"]),(bond_p,["键","设定","视觉键型"]),(bond_p,["键","插值","透明度"]),(ad_p,["形式电荷","设定","透明度"]),(ad_p,["形式电荷","插值","坐标"]))
     for position,path in actions:context_action(position,path)
     capture("右键 Set Lerp 进入左侧节点")
 

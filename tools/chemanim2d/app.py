@@ -7,8 +7,8 @@ import subprocess
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeySequence
-from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPushButton, QSlider, QSpinBox, QSplitter, QToolBar, QVBoxLayout, QWidget)
 
 from .canvas import StructureCanvas
@@ -16,6 +16,7 @@ from .core import BUILD_COMMIT, DOCUMENT_VERSION, CoreSession
 from .mode_toolbar import ModeToolPanel
 from .node_inspector import NodeInspector
 from .node_list import NodeList
+from .periodic_table import PeriodicTableDialog
 from .scene_inspector import SceneInspector
 
 
@@ -37,9 +38,13 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
           QMainWindow,QDialog{background:#1d1f22;color:#e5e8ec} QMenuBar,QMenu,QToolBar,QStatusBar{background:#202327;color:#e5e8ec;border-color:#343940}
           QWidget#modeToolPanel{background:#181a1d;border-bottom:1px solid #3a3f46} QScrollArea,QScrollArea>QWidget>QWidget{background:#181a1d;border:0}
+          QTabBar#primaryTabs::tab{min-width:88px;padding:8px 20px;background:#25292e;color:#b9c1ca;border:1px solid #41474f;border-bottom:0;margin-right:3px;border-top-left-radius:4px;border-top-right-radius:4px}
+          QTabBar#primaryTabs::tab:selected{background:#31577f;color:#ffffff;border-color:#568ac0}
+          QWidget#secondaryRow{background:#202328;border-top:1px solid #3b424a;border-bottom:1px solid #3b424a}
+          QTabBar#secondaryTabs::tab{min-width:76px;padding:6px 16px;background:#202328;color:#aeb7c2;border:0;border-bottom:3px solid transparent;margin-right:2px}
+          QTabBar#secondaryTabs::tab:selected{color:#ffffff;background:#29323c;border-bottom-color:#55a1e8}
+          QWidget#tertiaryTools{background:#15181b;border-top:0}
           QPushButton{background:#2a2e33;color:#e5e8ec;border:1px solid #41474f;padding:5px 12px} QPushButton:hover{background:#343a41}
-          QPushButton[level="primary"],QPushButton[level="secondary"]{background:#25292e;color:#dfe4ea;border:1px solid #3a4048;padding:5px 20px}
-          QPushButton[level="primary"]:checked,QPushButton[level="secondary"]:checked{background:#35577e;border-color:#4f86c3}
           QToolButton{background:transparent;color:#e5e8ec;border:1px solid transparent;padding:4px 7px} QToolButton:hover{background:#2b3036;border-color:#414852} QToolButton:checked{background:#285b91;border-color:#54a4ee}
           QTreeWidget,QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDoubleSpinBox{background:#24272b;color:#e7e9ec;border:1px solid #3b4148;selection-background-color:#2467a5}
           QLabel{color:#e4e7eb} QLabel#inspectorTitle{font-size:16px;font-weight:600;padding:6px 0} QLabel[toolGroup="true"]{color:#aeb7c2;font-weight:600;padding:0 4px}
@@ -47,9 +52,9 @@ class MainWindow(QMainWindow):
         """)
         self._build_actions();self._build_menu()
         self.mode_panel=ModeToolPanel(self.session);self.mode_panel.nodeRequested.connect(self._add_node);self.mode_panel.drawToolRequested.connect(self._set_tool);self.mode_panel.elementRequested.connect(self._set_element);self.mode_panel.periodicTableRequested.connect(self.choose_element)
-        self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(360);self.node_list.setMaximumWidth(520);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited)
-        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context)
-        split=QSplitter();split.addWidget(self.node_list);split.addWidget(self.canvas);split.setSizes([390,1210])
+        self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(420);self.node_list.setMaximumWidth(600);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited);self.node_list.undoRequested.connect(self.undo);self.node_list.redoRequested.connect(self.redo)
+        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo)
+        split=QSplitter();split.addWidget(self.node_list);split.addWidget(self.canvas);split.setSizes([440,1160])
         self._build_transport()
         center=QWidget();layout=QVBoxLayout(center);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0);layout.addWidget(self.mode_panel);layout.addWidget(split,1);layout.addWidget(self.transport);self.setCentralWidget(center)
         self.play_timer=QTimer(self);self.play_timer.timeout.connect(self._play_tick)
@@ -61,11 +66,11 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self):
-        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",lambda checked:self.canvas.set_final_effect(checked),checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M")}
+        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",lambda checked:self.canvas.set_final_effect(checked),checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M")}
 
     def _build_menu(self):
         file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();[file.addAction(self.actions[k]) for k in ("lua","render")]
-        edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"])
+        edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"]);edit.addSeparator();edit.addAction(self.actions["duplicate"]);edit.addAction(self.actions["delete"])
         view=self.menuBar().addMenu("视图");[view.addAction(self.actions[k]) for k in ("fit","fit_all","final")]
         build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"])
         bar=QToolBar("快捷",self);bar.setMovable(False);bar.setFloatable(False)
@@ -95,13 +100,20 @@ class MainWindow(QMainWindow):
     def _transaction(self):self.mark_dirty();self.refresh_all(self.node_list.current_id())
     def _sequence_edited(self):self.mark_dirty();self.refresh_all(self.node_list.current_id());self.canvas.set_preview_frame(self.frame_spin.value())
     def _selection(self,atoms,bonds):pass
+    def _delete_focused(self):
+        focus=QApplication.focusWidget()
+        if focus is self.node_list.tree or self.node_list.isAncestorOf(focus):self.node_list.delete()
+        elif self.session.delete_selection():self._transaction()
+    def _duplicate_focused(self):
+        focus=QApplication.focusWidget()
+        if focus is self.node_list.tree or self.node_list.isAncestorOf(focus):self.node_list.duplicate()
     def _hover(self,value):
         if value["kind"]!="none":self.statusBar().showMessage(f'{value["kind"]} · Core {BUILD_COMMIT[:12]}')
     def _set_tool(self,value):self.mode_panel.mode="绘制";self.session.edit_base(self.frame_spin.value());self.canvas.set_base_edit(True);self.session.set_tool(value);self.edit_mode.setText("编辑：基础结构");self.node_list.tree.clearSelection();self.statusBar().showMessage(f"绘制工具：{value}")
     def _set_element(self,value):self.session.set_element(value);self._set_tool("atom_label")
     def choose_element(self):
-        elements=("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og").split();value,ok=QInputDialog.getItem(self,"周期表","元素",elements,elements.index("C"),False)
-        if ok:self._set_element(value)
+        dialog=PeriodicTableDialog(self)
+        if dialog.exec()==QDialog.DialogCode.Accepted and dialog.selected_element:self._set_element(dialog.selected_element)
 
     def _latest_arrow(self,before):
         alive=[]
@@ -170,7 +182,7 @@ class MainWindow(QMainWindow):
             if "offset" in node_type:seed.update(x=value.get("x",0.0),y=value.get("y",0.0))
             elif "alpha" in node_type:seed["value"]=value.get("alpha",255)
             elif "color" in node_type:seed.update(value.get("color",{"r":0,"g":0,"b":0}))
-            elif "text" in node_type:seed["value"]=value.get("text","+")
+            elif "text" in node_type:seed["value"]=value.get("text","⊕")
         return seed
 
     def _scene_dialog(self):
@@ -182,7 +194,7 @@ class MainWindow(QMainWindow):
         menu=QMenu(self);objects=[("分子",{"position":("坐标","molecule_set_position","molecule_lerp_position"),"alpha":("透明度","molecule_set_alpha","molecule_lerp_alpha"),"color":("颜色","molecule_set_color","molecule_lerp_color"),"scale":("缩放","molecule_set_scale","molecule_lerp_scale"),"rotation":("旋转","molecule_set_rotation","molecule_lerp_rotation")})]
         if kind=="atom":objects.append(("原子",{"xy":("坐标","atom_set_xy","atom_lerp_xy"),"alpha":("透明度","atom_set_alpha","atom_lerp_alpha"),"color":("颜色","atom_set_color","atom_lerp_color"),"element":("元素/文字","atom_set_element",None)}))
         elif kind=="bond":objects.append(("键",{"alpha":("透明度","bond_set_alpha","bond_lerp_alpha"),"color":("颜色","bond_set_color","bond_lerp_color"),"type":("视觉键型","bond_set_order",None),"secondary":("双键副线方向","bond_set_secondary_side",None)}))
-        elif kind=="adornment":objects.append(("电荷标记",{"offset":("坐标","adornment_set_offset","adornment_lerp_offset"),"alpha":("透明度","adornment_set_alpha","adornment_lerp_alpha"),"color":("颜色","adornment_set_color","adornment_lerp_color"),"text":("文字","adornment_set_text",None)}))
+        elif kind=="adornment":objects.append(("形式电荷",{"offset":("坐标","adornment_set_offset","adornment_lerp_offset"),"alpha":("透明度","adornment_set_alpha","adornment_lerp_alpha"),"color":("颜色","adornment_set_color","adornment_lerp_color")}))
         for object_label,properties in objects:
             root=menu.addMenu(object_label);set_menu=root.addMenu("设定");lerp_menu=root.addMenu("插值")
             for _key,(label,set_type,lerp_type) in properties.items():

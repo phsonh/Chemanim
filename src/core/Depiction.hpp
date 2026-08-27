@@ -28,6 +28,7 @@ struct DepictionResult {
     std::string svg;
     Point modelOrigin;
     double modelScale = 1.0;
+    Rect viewBox;
     std::vector<AtomGeometry> atoms;
     std::vector<BondGeometry> bonds;
 };

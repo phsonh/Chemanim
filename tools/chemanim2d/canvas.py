@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import (QColor, QImage, QKeyEvent, QMouseEvent, QPainter,
-                         QPainterPath, QPen, QPolygonF, QWheelEvent)
+from PyQt6.QtGui import (QColor, QImage, QKeyEvent, QKeySequence, QMouseEvent,
+                         QPainter, QPainterPath, QPen, QPolygonF, QWheelEvent)
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QWidget
 
@@ -17,6 +17,8 @@ class StructureCanvas(QWidget):
     hoverChanged = pyqtSignal(dict)
     zoomChanged = pyqtSignal(float)
     contextRequested = pyqtSignal(dict, object)
+    undoRequested = pyqtSignal()
+    redoRequested = pyqtSignal()
 
     def __init__(self, session: CoreSession, parent=None):
         super().__init__(parent)
@@ -269,6 +271,13 @@ class StructureCanvas(QWidget):
                         painter.drawPath(path)
             elif kind=="bond" and start and current:
                 painter.drawLine(QPointF(start["x"],start["y"]),QPointF(current["x"],current["y"]))
+            elif kind=="adornment" and current:
+                center=QPointF(current["x"],current["y"]);radius=8.0
+                painter.setBrush(QColor(45,145,235,24));painter.drawEllipse(center,radius,radius)
+                painter.setPen(QPen(QColor(45,145,235,230),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+                painter.drawLine(QPointF(center.x()-4,center.y()),QPointF(center.x()+4,center.y()))
+                if self._preview.get("text")=="⊕":
+                    painter.drawLine(QPointF(center.x(),center.y()-4),QPointF(center.x(),center.y()+4))
 
     @staticmethod
     def _mods(event):
@@ -338,6 +347,10 @@ class StructureCanvas(QWidget):
         self.request_refresh();event.accept()
 
     def keyPressEvent(self,event:QKeyEvent):
+        if event.matches(QKeySequence.StandardKey.Undo):
+            self.undoRequested.emit();event.accept();return
+        if event.matches(QKeySequence.StandardKey.Redo) or (event.key()==Qt.Key.Key_Z and event.modifiers()==(Qt.KeyboardModifier.ControlModifier|Qt.KeyboardModifier.ShiftModifier)):
+            self.redoRequested.emit();event.accept();return
         if event.key()==Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space_down=True;self.setCursor(Qt.CursorShape.OpenHandCursor);event.accept();return
         if event.key() in (Qt.Key.Key_F,Qt.Key.Key_Home):
