@@ -157,7 +157,28 @@ struct EditorSession::Impl {
             if (!bond.alive || !bond.visible) continue;
             const Atom* a = value->atom(bond.atomA); const Atom* b = value->atom(bond.atomB);
             if (!a || !b) continue;
-            const double d = pointSegmentDistance(canvasPoint, viewport.modelToCanvas(a->position), viewport.modelToCanvas(b->position));
+            const Point first=viewport.modelToCanvas(a->position),second=viewport.modelToCanvas(b->position);
+            const double dx=second.x-first.x,dy=second.y-first.y;
+            const double magnitude=std::max(1e-9,std::hypot(dx,dy));
+            const Point normal{-dy/magnitude,dx/magnitude};
+            const double spacing=project.style.doubleBondSpacing*value->referenceBondLength*viewport.pixelsPerUnit;
+            const auto strokeDistance=[&](double offset){
+                const Point delta{normal.x*offset,normal.y*offset};
+                return pointSegmentDistance(canvasPoint,{first.x+delta.x,first.y+delta.y},
+                                             {second.x+delta.x,second.y+delta.y});
+            };
+            double d=strokeDistance(0.0);
+            if(bond.type==BondType::Triple)d=std::min({d,strokeDistance(-spacing),strokeDistance(spacing)});
+            else if(bond.type==BondType::Double){
+                if(bond.secondaryLineSide==SecondaryLineSide::Center)
+                    d=std::min(strokeDistance(-spacing*.5),strokeDistance(spacing*.5));
+                else{
+                    // Model-space Left becomes the negative normal after the
+                    // canvas Y axis is inverted.
+                    const double sign=bond.secondaryLineSide==SecondaryLineSide::Left?-1.0:1.0;
+                    d=std::min(d,strokeDistance(spacing*sign));
+                }
+            }
             if (d <= 9.0 && d < best.distance) best = {HitKind::Bond, bond.id, d};
         }
         if (best.kind == HitKind::Bond) return best;
@@ -524,9 +545,20 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                         bond->type==BondType::Double?BondType::Triple:BondType::Single;
                     bond->stereo=BondStereo::None;
                     if(bond->type==BondType::Double)bond->secondaryLineSide=SecondaryLineSide::Center;
+                } else if (impl_->tool==Tool::DoubleBond && bond->type==BondType::Double &&
+                           bond->stereo==BondStereo::None) {
+                    // Match ChemDraw's double-bond tool: clicking an existing
+                    // double bond changes only its persistent visual side.
+                    // The atom order remains stable, so Left/Right also remain
+                    // stable across save/reopen and timeline evaluation.
+                    bond->secondaryLineSide =
+                        bond->secondaryLineSide==SecondaryLineSide::Center ? SecondaryLineSide::Left :
+                        bond->secondaryLineSide==SecondaryLineSide::Left ? SecondaryLineSide::Right :
+                        SecondaryLineSide::Center;
                 } else {
                     bond->type = type;
                     bond->stereo = stereo;
+                    if (type==BondType::Double) bond->secondaryLineSide=SecondaryLineSide::Center;
                 }
                 impl_->gesture->changed = true;
             }

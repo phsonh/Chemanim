@@ -120,10 +120,11 @@ std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& d
 }
 
 void appendLine(std::ostringstream& svg, RDGeom::Point2D first, RDGeom::Point2D second,
-                double width, const std::string& color, double opacity) {
+                double width, const std::string& color, double opacity,
+                const char* lineCap = "round") {
     svg << "<path d='M " << first.x << ',' << first.y << " L " << second.x << ',' << second.y
         << "' fill='none' stroke='" << color << "' stroke-width='" << width
-        << "' stroke-linecap='round' stroke-linejoin='round' opacity='" << opacity << "'/>\n";
+        << "' stroke-linecap='" << lineCap << "' stroke-linejoin='round' opacity='" << opacity << "'/>\n";
 }
 
 template <typename Drawer>
@@ -164,9 +165,9 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
         const std::string color=rgb(bond.color,molecule.color);
         const double opacity=std::clamp(bond.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
         const double lineWidth=style.lineWidthPt;
-        const auto line=[&](Point offset,double minimum=0.0){
+        const auto line=[&](Point offset,double minimum=0.0,const char* lineCap="round"){
             appendLine(svg,point(clipped(a,b->position,offset,minimum)),
-                       point(clipped(b,a->position,offset,minimum)),lineWidth,color,opacity);
+                       point(clipped(b,a->position,offset,minimum)),lineWidth,color,opacity,lineCap);
         };
         if (bond.stereo==BondStereo::SolidWedge) {
             const Point n{normal.x*modelSpacing,normal.y*modelSpacing};
@@ -176,23 +177,32 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
         }
         if (bond.stereo==BondStereo::DashedWedge) {
             const double t0=pointDistance(a->position,clipped(a,b->position,{}))/length,t1=1.0-pointDistance(b->position,clipped(b,a->position,{}))/length;
-            for(int i=1;i<=7;++i){const double t=t0+(t1-t0)*i/8.0;const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth,color,opacity);} continue;
+            // ACS-style hashed wedges use a few substantial bars. Seven thin
+            // round-ended strokes read as a comb and differ visibly from the
+            // ChemDraw 1996 document style.
+            constexpr int hashCount=5;
+            for(int i=1;i<=hashCount;++i){const double t=t0+(t1-t0)*i/(hashCount+1.0);const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth*1.18,color,opacity,"butt");} continue;
         }
         if (bond.stereo==BondStereo::Wavy) {
             const double t0=pointDistance(a->position,clipped(a,b->position,{}))/length,t1=1.0-pointDistance(b->position,clipped(b,a->position,{}))/length;
-            svg<<"<path d='";for(int i=0;i<=16;++i){const double t=t0+(t1-t0)*i/16.0;const double w=std::sin(i/16.0*8.0*std::numbers::pi)*modelSpacing*.25;const auto p=point({a->position.x+dx*t+normal.x*w,a->position.y+dy*t+normal.y*w});svg<<(i?" L ":"M ")<<p.x<<','<<p.y;}svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<lineWidth<<"' stroke-linecap='round' opacity='"<<opacity<<"'/>\n";continue;
+            // Sample densely enough that NanoSVG produces a smooth wave rather
+            // than the old angular lightning-bolt polyline.
+            constexpr int samples=64;
+            svg<<"<path d='";for(int i=0;i<=samples;++i){const double t=t0+(t1-t0)*i/samples;const double w=std::sin(i/static_cast<double>(samples)*8.0*std::numbers::pi)*modelSpacing*.25;const auto p=point({a->position.x+dx*t+normal.x*w,a->position.y+dy*t+normal.y*w});svg<<(i?" L ":"M ")<<p.x<<','<<p.y;}svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<lineWidth<<"' stroke-linecap='round' stroke-linejoin='round' opacity='"<<opacity<<"'/>\n";continue;
         }
         if (bond.type==BondType::Single) {line({});continue;}
         if (bond.type==BondType::Triple) {
-            line({});for(double sign:{-1.0,1.0})line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign});
+            line({});for(double sign:{-1.0,1.0})line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign},0.0,"butt");
             continue;
         }
         if (bond.secondaryLineSide==SecondaryLineSide::Center) {
-            for(double sign:{-1.0,1.0})line({normal.x*halfCentered*sign,normal.y*halfCentered*sign});
+            for(double sign:{-1.0,1.0})line({normal.x*halfCentered*sign,normal.y*halfCentered*sign},0.0,"butt");
         } else {
             line({});
             const double sign=bond.secondaryLineSide==SecondaryLineSide::Left?1.0:-1.0;
-            line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign},length*.16);
+            // A flat cap avoids the isolated black bead visible where a
+            // shortened alkene/ring secondary line approaches a single bond.
+            line({normal.x*modelSpacing*sign,normal.y*modelSpacing*sign},length*.16,"butt");
         }
     }
     return svg.str();
@@ -245,7 +255,12 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
         if(!bond.visible || !bond.alive)continue;
         const auto a = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomA; });
         const auto b = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomB; });
-        if (a != result.atoms.end() && b != result.atoms.end()) result.bonds.push_back({bond.id, a->center, b->center, bondHitPolygon(a->center, b->center, 7.0)});
+        if (a != result.atoms.end() && b != result.atoms.end()) {
+            result.bonds.push_back({bond.id, a->center, b->center,
+                                    bondHitPolygon(a->center, b->center, 7.0),
+                                    bond.type, bond.secondaryLineSide,
+                                    style.doubleBondSpacing * referenceBondLength * result.modelScale});
+        }
     }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     unsigned labelIndex=0;

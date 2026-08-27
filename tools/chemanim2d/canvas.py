@@ -216,6 +216,44 @@ class StructureCanvas(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
 
+    @staticmethod
+    def _bond_highlight_segments(bond):
+        """Return the visible strokes, not merely the bond centre line."""
+        first = QPointF(bond["first"]["x"], bond["first"]["y"])
+        second = QPointF(bond["second"]["x"], bond["second"]["y"])
+        dx, dy = second.x()-first.x(), second.y()-first.y()
+        length = max(1e-9, (dx*dx+dy*dy)**.5)
+        tangent = QPointF(dx/length, dy/length)
+        normal = QPointF(-dy/length, dx/length)
+        spacing = float(bond.get("line_spacing", 0.0))
+        kind = bond.get("type", "single")
+        side = bond.get("secondary_line_side", "center")
+
+        def shifted(offset, trim=0.0):
+            delta = normal*offset
+            inward = tangent*trim
+            return first+delta+inward, second+delta-inward
+
+        if kind == "triple":
+            return [shifted(-spacing), shifted(0.0), shifted(spacing)]
+        if kind != "double":
+            return [shifted(0.0)]
+        if side == "center":
+            return [shifted(-spacing*.5), shifted(spacing*.5)]
+        # Core Left is defined in model coordinates; the screen Y axis is
+        # inverted, so its signed screen normal is negative.
+        sign = -1.0 if side == "left" else 1.0
+        return [shifted(0.0), shifted(spacing*sign, length*.16)]
+
+    def _draw_bond_highlight(self, painter, bond):
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(42,145,235,190),5,
+                            Qt.PenStyle.SolidLine,Qt.PenCapStyle.FlatCap))
+        for first,second in self._bond_highlight_segments(bond):
+            painter.drawLine(first,second)
+        painter.restore()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -253,19 +291,16 @@ class StructureCanvas(QWidget):
                 painter.setBrush(QColor(42,145,235,38))
                 painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
             elif hover_kind=="bond" and hover_id in bonds:
-                bond=bonds[hover_id]
-                painter.setPen(QPen(QColor(42,145,235,190),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
-                painter.drawLine(QPointF(bond["first"]["x"],bond["first"]["y"]),QPointF(bond["second"]["x"],bond["second"]["y"]))
+                self._draw_bond_highlight(painter,bonds[hover_id])
             painter.setPen(QPen(QColor(42,145,235),2))
             painter.setBrush(QColor(42,145,235,38))
             for atom_id in self._selected_atoms:
                 if atom_id in points:
                     point=points[atom_id]
                     painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
-            painter.setPen(QPen(QColor(42,145,235,190),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
             for bond_id in self._selected_bonds:
                 if bond_id in bonds:
-                    bond=bonds[bond_id];painter.drawLine(QPointF(bond["first"]["x"],bond["first"]["y"]),QPointF(bond["second"]["x"],bond["second"]["y"]))
+                    self._draw_bond_highlight(painter,bonds[bond_id])
         if self._preview.get("active"):
             kind=self._preview.get("kind","none")
             start,current=self._preview.get("start"),self._preview.get("current")

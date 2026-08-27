@@ -20,6 +20,9 @@ struct BondGeometry {
     Point first;
     Point second;
     std::vector<Point> hitPolygon;
+    BondType type = BondType::Single;
+    SecondaryLineSide secondaryLineSide = SecondaryLineSide::Center;
+    double lineSpacing = 0.0;
 };
 
 struct DepictionResult {

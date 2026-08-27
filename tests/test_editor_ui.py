@@ -187,3 +187,16 @@ def test_canvas_keyboard_undo_redo_and_delete_operate_on_structure():
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"]);canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Delete)
     assert not value.session.project()["molecules"][0]["atoms"][0]["alive"]
     value.close()
+
+
+def test_bond_hover_outline_uses_every_visible_double_and_triple_stroke():
+    value=window();canvas=value.canvas
+    base={"first":{"x":100.0,"y":100.0},"second":{"x":180.0,"y":100.0},
+          "line_spacing":12.0,"secondary_line_side":"center"}
+    assert len(canvas._bond_highlight_segments({**base,"type":"single"}))==1
+    double=canvas._bond_highlight_segments({**base,"type":"double"})
+    triple=canvas._bond_highlight_segments({**base,"type":"triple"})
+    assert len(double)==2 and len(triple)==3
+    assert {round(segment[0].y(),2) for segment in double}=={94.0,106.0}
+    assert {round(segment[0].y(),2) for segment in triple}=={88.0,100.0,112.0}
+    value.close()

@@ -315,6 +315,75 @@ def test_hover_follows_pointer_without_selecting_finished_structure():
     assert over_atom["selected_atoms"]==away["selected_atoms"]==[]
 
 
+def test_double_bond_tool_cycles_persistent_visual_side_only():
+    core=session();gesture(core,"double_bond",(420,270),(452,270))
+    bond=bonds(core)[0]
+    assert (bond["type"],bond["secondary_line_side"])==("double","center")
+    for expected in ("left","right","center"):
+        drawing=core.depict(False);visual=drawing["bonds"][0]
+        midpoint=((visual["first"]["x"]+visual["second"]["x"])*.5,
+                  (visual["first"]["y"]+visual["second"]["y"])*.5)
+        gesture(core,"double_bond",midpoint)
+        bond=bonds(core)[0]
+        assert bond["type"]=="double" and bond["stereo"]=="none"
+        assert bond["secondary_line_side"]==expected
+    assert core.undo() and bonds(core)[0]["secondary_line_side"]=="right"
+
+
+def test_depiction_exposes_all_strokes_for_double_and_triple_highlight():
+    core=session();gesture(core,"double_bond",(420,250),(452,250));gesture(core,"triple_bond",(420,300),(452,300))
+    drawing=core.depict(False);visual={bond["id"]:bond for bond in drawing["bonds"]}
+    model={bond["id"]:bond for bond in bonds(core)}
+    double=next(visual[key] for key,value in model.items() if value["type"]=="double")
+    triple=next(visual[key] for key,value in model.items() if value["type"]=="triple")
+    assert double["type"]=="double" and double["secondary_line_side"]=="center"
+    assert triple["type"]=="triple"
+    assert double["line_spacing"]>0 and triple["line_spacing"]==double["line_spacing"]
+
+
+def test_multiple_bond_hit_testing_follows_visible_offset_strokes_at_high_zoom():
+    core=session();core.set_viewport(960,540,3,0,0)
+    gesture(core,"double_bond",(400,230),(496,230));drawing=core.depict(False);double=drawing["bonds"][0]
+    midpoint=((double["first"]["x"]+double["second"]["x"])*.5,
+              (double["first"]["y"]+double["second"]["y"])*.5)
+    gesture(core,"double_bond",midpoint);double=core.depict(False)["bonds"][0]
+    dx=double["second"]["x"]-double["first"]["x"]
+    dy=double["second"]["y"]-double["first"]["y"]
+    length=math.hypot(dx,dy);normal=(-dy/length,dx/length)
+    # Left in model coordinates is the negative screen normal.
+    secondary=(midpoint[0]-normal[0]*double["line_spacing"],
+               midpoint[1]-normal[1]*double["line_spacing"])
+    assert core.hit_test(*secondary)["id"]==double["id"]
+
+    gesture(core,"triple_bond",(400,330),(496,330));triple=core.depict(False)["bonds"][-1]
+    midpoint=((triple["first"]["x"]+triple["second"]["x"])*.5,
+              (triple["first"]["y"]+triple["second"]["y"])*.5)
+    dx=triple["second"]["x"]-triple["first"]["x"]
+    dy=triple["second"]["y"]-triple["first"]["y"]
+    length=math.hypot(dx,dy);normal=(-dy/length,dx/length)
+    outer=(midpoint[0]+normal[0]*triple["line_spacing"],
+           midpoint[1]+normal[1]*triple["line_spacing"])
+    assert core.hit_test(*outer)["id"]==triple["id"]
+
+
+def test_acs_visual_primitives_use_flat_secondary_caps_and_five_hash_wedge_bars():
+    double=session();gesture(double,"double_bond",(420,250),(452,250))
+    visual=double.depict(False)["bonds"][0]
+    midpoint=((visual["first"]["x"]+visual["second"]["x"])*.5,
+              (visual["first"]["y"]+visual["second"]["y"])*.5)
+    gesture(double,"double_bond",midpoint)
+    group=double.depict(False)["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    assert group.count("stroke-linecap='butt'")==1
+
+    hashed=session();gesture(hashed,"dashed_wedge",(420,250),(452,250))
+    group=hashed.depict(False)["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    assert group.count("<path")==5 and group.count("stroke-linecap='butt'")==5
+
+    wavy=session();gesture(wavy,"wavy_bond",(420,250),(452,250))
+    group=wavy.depict(False)["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    assert group.count(" L ")>=64 and "stroke-linejoin='round'" in group
+
+
 def test_explicit_double_bond_is_clipped_outside_hetero_atom_label():
     core=session();gesture(core,"atom_label",(480,300));start=atoms(core)[0]
     gesture(core,"single_bond",canvas_point(core,start["id"]),(480,220));oxygen=atoms(core)[-1]
