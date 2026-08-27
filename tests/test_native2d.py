@@ -281,6 +281,36 @@ def test_blank_bond_uses_15_degree_snap_and_alt_disables_it():
     assert abs(unsnapped - 22) < 1e-9
 
 
+def test_single_bond_tool_click_cycles_single_double_triple_single():
+    core=session();gesture(core,"single_bond",(420,270),(500,270));bond=bonds(core)[0]
+    midpoint=((canvas_point(core,bond["a"])[0]+canvas_point(core,bond["b"])[0])*.5,
+              (canvas_point(core,bond["a"])[1]+canvas_point(core,bond["b"])[1])*.5)
+    observed=[]
+    for _ in range(3):
+        gesture(core,"single_bond",midpoint);observed.append(bonds(core)[0]["type"])
+    assert observed==["double","triple","single"]
+
+
+def test_explicit_double_bond_is_clipped_outside_hetero_atom_label():
+    core=session();gesture(core,"atom_label",(480,300));start=atoms(core)[0]
+    gesture(core,"single_bond",canvas_point(core,start["id"]),(480,220));oxygen=atoms(core)[-1]
+    core.set_element("O");gesture(core,"atom_label",canvas_point(core,oxygen["id"]))
+    bond=bonds(core)[0];midpoint=((canvas_point(core,bond["a"])[0]+canvas_point(core,bond["b"])[0])*.5,
+                                 (canvas_point(core,bond["a"])[1]+canvas_point(core,bond["b"])[1])*.5)
+    gesture(core,"single_bond",midpoint)
+    drawing=core.depict(False);svg=drawing["svg"]
+    viewbox=[float(value) for value in re.search(r"viewBox='([^']+)'",svg).group(1).split()]
+    left,top,width,height=viewbox
+    group=svg.split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    endpoints=[]
+    for match in re.finditer(r"M ([\-0-9.eE]+),([\-0-9.eE]+) L ([\-0-9.eE]+),([\-0-9.eE]+)",group):
+        for x,y in ((float(match.group(1)),float(match.group(2))),(float(match.group(3)),float(match.group(4)))):
+            endpoints.append(((x-left)*drawing["width"]/width,(y-top)*drawing["height"]/height))
+    oxygen_center=next(item["center"] for item in drawing["atoms"] if item["id"]==oxygen["id"])
+    distances=[math.hypot(x-oxygen_center["x"],y-oxygen_center["y"]) for x,y in endpoints]
+    assert len(endpoints)==4 and min(distances)>7
+
+
 def double_bond_count(svg: str) -> int:
     classes = re.findall(r"class='bond-(\d+)[^']*'", svg)
     return sum(classes.count(bond) >= 2 for bond in set(classes))

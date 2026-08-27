@@ -6,6 +6,7 @@ import sys
 
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QToolButton
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -126,4 +127,29 @@ def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
     buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     assert "charge_positive" in buttons and "charge_negative" in buttons
     assert buttons["charge_positive"].toolTip()=="形式正电荷（带圈 +）"
+    value.close()
+
+
+def test_node_keyboard_delete_undo_redo_and_duplicate_are_focus_aware():
+    value=window();created=value._add_node("wait",open_editor=False);value.node_list.tree.setFocus();QApplication.processEvents()
+    QTest.keyClick(value.node_list.tree,Qt.Key.Key_D,Qt.KeyboardModifier.ControlModifier)
+    assert len([node for node in value.session.project()["nodes"] if node["type"]=="wait"])==2
+    QTest.keyClick(value.node_list.tree,Qt.Key.Key_Delete)
+    assert len([node for node in value.session.project()["nodes"] if node["type"]=="wait"])==1
+    QTest.keyClick(value.node_list.tree,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier)
+    assert len([node for node in value.session.project()["nodes"] if node["type"]=="wait"])==2
+    QTest.keyClick(value.node_list.tree,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier)
+    assert len([node for node in value.session.project()["nodes"] if node["type"]=="wait"])==1
+    value.close()
+
+
+def test_canvas_keyboard_undo_redo_and_delete_operate_on_structure():
+    value=window();canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("atom_label")
+    center=(canvas.width()*.5,canvas.height()*.5);value.session.pointer_down(*center);value.session.pointer_up(*center);value.refresh_all()
+    assert len(value.session.project()["molecules"][0]["atoms"])==1
+    QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert not value.session.project()["molecules"][0]["atoms"]
+    QTest.keyClick(canvas,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier);assert len(value.session.project()["molecules"][0]["atoms"])==1
+    atom=value.session.project()["molecules"][0]["atoms"][0];value._set_tool("select_rectangle");point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
+    value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"]);canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Delete)
+    assert not value.session.project()["molecules"][0]["atoms"][0]["alive"]
     value.close()

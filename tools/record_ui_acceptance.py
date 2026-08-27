@@ -11,7 +11,7 @@ sys.path.insert(0,str(ROOT/"tools"))
 from PyQt6.QtCore import QPoint,QPointF,QTimer,Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication,QDialog,QMenu
+from PyQt6.QtWidgets import QApplication,QDialog,QMenu,QToolButton
 
 from chemanim2d.app import MainWindow
 from chemanim2d.core import BUILD_COMMIT
@@ -31,7 +31,25 @@ def main():
 
     project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard();capture("干净布局")
 
+    # Real keyboard dispatch plus bond-order cycling and hetero-label clipping.
+    window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("single_bond")
+    first=QPoint(canvas.width()//2,canvas.height()//2+70);second=first+QPoint(0,-90)
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=first);QTest.mouseMove(canvas,second,80);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=second);QTest.qWait(80)
+    endpoint=window.session.project()["molecules"][0]["atoms"][-1];p=next(item["center"] for item in window.session.depict(False)["atoms"] if item["id"]==endpoint["id"])
+    window.mode_panel.set_category("元素");buttons={button.text():button for button in window.mode_panel.tertiary.findChildren(QToolButton)};buttons["O"].click();QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(p["x"]),round(p["y"])));QTest.qWait(80)
+    assert window.session.project()["molecules"][0]["atoms"][-1]["element"]=="O"
+    window.mode_panel.set_category("结构");window._set_tool("single_bond");bond=window.session.depict(False)["bonds"][0];mid=QPoint(round((bond["first"]["x"]+bond["second"]["x"])/2),round((bond["first"]["y"]+bond["second"]["y"])/2));QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);QTest.qWait(80)
+    assert window.session.project()["molecules"][0]["bonds"][0]["type"]=="double";capture("单键重复点击变双键且 O 标签裁切")
+    canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert window.session.project()["molecules"][0]["bonds"][0]["type"]=="single"
+    QTest.keyClick(canvas,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier);assert window.session.project()["molecules"][0]["bonds"][0]["type"]=="double"
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);assert window.session.project()["molecules"][0]["bonds"][0]["type"]=="triple"
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=mid);assert window.session.project()["molecules"][0]["bonds"][0]["type"]=="single"
+    wait=window._add_node("wait",open_editor=False);window.node_list.tree.setFocus();QTest.keyClick(window.node_list.tree,Qt.Key.Key_D,Qt.KeyboardModifier.ControlModifier);assert len([node for node in window.session.project()["nodes"] if node["type"]=="wait"])==2
+    QTest.keyClick(window.node_list.tree,Qt.Key.Key_Delete);QTest.keyClick(window.node_list.tree,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert len([node for node in window.session.project()["nodes"] if node["type"]=="wait"])==2
+    QTest.keyClick(window.node_list.tree,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier);assert len([node for node in window.session.project()["nodes"] if node["type"]=="wait"])==1;capture("节点和画布快捷键")
+
     # All structure operations below are real QTest mouse gestures on the PyQt canvas.
+    window.new_project();project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard()
     window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("ring5")
     center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QTest.qWait(80)
     shared=window.session.depict(False)["bonds"][0];mid=QPoint(round((shared["first"]["x"]+shared["second"]["x"])/2),round((shared["first"]["y"]+shared["second"]["y"])/2))
