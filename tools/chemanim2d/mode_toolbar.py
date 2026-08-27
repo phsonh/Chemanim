@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from math import cos, pi, sin
 from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea,
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QScrollArea,
                              QTabBar, QToolButton, QVBoxLayout, QWidget)
 
 
@@ -42,7 +42,8 @@ class ModeToolPanel(QWidget):
     SCRIPT_CATEGORIES=("通用","分子","箭头");DRAW_CATEGORIES=("工具","结构","元素")
 
     def __init__(self,session,parent=None):
-        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self._active_draw_tool="select_rectangle"
+        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle"
+        self.recent_elements=["C","N","O","H","S","P","F","Cl","Br","I"]
         self.setObjectName("modeToolPanel");layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0);layout.setSpacing(0)
         self.primary=QTabBar();self.primary.setObjectName("primaryTabs");self.primary.setShape(QTabBar.Shape.RoundedNorth);self.primary.setExpanding(False);self.primary.setDrawBase(False)
         for name in ("脚本","绘制"):self.primary.addTab(name)
@@ -50,16 +51,18 @@ class ModeToolPanel(QWidget):
         primary_row=QWidget();primary_layout=QHBoxLayout(primary_row);primary_layout.setContentsMargins(8,0,8,0);primary_layout.setSpacing(0);primary_layout.addWidget(self.primary);primary_layout.addStretch()
         self.secondary=QTabBar();self.secondary.setObjectName("secondaryTabs");self.secondary.setShape(QTabBar.Shape.RoundedNorth);self.secondary.setExpanding(False);self.secondary.setDrawBase(False);self.secondary.currentChanged.connect(lambda index:self.set_category(self.secondary.tabText(index)) if index>=0 else None)
         self.secondary_row=QWidget();self.secondary_row.setObjectName("secondaryRow");self.secondary_layout=QHBoxLayout(self.secondary_row);self.secondary_layout.setContentsMargins(22,0,8,0);self.secondary_layout.setSpacing(0);self.secondary_layout.addWidget(self.secondary);self.secondary_layout.addStretch()
+        self.scope_tabs=QTabBar();self.scope_tabs.setObjectName("scriptScopeTabs");self.scope_tabs.setShape(QTabBar.Shape.RoundedNorth);self.scope_tabs.setExpanding(False);self.scope_tabs.setDrawBase(False);self.scope_tabs.currentChanged.connect(lambda index:self.set_script_scope(self.scope_tabs.tabText(index)) if index>=0 else None)
+        self.scope_row=QWidget();self.scope_row.setObjectName("scriptScopeRow");scope_layout=QHBoxLayout(self.scope_row);scope_layout.setContentsMargins(38,0,8,0);scope_layout.setSpacing(0);scope_layout.addWidget(self.scope_tabs);scope_layout.addStretch()
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded);self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff);self.scroll.setFrameShape(QFrame.Shape.NoFrame);self.scroll.setMinimumHeight(58);self.scroll.setMaximumHeight(68)
         self.tertiary=QWidget();self.tertiary.setObjectName("tertiaryTools");self.tertiary_layout=QHBoxLayout(self.tertiary);self.tertiary_layout.setContentsMargins(10,6,10,6);self.tertiary_layout.setSpacing(6);self.scroll.setWidget(self.tertiary)
-        layout.addWidget(primary_row);layout.addWidget(self.secondary_row);layout.addWidget(self.scroll)
+        layout.addWidget(primary_row);layout.addWidget(self.secondary_row);layout.addWidget(self.scope_row);layout.addWidget(self.scroll)
         self._build_secondary()
 
     @staticmethod
     def _clear(layout):
         while layout.count():
             item=layout.takeAt(0)
-            if item.widget():item.widget().deleteLater()
+            if item.widget():item.widget().hide();item.widget().deleteLater()
 
     def set_mode(self,mode):
         if mode not in ("脚本","绘制"):return
@@ -69,8 +72,15 @@ class ModeToolPanel(QWidget):
     def set_category(self,category):
         categories=self.SCRIPT_CATEGORIES if self.mode=="脚本" else self.DRAW_CATEGORIES
         if category not in categories:return
-        self.category=category;index=categories.index(category)
+        self.category=category;self.script_scope="对象";index=categories.index(category)
         if self.secondary.currentIndex()!=index:self.secondary.blockSignals(True);self.secondary.setCurrentIndex(index);self.secondary.blockSignals(False)
+        self._build_tertiary()
+
+    def set_script_scope(self,scope):
+        if scope not in ("对象","设定","变换"):return
+        self.script_scope=scope
+        if self.scope_tabs.currentIndex()!=("对象","设定","变换").index(scope):
+            self.scope_tabs.blockSignals(True);self.scope_tabs.setCurrentIndex(("对象","设定","变换").index(scope));self.scope_tabs.blockSignals(False)
         self._build_tertiary()
 
     def _build_secondary(self):
@@ -80,8 +90,13 @@ class ModeToolPanel(QWidget):
         for name in categories:self.secondary.addTab(name)
         self.secondary.setCurrentIndex(categories.index(self.category));self.secondary.blockSignals(False);self._build_tertiary()
 
+    def record_element(self,element):
+        if not element:return
+        self.recent_elements=[element]+[value for value in self.recent_elements if value!=element]
+        self.recent_elements=self.recent_elements[:10]
+        if self.mode=="绘制" and self.category=="元素":self._build_tertiary()
+
     def _separator(self):line=QFrame();line.setFrameShape(QFrame.Shape.VLine);self.tertiary_layout.addWidget(line)
-    def _label(self,text):label=QLabel(text);label.setProperty("toolGroup",True);self.tertiary_layout.addWidget(label)
     def _tool(self,kind,label,signal,checkable=False,tooltip="",show_icon=True,icon_only=False):
         is_draw=getattr(signal,"signal",None)==getattr(self.drawToolRequested,"signal",None)
         button=QToolButton();button.setText(label);button.setToolTip(tooltip or label);button.setCheckable(checkable);button.setMinimumHeight(40)
@@ -98,30 +113,25 @@ class ModeToolPanel(QWidget):
             signal.emit(kind)
         button.clicked.connect(clicked);self.tertiary_layout.addWidget(button);return button
 
-    def _node_menu(self,label,definitions):
-        button=QToolButton();button.setText(label);button.setIcon(icon_for("node"));button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);button.setMinimumHeight(40);button.setMinimumWidth(button.fontMetrics().horizontalAdvance(label)+54);menu=QMenu(button)
-        for definition in definitions:
-            action=QAction(definition["label"],menu);action.triggered.connect(lambda checked=False,t=definition["type"]:self.nodeRequested.emit(t));menu.addAction(action)
-        button.setMenu(menu);self.tertiary_layout.addWidget(button)
+    @staticmethod
+    def _script_scope_for(node_type):
+        if "_lerp_" in node_type or node_type=="selection_fade":return "变换"
+        if "_set_" in node_type or node_type.startswith("adornment_set_"):return "设定"
+        return "对象"
 
     def _build_tertiary(self):
         self._clear(self.tertiary_layout)
+        scoped=self.mode=="脚本" and self.category in ("分子","箭头")
+        self.scope_row.setVisible(scoped)
+        if scoped:
+            self.scope_tabs.blockSignals(True)
+            while self.scope_tabs.count():self.scope_tabs.removeTab(0)
+            for name in ("对象","设定","变换"):self.scope_tabs.addTab(name)
+            self.scope_tabs.setCurrentIndex(("对象","设定","变换").index(self.script_scope));self.scope_tabs.blockSignals(False)
         if self.mode=="脚本":
-            definitions=[item for item in self.session.node_registry() if item["category"]==self.category];groups=[]
-            for item in definitions:
-                if item.get("group","") not in groups:groups.append(item.get("group",""))
-            for index,group in enumerate(groups):
-                if index:self._separator()
-                self._label(group);items=[item for item in definitions if item.get("group","")==group]
-                if len(items)<=4:
-                    for item in items:self._tool(item["type"],item["label"],self.nodeRequested)
-                else:
-                    sets=[item for item in items if "_set_" in item["type"] or item["type"].startswith("adornment_set")]
-                    lerps=[item for item in items if "_lerp_" in item["type"] or item["type"].startswith("adornment_lerp")]
-                    others=[item for item in items if item not in sets and item not in lerps]
-                    if others:self._node_menu("创建/事件",others)
-                    if sets:self._node_menu("设定…",sets)
-                    if lerps:self._node_menu("插值…",lerps)
+            definitions=[item for item in self.session.node_registry() if item["category"]==self.category]
+            if scoped:definitions=[item for item in definitions if self._script_scope_for(item["type"])==self.script_scope]
+            for item in definitions:self._tool(item["type"],item["label"],self.nodeRequested,show_icon=False)
         elif self.category=="工具":
             for key,label,shortcut in (("select_rectangle","框选","V"),("select_lasso","套索","L"),("eraser","橡皮擦","E")):self._tool(key,label,self.drawToolRequested,True,f"{label} · {shortcut}",icon_only=True)
         elif self.category=="结构":
@@ -133,6 +143,6 @@ class ModeToolPanel(QWidget):
             self._tool("charge_positive","⊕",self.drawToolRequested,True,"形式正电荷（带圈 +）",icon_only=True)
             self._tool("charge_negative","⊖",self.drawToolRequested,True,"形式负电荷（带圈 −）",icon_only=True)
         elif self.category=="元素":
-            for element in ("C","N","O","S","P","F","Cl","Br","I"):self._tool(element,element,self.elementRequested,show_icon=False)
+            for element in self.recent_elements:self._tool(element,element,self.elementRequested,show_icon=False)
             self._separator();button=QToolButton();button.setText("周期表…");button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.clicked.connect(self.periodicTableRequested);self.tertiary_layout.addWidget(button)
         self.tertiary_layout.addStretch()

@@ -306,7 +306,18 @@ struct EditorSession::Impl {
     }
 
     void commit() {
-        if (!gesture || !gesture->changed) { gesture.reset(); return; }
+        if (!gesture) return;
+        if (!gesture->changed) {
+            // A failed compound gesture must be atomic.  In particular, bond
+            // creation used to leave its first atom behind when endpoint
+            // resolution failed, while reporting no change and therefore
+            // providing no way to undo back to an empty canvas.
+            const auto high = project.nextCreationSerial;
+            project = std::move(gesture->before);
+            project.nextCreationSerial = std::max(project.nextCreationSerial, high);
+            gesture.reset();
+            return;
+        }
         undo.push_back({std::move(gesture->before), project});
         redo.clear();
         gesture.reset();
@@ -322,7 +333,14 @@ const Project& EditorSession::project() const { return impl_->project; }
 void EditorSession::replaceProject(Project project) { impl_ = std::make_unique<Impl>(); impl_->project = std::move(project); impl_->project.ensureDefaultNodes(); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
 void EditorSession::setActiveMolecule(const std::string& stableId) { if (!impl_->project.molecule(stableId)) throw std::runtime_error("Unknown molecule: " + stableId); impl_->activeMolecule = stableId; impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
 std::string EditorSession::activeMoleculeId() const { return impl_->activeMolecule; }
-void EditorSession::setTool(Tool tool) { impl_->tool = tool; impl_->gesture.reset(); }
+void EditorSession::setTool(Tool tool) {
+    impl_->tool = tool;
+    impl_->gesture.reset();
+    if (tool != Tool::SelectRectangle && tool != Tool::SelectLasso && tool != Tool::Move) {
+        impl_->selectedAtoms.clear();
+        impl_->selectedBonds.clear();
+    }
+}
 Tool EditorSession::tool() const { return impl_->tool; }
 void EditorSession::setElement(std::string element) { impl_->element = std::move(element); }
 void EditorSession::setViewport(Viewport viewport) { impl_->viewport = viewport; }
@@ -513,17 +531,20 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 impl_->gesture->changed = true;
             }
         } else {
-            std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel, "C", impl_->project.allocateCreationSerial());
+            // Resolve both endpoints against the pre-gesture document.  If we
+            // create the first carbon before resolving a click endpoint, that
+            // new carbon is hit at the cursor and the gesture collapses into a
+            // lone implicit-CH4 atom instead of the expected ethane skeleton.
             const Point endpoint = impl_->gestureEndpoint(alt);
             const Hit endpointHit = impl_->hit(impl_->viewport.modelToCanvas(endpoint),
                                                impl_->gesture->startHit.kind == HitKind::Atom
                                                    ? std::optional(impl_->gesture->startHit.id)
                                                    : std::nullopt);
+            std::string first = impl_->gesture->startHit.kind == HitKind::Atom ? impl_->gesture->startHit.id : molecule->addAtom(impl_->gesture->startModel, "C", impl_->project.allocateCreationSerial());
             std::string second = endpointHit.kind == HitKind::Atom ? endpointHit.id : molecule->addAtom(endpoint, "C", impl_->project.allocateCreationSerial());
             if (first != second) {
                 const std::string bondId = molecule->addBond(first, second, type, stereo);
                 impl_->gesture->changed = !bondId.empty();
-                impl_->selectedAtoms = {second};
             }
         }
     } else if (isRingTool(impl_->tool)) {
@@ -547,7 +568,7 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 }
                 (void)bondId;
             }
-            impl_->selectedAtoms = std::set<std::string>(ids.begin(), ids.end()); impl_->gesture->changed = true;
+            impl_->gesture->changed = true;
         }
     } else if (impl_->tool == Tool::AtomLabel) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) molecule->atom(impl_->gesture->startHit.id)->element = impl_->element;

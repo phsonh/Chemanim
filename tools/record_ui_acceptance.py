@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication,QDialog,QMenu,QToolButton
 
 from chemanim2d.app import MainWindow
 from chemanim2d.core import BUILD_COMMIT
+from chemanim2d.periodic_table import PeriodicTableDialog
 
 
 def main():
@@ -30,6 +31,17 @@ def main():
             path=output/f"frame-{len(frames):04d}.png";window.grab().save(str(path));frames.append(path)
 
     project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard();capture("干净布局")
+
+    # A blank click with the bond tool is one complete ethane-skeleton
+    # transaction, carries no persistent selection, and undoes to true blank.
+    window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("single_bond")
+    center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QTest.qWait(80)
+    molecule=window.session.project()["molecules"][0];assert len(molecule["atoms"])==2 and len(molecule["bonds"])==1 and not canvas.selected_atoms
+    capture("空白单击单键生成乙烷骨架")
+    atom=window.session.depict(False)["atoms"][0]["center"];QTest.mouseMove(canvas,QPoint(round(atom["x"]),round(atom["y"])),80);assert canvas._hover["kind"]=="atom";capture("鼠标悬停才显示蓝色轮廓")
+    QTest.mouseMove(window,QPoint(5,5),80);QTest.qWait(40);assert canvas._hover["kind"]=="none",canvas._hover;capture("鼠标移开后蓝色轮廓消失")
+    canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert not [atom for atom in window.session.project()["molecules"][0]["atoms"] if atom["alive"]];capture("第一次绘制可撤销回空白")
+    window.new_project();project=window.session.project();project["mod"]="ui_acceptance_v5";project["scene"].update({"background":"F4F1EAFF","title":"ui_acceptance_v5"});window.session.replace_json(json.dumps(project));window.refresh_all();canvas.fit_artboard()
 
     # Real keyboard dispatch plus bond-order cycling and hetero-label clipping.
     window.mode_panel.set_mode("绘制");window.mode_panel.set_category("结构");window._set_tool("single_bond")
@@ -128,6 +140,9 @@ def main():
 
     scene=window.session.project()["scene"];scene.update({"width":1080,"height":1920,"logic_width":540,"logic_height":960,"background":"16243BFF"});window.session.update_scene(json.dumps(scene));canvas.fit_artboard();window.refresh_all(window.node_list.current_id());capture("竖屏场景和背景")
     save=ROOT/"mod"/"ui_acceptance_v5"/"ui_acceptance_v5.cmm";save.parent.mkdir(parents=True,exist_ok=True);window.session.save(str(save));before=json.loads(window.session.json());window.load(save);after=window.session.project();assert [n["id"] for n in before["nodes"]]==[n["id"] for n in after["nodes"]];capture("保存关闭重开")
+
+    window.mode_panel.set_mode("脚本");window.mode_panel.set_category("分子");window.mode_panel.set_script_scope("变换");QTest.qWait(80);window.grab().save(str(output/"script-scope-tabs.png"))
+    periodic=PeriodicTableDialog(window);periodic.show();QTest.qWait(160);periodic.grab().save(str(output/"periodic-long-form.png"));periodic.close()
 
     import imageio_ffmpeg
     video=output/f"ui-acceptance-{BUILD_COMMIT[:12]}.mp4";ffmpeg=imageio_ffmpeg.get_ffmpeg_exe();subprocess.run([ffmpeg,"-y","-framerate","10","-i",str(output/"frame-%04d.png"),"-c:v","libx264","-pix_fmt","yuv420p","-movflags","+faststart",str(video)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

@@ -32,6 +32,7 @@ class StructureCanvas(QWidget):
         self.preview_frame = 0
         self._depiction = self._svg = self._raster = None
         self._selected_atoms, self._selected_bonds = [], []
+        self._hover = {"kind": "none", "id": ""}
         self._preview = {"active": False, "kind": "none"}
         self._panning = False
         self._pan_press = QPointF()
@@ -241,13 +242,26 @@ class StructureCanvas(QWidget):
             return
         if self._depiction:
             points = {item["id"]:item["center"] for item in self._depiction.get("atoms",[])}
+            bonds={item["id"]:item for item in self._depiction.get("bonds",[])}
+            # ChemDraw-style blue feedback follows the pointer.  Creation
+            # tools do not leave their result selected; moving away therefore
+            # removes the highlight immediately.
+            hover_kind,hover_id=self._hover.get("kind","none"),self._hover.get("id","")
+            if hover_kind=="atom" and hover_id in points:
+                point=points[hover_id]
+                painter.setPen(QPen(QColor(42,145,235),2))
+                painter.setBrush(QColor(42,145,235,38))
+                painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
+            elif hover_kind=="bond" and hover_id in bonds:
+                bond=bonds[hover_id]
+                painter.setPen(QPen(QColor(42,145,235,190),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+                painter.drawLine(QPointF(bond["first"]["x"],bond["first"]["y"]),QPointF(bond["second"]["x"],bond["second"]["y"]))
             painter.setPen(QPen(QColor(42,145,235),2))
             painter.setBrush(QColor(42,145,235,38))
             for atom_id in self._selected_atoms:
                 if atom_id in points:
                     point=points[atom_id]
                     painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
-            bonds={item["id"]:item for item in self._depiction.get("bonds",[])}
             painter.setPen(QPen(QColor(42,145,235,190),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
             for bond_id in self._selected_bonds:
                 if bond_id in bonds:
@@ -287,10 +301,17 @@ class StructureCanvas(QWidget):
     def _consume(self,result):
         self._selected_atoms=list(result["selected_atoms"])
         self._selected_bonds=list(result["selected_bonds"])
+        self._hover=dict(result["hover"])
         self._preview=result["preview"]
         self.selectionChanged.emit(self._selected_atoms,self._selected_bonds)
         self.hoverChanged.emit(result["hover"])
         self.update()
+
+    def leaveEvent(self,event):
+        self._hover={"kind":"none","id":""}
+        self.hoverChanged.emit(self._hover)
+        self.update()
+        super().leaveEvent(event)
 
     def _begin_pan(self, position):
         self._panning=True

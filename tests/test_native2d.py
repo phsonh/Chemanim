@@ -291,6 +291,30 @@ def test_single_bond_tool_click_cycles_single_double_triple_single():
     assert observed==["double","triple","single"]
 
 
+def test_single_bond_click_on_blank_creates_ethane_skeleton_and_undoes_to_blank():
+    core=session();core.set_tool("single_bond");core.pointer_down(420,270);result=core.pointer_up(420,270)
+    live_atoms=atoms(core);live_bonds=bonds(core)
+    assert result["changed"] and len(live_atoms)==2 and len(live_bonds)==1
+    assert live_bonds[0]["type"]=="single"
+    assert abs(live_atoms[0]["y"]-live_atoms[1]["y"])<1e-12
+    assert abs(abs(live_atoms[1]["x"]-live_atoms[0]["x"])-32.0)<1e-12
+    assert result["selected_atoms"]==[] and result["selected_bonds"]==[]
+    assert core.undo() and not atoms(core) and not bonds(core)
+    assert core.redo() and len(atoms(core))==2 and len(bonds(core))==1
+
+
+def test_hover_follows_pointer_without_selecting_finished_structure():
+    core=session();core.set_tool("single_bond");core.pointer_down(420,270);core.pointer_up(420,270)
+    drawing=core.depict(False);atom_point=drawing["atoms"][0]["center"];bond=drawing["bonds"][0]
+    over_atom=core.pointer_move(atom_point["x"],atom_point["y"])
+    over_bond=core.pointer_move((bond["first"]["x"]+bond["second"]["x"])*.5,(bond["first"]["y"]+bond["second"]["y"])*.5)
+    away=core.pointer_move(20,20)
+    assert over_atom["hover"]["kind"]=="atom"
+    assert over_bond["hover"]["kind"]=="bond"
+    assert away["hover"]["kind"]=="none"
+    assert over_atom["selected_atoms"]==away["selected_atoms"]==[]
+
+
 def test_explicit_double_bond_is_clipped_outside_hetero_atom_label():
     core=session();gesture(core,"atom_label",(480,300));start=atoms(core)[0]
     gesture(core,"single_bond",canvas_point(core,start["id"]),(480,220));oxygen=atoms(core)[-1]

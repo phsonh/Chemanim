@@ -17,6 +17,7 @@ class NodeList(QWidget):
     def __init__(self, session, parent=None):
         super().__init__(parent); self.session = session; self._updating = False
         self.tree = QTreeWidget(); self.tree.setHeaderLabels(["节点", "目标", "时长", "起止帧"])
+        font=self.tree.font();font.setPointSizeF(max(10.5,font.pointSizeF()+1.0));self.tree.setFont(font)
         header=self.tree.header();header.setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
         for column,width in ((1,105),(2,70),(3,92)):
             header.setSectionResizeMode(column,QHeaderView.ResizeMode.Fixed);self.tree.setColumnWidth(column,width)
@@ -26,7 +27,7 @@ class NodeList(QWidget):
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.tree.installEventFilter(self)
         self.tree.currentItemChanged.connect(self._selected); self.tree.itemDoubleClicked.connect(self._double_clicked)
-        self.tree.itemChanged.connect(self._enabled_changed); self.tree.model().rowsMoved.connect(self._rows_moved)
+        self.tree.model().rowsMoved.connect(self._rows_moved)
         buttons = QHBoxLayout()
         for text, callback in (("复制", self.duplicate), ("删除", self.delete), ("上移", lambda: self.move(-1)), ("下移", lambda: self.move(1))):
             button = QPushButton(text); button.clicked.connect(callback); buttons.addWidget(button)
@@ -56,8 +57,9 @@ class NodeList(QWidget):
             item = QTreeWidgetItem([definition.get("label", node["type"]), timing.get("target", ""),
                                     f"{duration} 帧" if duration else "—",
                                     f'{timing.get("start", 0)} → {timing.get("end", 0)}'])
+            item.setFlags(item.flags()&~Qt.ItemFlag.ItemIsUserCheckable)
             item.setData(0, Qt.ItemDataRole.UserRole, node["id"])
-            item.setCheckState(0, Qt.CheckState.Checked if node.get("enabled", True) else Qt.CheckState.Unchecked)
+            if not node.get("enabled",True):item.setToolTip(0,"此节点已禁用")
             self.tree.addTopLevelItem(item)
             if node["id"] == selected_id: self.tree.setCurrentItem(item)
         if not self.tree.currentItem() and self.tree.topLevelItemCount(): self.tree.setCurrentItem(self.tree.topLevelItem(0))
@@ -71,12 +73,6 @@ class NodeList(QWidget):
         timing = next((value for value in self.session.node_timings() if value["id"] == node_id), None)
         if timing: self.frameRequested.emit(timing["start"])
         self.editRequested.emit(node_id)
-
-    def _enabled_changed(self, item, column):
-        if self._updating: return
-        node_id=item.data(0, Qt.ItemDataRole.UserRole)
-        if self.session.enable_node(node_id, item.checkState(0) == Qt.CheckState.Checked):
-            self.sequenceEdited.emit(); self.refresh(node_id)
 
     def _rows_moved(self, *args):
         if self._updating: return

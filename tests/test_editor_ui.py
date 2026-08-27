@@ -7,7 +7,7 @@ import sys
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QToolButton
+from PyQt6.QtWidgets import QApplication, QToolBar, QToolButton
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
@@ -102,6 +102,7 @@ def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
     center=(value.canvas.width()*.5,value.canvas.height()*.5)
     value.session.pointer_down(*center);value.session.pointer_up(*center)
     atom=value.session.project()["molecules"][0]["atoms"][0];assert atom["element"]=="O"
+    buttons={button.text():button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     buttons["N"].click();point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"])
     atoms=value.session.project()["molecules"][0]["atoms"]
@@ -110,14 +111,47 @@ def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
     value.close()
 
 
-def test_periodic_table_uses_real_layout_and_folds_later_periods():
+def test_periodic_table_uses_complete_32_column_long_form_layout():
     application();dialog=PeriodicTableDialog()
     assert len(dialog.buttons)==118
-    assert dialog.expanded.isHidden()
     assert dialog.table_layout.itemAtPosition(1,1).widget()==dialog.buttons["H"]
-    assert dialog.table_layout.itemAtPosition(1,18).widget()==dialog.buttons["He"]
-    dialog.expand_button.click();assert not dialog.expanded.isHidden()
+    assert dialog.table_layout.itemAtPosition(1,32).widget()==dialog.buttons["He"]
+    assert dialog.table_layout.itemAtPosition(6,3).widget()==dialog.buttons["La"]
+    assert dialog.table_layout.itemAtPosition(6,17).widget()==dialog.buttons["Lu"]
+    assert dialog.table_layout.itemAtPosition(6,18).widget()==dialog.buttons["Hf"]
+    assert dialog.table_layout.itemAtPosition(7,3).widget()==dialog.buttons["Ac"]
+    assert dialog.table_layout.itemAtPosition(7,18).widget()==dialog.buttons["Rf"]
+    assert not hasattr(dialog,"expand_button")
     dialog.buttons["Og"].click();assert dialog.selected_element=="Og"
+
+
+def test_element_toolbar_tracks_only_ten_most_recent_elements():
+    value=window();value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
+    value._set_element("Xe")
+    assert value.mode_panel.recent_elements==["Xe","C","N","O","H","S","P","F","Cl","Br"]
+    QApplication.processEvents()
+    buttons=[button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()!="周期表…"]
+    assert buttons==value.mode_panel.recent_elements and len(buttons)==10
+    value.close()
+
+
+def test_script_tools_are_text_only_and_molecule_arrow_use_scope_tabs():
+    value=window();value.mode_panel.set_mode("脚本");value.mode_panel.set_category("分子")
+    assert [value.mode_panel.scope_tabs.tabText(i) for i in range(value.mode_panel.scope_tabs.count())]==["对象","设定","变换"]
+    for scope in ("对象","设定","变换"):
+        value.mode_panel.set_script_scope(scope);QApplication.processEvents()
+        buttons=[button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]
+        assert buttons and all(button.icon().isNull() for button in buttons)
+    value.mode_panel.set_category("箭头");assert value.mode_panel.scope_row.isVisible()
+    value.close()
+
+
+def test_main_menu_has_no_redundant_second_row_toolbar_and_nodes_have_no_checks():
+    value=window();assert value.findChildren(QToolBar)==[]
+    item=value.node_list.tree.topLevelItem(0)
+    assert not bool(item.flags()&Qt.ItemFlag.ItemIsUserCheckable)
+    assert value.node_list.tree.font().pointSizeF()>=10.5
+    value.close()
 
 
 def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():

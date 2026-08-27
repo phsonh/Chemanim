@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeySequence
 from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QPushButton, QSlider, QSpinBox, QSplitter, QToolBar, QVBoxLayout, QWidget)
+    QPushButton, QSlider, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from .canvas import StructureCanvas
 from .core import BUILD_COMMIT, DOCUMENT_VERSION, CoreSession
@@ -37,12 +37,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Chemanim");self.resize(1600,980)
         self.setStyleSheet("""
           QMainWindow,QDialog{background:#1d1f22;color:#e5e8ec} QMenuBar,QMenu,QToolBar,QStatusBar{background:#202327;color:#e5e8ec;border-color:#343940}
-          QWidget#modeToolPanel{background:#181a1d;border-bottom:1px solid #3a3f46} QScrollArea,QScrollArea>QWidget>QWidget{background:#181a1d;border:0}
-          QTabBar#primaryTabs::tab{min-width:88px;padding:8px 20px;background:#25292e;color:#b9c1ca;border:1px solid #41474f;border-bottom:0;margin-right:3px;border-top-left-radius:4px;border-top-right-radius:4px}
-          QTabBar#primaryTabs::tab:selected{background:#31577f;color:#ffffff;border-color:#568ac0}
-          QWidget#secondaryRow{background:#202328;border-top:1px solid #3b424a;border-bottom:1px solid #3b424a}
-          QTabBar#secondaryTabs::tab{min-width:76px;padding:6px 16px;background:#202328;color:#aeb7c2;border:0;border-bottom:3px solid transparent;margin-right:2px}
-          QTabBar#secondaryTabs::tab:selected{color:#ffffff;background:#29323c;border-bottom-color:#55a1e8}
+          QWidget#modeToolPanel{background:#181b1f;border-bottom:1px solid #343a42} QScrollArea,QScrollArea>QWidget>QWidget{background:#181a1d;border:0}
+          QTabBar#primaryTabs::tab{min-width:92px;padding:10px 24px;background:transparent;color:#929ca7;border:0;border-bottom:3px solid transparent;margin-right:8px;font-weight:600}
+          QTabBar#primaryTabs::tab:hover{color:#d9dfe6;background:#22272d}
+          QTabBar#primaryTabs::tab:selected{background:#22272d;color:#f5f8fb;border-bottom-color:#55a1e8}
+          QWidget#secondaryRow{background:#20242a;border-top:1px solid #2d333a;border-bottom:1px solid #343b43}
+          QTabBar#secondaryTabs::tab{min-width:70px;padding:7px 17px;background:transparent;color:#9da7b2;border:0;border-bottom:2px solid transparent;margin-right:8px}
+          QTabBar#secondaryTabs::tab:hover{color:#e0e5ea;background:#272d34}
+          QTabBar#secondaryTabs::tab:selected{color:#ffffff;background:transparent;border-bottom-color:#55a1e8;font-weight:600}
+          QWidget#scriptScopeRow{background:#1b1f24;border-bottom:1px solid #30363e}
+          QTabBar#scriptScopeTabs::tab{min-width:62px;padding:5px 15px;background:transparent;color:#8f99a5;border:0;border-bottom:2px solid transparent;margin-right:6px}
+          QTabBar#scriptScopeTabs::tab:hover{color:#dce2e8;background:#242a31}
+          QTabBar#scriptScopeTabs::tab:selected{color:#f4f7fa;border-bottom-color:#4598e5;font-weight:600}
           QWidget#tertiaryTools{background:#15181b;border-top:0}
           QPushButton{background:#2a2e33;color:#e5e8ec;border:1px solid #41474f;padding:5px 12px} QPushButton:hover{background:#343a41}
           QToolButton{background:transparent;color:#e5e8ec;border:1px solid transparent;padding:4px 7px} QToolButton:hover{background:#2b3036;border-color:#414852} QToolButton:checked{background:#285b91;border-color:#54a4ee}
@@ -73,9 +79,6 @@ class MainWindow(QMainWindow):
         edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"]);edit.addSeparator();edit.addAction(self.actions["duplicate"]);edit.addAction(self.actions["delete"])
         view=self.menuBar().addMenu("视图");[view.addAction(self.actions[k]) for k in ("fit","fit_all","final")]
         build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"])
-        bar=QToolBar("快捷",self);bar.setMovable(False);bar.setFloatable(False)
-        for key in ("new","open","save","undo","redo","lua","render"):bar.addAction(self.actions[key])
-        self.addToolBar(bar)
 
     def _build_transport(self):
         self.transport=QWidget();layout=QHBoxLayout(self.transport);layout.setContentsMargins(8,4,8,4)
@@ -110,7 +113,7 @@ class MainWindow(QMainWindow):
     def _hover(self,value):
         if value["kind"]!="none":self.statusBar().showMessage(f'{value["kind"]} · Core {BUILD_COMMIT[:12]}')
     def _set_tool(self,value):self.mode_panel.mode="绘制";self.session.edit_base(self.frame_spin.value());self.canvas.set_base_edit(True);self.session.set_tool(value);self.edit_mode.setText("编辑：基础结构");self.node_list.tree.clearSelection();self.statusBar().showMessage(f"绘制工具：{value}")
-    def _set_element(self,value):self.session.set_element(value);self._set_tool("atom_label")
+    def _set_element(self,value):self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
     def choose_element(self):
         dialog=PeriodicTableDialog(self)
         if dialog.exec()==QDialog.DialogCode.Accepted and dialog.selected_element:self._set_element(dialog.selected_element)
