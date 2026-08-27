@@ -170,9 +170,25 @@ struct EditorSession::Impl {
             double d=strokeDistance(0.0);
             if(bond.type==BondType::Triple)d=std::min({d,strokeDistance(-spacing),strokeDistance(spacing)});
             else if(bond.type==BondType::Double){
-                if(bond.secondaryLineSide==SecondaryLineSide::Center)
+                if(bond.secondaryLineSide==SecondaryLineSide::Center){
                     d=std::min(strokeDistance(-spacing*.5),strokeDistance(spacing*.5));
-                else{
+                    const Point tangent{dx/magnitude,dy/magnitude};
+                    const double convergence=std::min(magnitude*.2,spacing*.5/std::sqrt(3.0));
+                    const auto converges=[&](const Atom* atom){
+                        if(!atom||(!atom->hidden&&(atom->element!="C"||!atom->alias.empty())))return false;
+                        return std::any_of(value->bonds.begin(),value->bonds.end(),[&](const Bond& candidate){
+                            return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
+                                   (candidate.atomA==atom->id||candidate.atomB==atom->id);
+                        });
+                    };
+                    for(double sign:{-1.0,1.0}){
+                        const Point offset{normal.x*spacing*.5*sign,normal.y*spacing*.5*sign};
+                        if(converges(a))d=std::min(d,pointSegmentDistance(canvasPoint,first,
+                            {first.x+offset.x+tangent.x*convergence,first.y+offset.y+tangent.y*convergence}));
+                        if(converges(b))d=std::min(d,pointSegmentDistance(canvasPoint,
+                            {second.x+offset.x-tangent.x*convergence,second.y+offset.y-tangent.y*convergence},second));
+                    }
+                }else{
                     // Model-space Left becomes the negative normal after the
                     // canvas Y axis is inverted.
                     const double sign=bond.secondaryLineSide==SecondaryLineSide::Left?-1.0:1.0;

@@ -127,6 +127,17 @@ void appendLine(std::ostringstream& svg, RDGeom::Point2D first, RDGeom::Point2D 
         << "' stroke-linecap='" << lineCap << "' stroke-linejoin='round' opacity='" << opacity << "'/>\n";
 }
 
+void appendPolyline(std::ostringstream& svg, const std::vector<RDGeom::Point2D>& points,
+                    double width, const std::string& color, double opacity,
+                    const char* lineCap = "butt") {
+    if(points.size()<2)return;
+    svg<<"<path d='M "<<points.front().x<<','<<points.front().y;
+    for(std::size_t index=1;index<points.size();++index)
+        svg<<" L "<<points[index].x<<','<<points[index].y;
+    svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<width
+       <<"' stroke-linecap='"<<lineCap<<"' stroke-linejoin='round' opacity='"<<opacity<<"'/>\n";
+}
+
 template <typename Drawer>
 std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer& drawer) {
     std::ostringstream svg; svg << std::setprecision(12);
@@ -161,6 +172,7 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
         if (!bond.alive || !bond.visible || !a || !b || !a->alive || !b->alive) continue;
         const double dx=b->position.x-a->position.x, dy=b->position.y-a->position.y;
         const double length=std::max(1e-9,std::hypot(dx,dy)); const Point normal{-dy/length,dx/length};
+        const Point tangent{dx/length,dy/length};
         const auto point=[&](Point p){return drawer.getDrawCoords(RDGeom::Point2D(p.x,p.y));};
         const std::string color=rgb(bond.color,molecule.color);
         const double opacity=std::clamp(bond.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
@@ -196,7 +208,36 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             continue;
         }
         if (bond.secondaryLineSide==SecondaryLineSide::Center) {
-            for(double sign:{-1.0,1.0})line({normal.x*halfCentered*sign,normal.y*halfCentered*sign},0.0,"butt");
+            const auto converges=[&](const Atom* atom){
+                if(!atom||labelExtents(atom).x>0.0)return false;
+                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),[&](const Bond& candidate){
+                    return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
+                           (candidate.atomA==atom->id||candidate.atomB==atom->id);
+                });
+            };
+            const bool convergeA=converges(a),convergeB=converges(b);
+            // For a 120-degree skeletal junction this length makes the outer
+            // branch collinear with the adjacent single bond. Both parallel
+            // strokes then meet the exact atom coordinate without a gap.
+            const double convergeLength=std::min(length*.2,halfCentered/std::sqrt(3.0));
+            for(double sign:{-1.0,1.0}){
+                const Point offset{normal.x*halfCentered*sign,normal.y*halfCentered*sign};
+                const Point bodyA=convergeA
+                    ?Point{a->position.x+offset.x+tangent.x*convergeLength,
+                           a->position.y+offset.y+tangent.y*convergeLength}
+                    :clipped(a,b->position,offset);
+                const Point bodyB=convergeB
+                    ?Point{b->position.x+offset.x-tangent.x*convergeLength,
+                           b->position.y+offset.y-tangent.y*convergeLength}
+                    :clipped(b,a->position,offset);
+                std::vector<RDGeom::Point2D> points;
+                points.reserve(4);
+                points.push_back(point(convergeA?a->position:bodyA));
+                if(convergeA)points.push_back(point(bodyA));
+                points.push_back(point(bodyB));
+                if(convergeB)points.push_back(point(b->position));
+                appendPolyline(svg,points,lineWidth,color,opacity,"butt");
+            }
         } else {
             line({});
             const double sign=bond.secondaryLineSide==SecondaryLineSide::Left?1.0:-1.0;
@@ -256,10 +297,21 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
         const auto a = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomA; });
         const auto b = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomB; });
         if (a != result.atoms.end() && b != result.atoms.end()) {
+            const Atom* atomA=molecule.atom(bond.atomA);const Atom* atomB=molecule.atom(bond.atomB);
+            const auto converges=[&](const Atom* atom){
+                if(!atom||(!atom->hidden&&(atom->element!="C"||!atom->alias.empty())))return false;
+                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),[&](const Bond& candidate){
+                    return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
+                           (candidate.atomA==atom->id||candidate.atomB==atom->id);
+                });
+            };
+            const double lineSpacing=style.doubleBondSpacing*referenceBondLength*result.modelScale;
             result.bonds.push_back({bond.id, a->center, b->center,
                                     bondHitPolygon(a->center, b->center, 7.0),
                                     bond.type, bond.secondaryLineSide,
-                                    style.doubleBondSpacing * referenceBondLength * result.modelScale});
+                                    lineSpacing,converges(atomA),converges(atomB),
+                                    std::min(pointDistance(a->center,b->center)*.2,
+                                             lineSpacing*.5/std::sqrt(3.0))});
         }
     }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();

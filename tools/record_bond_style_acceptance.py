@@ -108,6 +108,30 @@ def main():
     QTest.qWait(100)
     window.grab().save(str(output / "bond-primitives-acs-shape.png"))
 
+    # The previous regression hid at normal zoom. Recreate the user's large
+    # centered-double benzene and require all three double bonds to converge at
+    # their connected carbon vertices.
+    window.new_project()
+    project=window.session.project()
+    project["scene"].update({"background":"FFFFFFFF","title":"centered_double_junctions"})
+    window.session.replace_json(json.dumps(project))
+    canvas.view_scale=8.0
+    canvas.pan=QPointF()
+    window._set_tool("benzene")
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(760,500))
+    QTest.qWait(100)
+    for value in list(window.session.project()["molecules"][0]["bonds"]):
+        if value["type"]!="double":continue
+        click_double(value["id"],2 if value["secondary_line_side"]=="left" else 1)
+    drawing=window.session.depict(False)
+    centered=[bond for bond in drawing["bonds"] if bond["type"]=="double"]
+    assert len(centered)==3 and all(bond["secondary_line_side"]=="center" for bond in centered)
+    assert all(bond["converge_first"] and bond["converge_second"] for bond in centered)
+    QTest.mouseMove(canvas,QPoint(40,40),50)
+    window.refresh_all()
+    QTest.qWait(100)
+    window.grab().save(str(output / "benzene-centered-double-junctions-8x.png"))
+
     report = {"core": BUILD_COMMIT, "sides": sides,
               "screenshots": [str(path) for path in sorted(output.glob("*.png"))]}
     (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

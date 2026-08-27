@@ -384,6 +384,21 @@ def test_acs_visual_primitives_use_flat_secondary_caps_and_five_hash_wedge_bars(
     assert group.count(" L ")>=64 and "stroke-linejoin='round'" in group
 
 
+def test_centered_double_bond_converges_to_connected_carbon_vertices_without_gaps():
+    core=session();gesture(core,"double_bond",(420,270),(452,270))
+    bond=bonds(core)[0]
+    first=canvas_point(core,bond["a"]);second=canvas_point(core,bond["b"])
+    gesture(core,"single_bond",first,(first[0]-28,first[1]+20))
+    gesture(core,"single_bond",second,(second[0]+28,second[1]-20))
+    drawing=core.depict(False);visual=next(item for item in drawing["bonds"] if item["id"]==bond["id"])
+    assert visual["converge_first"] and visual["converge_second"]
+    assert visual["convergence_length"]>0
+    group=drawing["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    paths=re.findall(r"<path d='([^']+)'",group)
+    # Each of the first two paths is vertex -> parallel body -> vertex.
+    assert len(paths)>=4 and [path.count(" L ") for path in paths[:2]]==[3,3]
+
+
 def test_explicit_double_bond_is_clipped_outside_hetero_atom_label():
     core=session();gesture(core,"atom_label",(480,300));start=atoms(core)[0]
     gesture(core,"single_bond",canvas_point(core,start["id"]),(480,220));oxygen=atoms(core)[-1]

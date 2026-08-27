@@ -23,6 +23,9 @@ struct BondGeometry {
     BondType type = BondType::Single;
     SecondaryLineSide secondaryLineSide = SecondaryLineSide::Center;
     double lineSpacing = 0.0;
+    bool convergeFirst = false;
+    bool convergeSecond = false;
+    double convergenceLength = 0.0;
 };
 
 struct DepictionResult {

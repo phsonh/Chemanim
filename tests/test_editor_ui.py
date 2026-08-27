@@ -199,4 +199,9 @@ def test_bond_hover_outline_uses_every_visible_double_and_triple_stroke():
     assert len(double)==2 and len(triple)==3
     assert {round(segment[0].y(),2) for segment in double}=={94.0,106.0}
     assert {round(segment[0].y(),2) for segment in triple}=={88.0,100.0,112.0}
+    converged=canvas._bond_highlight_segments({**base,"type":"double",
+        "converge_first":True,"converge_second":True,"convergence_length":4.0})
+    assert len(converged)==6
+    assert sum(1 for first,second in converged if first.x()==100.0 and first.y()==100.0)==2
+    assert sum(1 for first,second in converged if second.x()==180.0 and second.y()==100.0)==2
     value.close()

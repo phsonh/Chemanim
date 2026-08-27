@@ -239,7 +239,18 @@ class StructureCanvas(QWidget):
         if kind != "double":
             return [shifted(0.0)]
         if side == "center":
-            return [shifted(-spacing*.5), shifted(spacing*.5)]
+            converge_first=bool(bond.get("converge_first",False))
+            converge_second=bool(bond.get("converge_second",False))
+            convergence=float(bond.get("convergence_length",0.0))
+            segments=[]
+            for offset in (-spacing*.5,spacing*.5):
+                delta=normal*offset
+                body_first=first+delta+(tangent*convergence if converge_first else QPointF())
+                body_second=second+delta-(tangent*convergence if converge_second else QPointF())
+                if converge_first:segments.append((first,body_first))
+                segments.append((body_first,body_second))
+                if converge_second:segments.append((body_second,second))
+            return segments
         # Core Left is defined in model coordinates; the screen Y axis is
         # inverted, so its signed screen normal is negative.
         sign = -1.0 if side == "left" else 1.0
