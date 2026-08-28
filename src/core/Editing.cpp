@@ -171,22 +171,39 @@ struct EditorSession::Impl {
             if(bond.type==BondType::Triple)d=std::min({d,strokeDistance(-spacing),strokeDistance(spacing)});
             else if(bond.type==BondType::Double){
                 if(bond.secondaryLineSide==SecondaryLineSide::Center){
-                    d=std::min(strokeDistance(-spacing*.5),strokeDistance(spacing*.5));
                     const Point tangent{dx/magnitude,dy/magnitude};
-                    const double convergence=std::min(magnitude*.2,spacing*.5/std::sqrt(3.0));
-                    const auto converges=[&](const Atom* atom){
-                        if(!atom||(!atom->hidden&&(atom->element!="C"||!atom->alias.empty())))return false;
-                        return std::any_of(value->bonds.begin(),value->bonds.end(),[&](const Bond& candidate){
-                            return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
-                                   (candidate.atomA==atom->id||candidate.atomB==atom->id);
-                        });
+                    const auto extension=[&](const Atom* atom,bool firstEndpoint,double sign){
+                        double bestExtension=0.0;
+                        for(const Bond& candidate:value->bonds){
+                            if(candidate.id==bond.id||!candidate.alive||!candidate.visible||
+                               (candidate.atomA!=atom->id&&candidate.atomB!=atom->id))continue;
+                            const Atom* neighbour=value->atom(candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
+                            if(!neighbour||!neighbour->alive)continue;
+                            const Point neighbourPoint=viewport.modelToCanvas(neighbour->position);
+                            const Point atomPoint=viewport.modelToCanvas(atom->position);
+                            const double ux=neighbourPoint.x-atomPoint.x,uy=neighbourPoint.y-atomPoint.y;
+                            const double neighbourLength=std::hypot(ux,uy);if(neighbourLength<1e-9)continue;
+                            const double un=(ux*normal.x+uy*normal.y)/neighbourLength;
+                            const double ut=(ux*tangent.x+uy*tangent.y)/neighbourLength;
+                            if(std::abs(un)<1e-6)continue;
+                            const double ray=sign*spacing*.5/un;
+                            if(ray<=0.0||ray>magnitude*.35)continue;const double candidateExtension=ray*ut;
+                            if((firstEndpoint&&candidateExtension>=-1e-6)||
+                               (!firstEndpoint&&candidateExtension<=1e-6))continue;
+                            if(bestExtension==0.0||std::abs(candidateExtension)<std::abs(bestExtension))
+                                bestExtension=candidateExtension;
+                        }
+                        return std::clamp(bestExtension,-magnitude*.25,magnitude*.25);
                     };
                     for(double sign:{-1.0,1.0}){
                         const Point offset{normal.x*spacing*.5*sign,normal.y*spacing*.5*sign};
-                        if(converges(a))d=std::min(d,pointSegmentDistance(canvasPoint,first,
-                            {first.x+offset.x+tangent.x*convergence,first.y+offset.y+tangent.y*convergence}));
-                        if(converges(b))d=std::min(d,pointSegmentDistance(canvasPoint,
-                            {second.x+offset.x-tangent.x*convergence,second.y+offset.y-tangent.y*convergence},second));
+                        const double firstExtension=extension(a,true,sign);
+                        const double secondExtension=extension(b,false,sign);
+                        d=std::min(d,pointSegmentDistance(canvasPoint,
+                            {first.x+offset.x+tangent.x*firstExtension,
+                             first.y+offset.y+tangent.y*firstExtension},
+                            {second.x+offset.x+tangent.x*secondExtension,
+                             second.y+offset.y+tangent.y*secondExtension}));
                     }
                 }else{
                     // Model-space Left becomes the negative normal after the

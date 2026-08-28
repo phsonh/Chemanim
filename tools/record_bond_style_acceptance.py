@@ -109,8 +109,8 @@ def main():
     window.grab().save(str(output / "bond-primitives-acs-shape.png"))
 
     # The previous regression hid at normal zoom. Recreate the user's large
-    # centered-double benzene and require all three double bonds to converge at
-    # their connected carbon vertices.
+    # centered-double benzene and require ChemDraw-style per-stroke terminals:
+    # one flat end at the atom projection and one extended to the neighbour.
     window.new_project()
     project=window.session.project()
     project["scene"].update({"background":"FFFFFFFF","title":"centered_double_junctions"})
@@ -126,7 +126,8 @@ def main():
     drawing=window.session.depict(False)
     centered=[bond for bond in drawing["bonds"] if bond["type"]=="double"]
     assert len(centered)==3 and all(bond["secondary_line_side"]=="center" for bond in centered)
-    assert all(bond["converge_first"] and bond["converge_second"] for bond in centered)
+    assert all(sum(value<0 for value in bond["first_extensions"])==1 and
+               sum(value>0 for value in bond["second_extensions"])==1 for bond in centered)
     QTest.mouseMove(canvas,QPoint(40,40),50)
     window.refresh_all()
     QTest.qWait(100)

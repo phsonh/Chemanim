@@ -127,17 +127,6 @@ void appendLine(std::ostringstream& svg, RDGeom::Point2D first, RDGeom::Point2D 
         << "' stroke-linecap='" << lineCap << "' stroke-linejoin='round' opacity='" << opacity << "'/>\n";
 }
 
-void appendPolyline(std::ostringstream& svg, const std::vector<RDGeom::Point2D>& points,
-                    double width, const std::string& color, double opacity,
-                    const char* lineCap = "butt") {
-    if(points.size()<2)return;
-    svg<<"<path d='M "<<points.front().x<<','<<points.front().y;
-    for(std::size_t index=1;index<points.size();++index)
-        svg<<" L "<<points[index].x<<','<<points[index].y;
-    svg<<"' fill='none' stroke='"<<color<<"' stroke-width='"<<width
-       <<"' stroke-linecap='"<<lineCap<<"' stroke-linejoin='round' opacity='"<<opacity<<"'/>\n";
-}
-
 template <typename Drawer>
 std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer& drawer) {
     std::ostringstream svg; svg << std::setprecision(12);
@@ -208,35 +197,43 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             continue;
         }
         if (bond.secondaryLineSide==SecondaryLineSide::Center) {
-            const auto converges=[&](const Atom* atom){
-                if(!atom||labelExtents(atom).x>0.0)return false;
-                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),[&](const Bond& candidate){
-                    return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
-                           (candidate.atomA==atom->id||candidate.atomB==atom->id);
-                });
+            const auto endpointExtension=[&](const Atom* atom,bool first,double sign){
+                if(!atom||labelExtents(atom).x>0.0)return 0.0;
+                double best=0.0;
+                for(const Bond& candidate:molecule.bonds){
+                    if(candidate.id==bond.id||!candidate.alive||!candidate.visible||
+                       (candidate.atomA!=atom->id&&candidate.atomB!=atom->id))continue;
+                    const Atom* neighbour=molecule.atom(candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
+                    if(!neighbour||!neighbour->alive)continue;
+                    const double ux=neighbour->position.x-atom->position.x;
+                    const double uy=neighbour->position.y-atom->position.y;
+                    const double magnitude=std::hypot(ux,uy);
+                    if(magnitude<1e-9)continue;
+                    const double un=(ux*normal.x+uy*normal.y)/magnitude;
+                    const double ut=(ux*tangent.x+uy*tangent.y)/magnitude;
+                    if(std::abs(un)<1e-6)continue;
+                    // ChemDraw's user-centred double uses a flat end at the
+                    // atom projection for one stroke. Only the stroke facing a
+                    // neighbouring bond is extended to their intersection.
+                    const double ray=sign*halfCentered/un;
+                    if(ray<=0.0||ray>length*.35)continue;
+                    const double extension=ray*ut;
+                    if((first&&extension>=-1e-6)||(!first&&extension<=1e-6))continue;
+                    if(best==0.0||std::abs(extension)<std::abs(best))best=extension;
+                }
+                return std::clamp(best,-length*.25,length*.25);
             };
-            const bool convergeA=converges(a),convergeB=converges(b);
-            // For a 120-degree skeletal junction this length makes the outer
-            // branch collinear with the adjacent single bond. Both parallel
-            // strokes then meet the exact atom coordinate without a gap.
-            const double convergeLength=std::min(length*.2,halfCentered/std::sqrt(3.0));
             for(double sign:{-1.0,1.0}){
+                const double extensionA=endpointExtension(a,true,sign);
+                const double extensionB=endpointExtension(b,false,sign);
                 const Point offset{normal.x*halfCentered*sign,normal.y*halfCentered*sign};
-                const Point bodyA=convergeA
-                    ?Point{a->position.x+offset.x+tangent.x*convergeLength,
-                           a->position.y+offset.y+tangent.y*convergeLength}
-                    :clipped(a,b->position,offset);
-                const Point bodyB=convergeB
-                    ?Point{b->position.x+offset.x-tangent.x*convergeLength,
-                           b->position.y+offset.y-tangent.y*convergeLength}
-                    :clipped(b,a->position,offset);
-                std::vector<RDGeom::Point2D> points;
-                points.reserve(4);
-                points.push_back(point(convergeA?a->position:bodyA));
-                if(convergeA)points.push_back(point(bodyA));
-                points.push_back(point(bodyB));
-                if(convergeB)points.push_back(point(b->position));
-                appendPolyline(svg,points,lineWidth,color,opacity,"butt");
+                const Point first=labelExtents(a).x>0.0?clipped(a,b->position,offset):
+                    Point{a->position.x+offset.x+tangent.x*extensionA,
+                          a->position.y+offset.y+tangent.y*extensionA};
+                const Point second=labelExtents(b).x>0.0?clipped(b,a->position,offset):
+                    Point{b->position.x+offset.x+tangent.x*extensionB,
+                          b->position.y+offset.y+tangent.y*extensionB};
+                appendLine(svg,point(first),point(second),lineWidth,color,opacity,"butt");
             }
         } else {
             line({});
@@ -297,21 +294,40 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
         const auto a = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomA; });
         const auto b = std::find_if(result.atoms.begin(), result.atoms.end(), [&](const AtomGeometry& value) { return value.id == bond.atomB; });
         if (a != result.atoms.end() && b != result.atoms.end()) {
-            const Atom* atomA=molecule.atom(bond.atomA);const Atom* atomB=molecule.atom(bond.atomB);
-            const auto converges=[&](const Atom* atom){
-                if(!atom||(!atom->hidden&&(atom->element!="C"||!atom->alias.empty())))return false;
-                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),[&](const Bond& candidate){
-                    return candidate.id!=bond.id&&candidate.alive&&candidate.visible&&
-                           (candidate.atomA==atom->id||candidate.atomB==atom->id);
-                });
+            const Atom* modelA=molecule.atom(bond.atomA);const Atom* modelB=molecule.atom(bond.atomB);
+            const double modelDx=modelB->position.x-modelA->position.x;
+            const double modelDy=modelB->position.y-modelA->position.y;
+            const double modelLength=std::max(1e-9,std::hypot(modelDx,modelDy));
+            const Point modelTangent{modelDx/modelLength,modelDy/modelLength};
+            const Point modelNormal{-modelTangent.y,modelTangent.x};
+            const double modelHalfSpacing=style.doubleBondSpacing*referenceBondLength*.5;
+            const auto extension=[&](const Atom* atom,bool first,double sign){
+                if(!atom||(!atom->hidden&&(atom->element!="C"||!atom->alias.empty())))return 0.0;
+                double best=0.0;
+                for(const Bond& candidate:molecule.bonds){
+                    if(candidate.id==bond.id||!candidate.alive||!candidate.visible||
+                       (candidate.atomA!=atom->id&&candidate.atomB!=atom->id))continue;
+                    const Atom* neighbour=molecule.atom(candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
+                    if(!neighbour||!neighbour->alive)continue;
+                    const double ux=neighbour->position.x-atom->position.x,uy=neighbour->position.y-atom->position.y;
+                    const double magnitude=std::hypot(ux,uy);if(magnitude<1e-9)continue;
+                    const double un=(ux*modelNormal.x+uy*modelNormal.y)/magnitude;
+                    const double ut=(ux*modelTangent.x+uy*modelTangent.y)/magnitude;
+                    if(std::abs(un)<1e-6)continue;
+                    const double ray=sign*modelHalfSpacing/un;
+                    if(ray<=0.0||ray>modelLength*.35)continue;const double value=ray*ut;
+                    if((first&&value>=-1e-6)||(!first&&value<=1e-6))continue;
+                    if(best==0.0||std::abs(value)<std::abs(best))best=value;
+                }
+                return std::clamp(best,-modelLength*.25,modelLength*.25)*result.modelScale;
             };
             const double lineSpacing=style.doubleBondSpacing*referenceBondLength*result.modelScale;
             result.bonds.push_back({bond.id, a->center, b->center,
                                     bondHitPolygon(a->center, b->center, 7.0),
                                     bond.type, bond.secondaryLineSide,
-                                    lineSpacing,converges(atomA),converges(atomB),
-                                    std::min(pointDistance(a->center,b->center)*.2,
-                                             lineSpacing*.5/std::sqrt(3.0))});
+                                    lineSpacing,
+                                    extension(modelA,true,-1.0),extension(modelA,true,1.0),
+                                    extension(modelB,false,-1.0),extension(modelB,false,1.0)});
         }
     }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();

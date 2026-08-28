@@ -239,17 +239,16 @@ class StructureCanvas(QWidget):
         if kind != "double":
             return [shifted(0.0)]
         if side == "center":
-            converge_first=bool(bond.get("converge_first",False))
-            converge_second=bool(bond.get("converge_second",False))
-            convergence=float(bond.get("convergence_length",0.0))
+            first_extensions=bond.get("first_extensions",(0.0,0.0))
+            second_extensions=bond.get("second_extensions",(0.0,0.0))
             segments=[]
-            for offset in (-spacing*.5,spacing*.5):
+            # Core stores extension slots by model-space normal sign. Canvas Y
+            # is inverted, so screen-space negative uses model-space positive.
+            for index,offset in enumerate((-spacing*.5,spacing*.5)):
+                model_index=1-index
                 delta=normal*offset
-                body_first=first+delta+(tangent*convergence if converge_first else QPointF())
-                body_second=second+delta-(tangent*convergence if converge_second else QPointF())
-                if converge_first:segments.append((first,body_first))
-                segments.append((body_first,body_second))
-                if converge_second:segments.append((body_second,second))
+                segments.append((first+delta+tangent*float(first_extensions[model_index]),
+                                 second+delta+tangent*float(second_extensions[model_index])))
             return segments
         # Core Left is defined in model coordinates; the screen Y axis is
         # inverted, so its signed screen normal is negative.
