@@ -384,7 +384,7 @@ def test_acs_visual_primitives_use_flat_secondary_caps_and_five_hash_wedge_bars(
     assert group.count(" L ")>=64 and "stroke-linejoin='round'" in group
 
 
-def test_centered_double_bond_matches_chemdraw_per_stroke_terminal_geometry():
+def test_centered_double_bond_keeps_chemdraw_geometry_without_rdkit_junction_patches():
     core=session();gesture(core,"double_bond",(420,270),(452,270))
     bond=bonds(core)[0]
     first=canvas_point(core,bond["a"]);second=canvas_point(core,bond["b"])
@@ -397,6 +397,8 @@ def test_centered_double_bond_matches_chemdraw_per_stroke_terminal_geometry():
     assert group.count("stroke-linecap='butt'")==2
     paths=re.findall(r"<path d='([^']+)'",group)
     assert len(paths)>=4 and [path.count(" L ") for path in paths[:2]]==[1,1]
+    tail=drawing["svg"].split("</g>",2)[-1]
+    assert not re.search(r"<path(?![^>]*class=)",tail)
 
 
 def test_explicit_double_bond_is_clipped_outside_hetero_atom_label():

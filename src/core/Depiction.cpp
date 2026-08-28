@@ -334,6 +334,13 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     unsigned labelIndex=0;
     for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule.color)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
     result.svg=std::regex_replace(result.svg,std::regex("<path class='bond-[^>]*?(?:/>|></path>)"),"");
+    // MolDraw2D ACS output also emits small anonymous miter patches at
+    // carbon junctions.  Once the classed RDKit bonds are replaced by our
+    // explicit visual bonds these patches become detached black hooks.  Atom
+    // glyphs carry atom-* classes, so anonymous paths can be removed safely
+    // before inserting the authoritative explicit bond layer.
+    result.svg=std::regex_replace(result.svg,
+        std::regex("<path(?![^>]*class=)[^>]*(?:/>|></path>)"),"");
     const std::string explicitBonds=explicitBondSvg(molecule,style,drawer);
     const std::string formalCharges=adornmentSvg(molecule,style,drawer);
     const std::size_t svgRoot=result.svg.find("<svg");
