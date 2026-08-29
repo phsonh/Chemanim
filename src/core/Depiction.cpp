@@ -248,48 +248,97 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             // symbol is about four normal pen widths in total.
             const double halfWidth=lineWidth*modelPerPoint*2.0;
             const Point n{normal.x*halfWidth,normal.y*halfWidth};
-            const auto joinsOtherBond=[&](const Atom* atom){
-                if(!atom||labelExtents(atom).x>0.0)return false;
-                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),
-                    [&](const Bond& candidate){
-                        if(candidate.id==bond.id||!candidate.alive||!candidate.visible)return false;
-                        if(candidate.atomA!=atom->id&&candidate.atomB!=atom->id)return false;
-                        const Atom* other=molecule.atom(
-                            candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
-                        return other&&other->alive;
-                    });
-            };
-            const bool fillStart=joinsOtherBond(a),fillEnd=joinsOtherBond(b);
-            const double shoulder=std::min(halfWidth,length*.25);
-            const Point startTip=clipped(a,b->position,{});
-            const Point endTip=clipped(b,a->position,{});
-            const Point startUpper=fillStart
-                ? Point{startTip.x+tangent.x*shoulder+n.x,
-                        startTip.y+tangent.y*shoulder+n.y}
-                : clipped(a,b->position,n);
-            const Point startLower=fillStart
-                ? Point{startTip.x+tangent.x*shoulder-n.x,
-                        startTip.y+tangent.y*shoulder-n.y}
-                : clipped(a,b->position,{-n.x,-n.y});
-            const Point endUpper=fillEnd
-                ? Point{endTip.x-tangent.x*shoulder+n.x,
-                        endTip.y-tangent.y*shoulder+n.y}
-                : clipped(b,a->position,n);
-            const Point endLower=fillEnd
-                ? Point{endTip.x-tangent.x*shoulder-n.x,
-                        endTip.y-tangent.y*shoulder-n.y}
-                : clipped(b,a->position,{-n.x,-n.y});
-            const auto startUpperDraw=point(startUpper),endUpperDraw=point(endUpper);
-            const auto endLowerDraw=point(endLower),startLowerDraw=point(startLower);
-            svg<<"<path class='solid-bar bond-"<<bond.id<<"' d='";
-            if(fillStart){const auto tip=point(startTip);svg<<"M "<<tip.x<<','<<tip.y<<" L ";}
-            else svg<<"M ";
-            svg<<startUpperDraw.x<<','<<startUpperDraw.y<<" L "
-               <<endUpperDraw.x<<','<<endUpperDraw.y;
-            if(fillEnd){const auto tip=point(endTip);svg<<" L "<<tip.x<<','<<tip.y;}
-            svg<<" L "<<endLowerDraw.x<<','<<endLowerDraw.y<<" L "
-               <<startLowerDraw.x<<','<<startLowerDraw.y
+            const Point startUpper=clipped(a,b->position,n);
+            const Point endUpper=clipped(b,a->position,n);
+            const Point endLower=clipped(b,a->position,{-n.x,-n.y});
+            const Point startLower=clipped(a,b->position,{-n.x,-n.y});
+            const auto p0=point(startUpper),p1=point(endUpper);
+            const auto p2=point(endLower),p3=point(startLower);
+            // The authoritative bar remains a full-width rectangle. Junction
+            // correction is strictly additive; never taper or shorten it.
+            svg<<"<path class='solid-bar bond-"<<bond.id<<"' d='M "
+               <<p0.x<<','<<p0.y<<" L "<<p1.x<<','<<p1.y
+               <<" L "<<p2.x<<','<<p2.y<<" L "<<p3.x<<','<<p3.y
                <<" Z' fill='"<<color<<"' opacity='"<<opacity<<"'/>\n";
+
+            const double neighbourHalfWidth=lineWidth*modelPerPoint*.5;
+            const auto cross=[](Point first,Point second){
+                return first.x*second.y-first.y*second.x;
+            };
+            const auto fillEndpoint=[&](const Atom* atom,Point barDirection,Point barNormal){
+                if(!atom||labelExtents(atom).x>0.0)return;
+                struct Candidate {Point direction;double angle=0.0;};
+                std::optional<Candidate> positive,negative;
+                bool straightBack=false;
+                for(const Bond& candidate:molecule.bonds){
+                    if(candidate.id==bond.id||!candidate.alive||!candidate.visible||
+                       (candidate.atomA!=atom->id&&candidate.atomB!=atom->id))continue;
+                    const Atom* other=molecule.atom(
+                        candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
+                    if(!other||!other->alive)continue;
+                    Point direction{other->position.x-atom->position.x,
+                                    other->position.y-atom->position.y};
+                    const double magnitude=std::hypot(direction.x,direction.y);
+                    if(magnitude<1e-9)continue;
+                    direction.x/=magnitude;direction.y/=magnitude;
+                    const double side=cross(barDirection,direction);
+                    const double dot=std::clamp(
+                        barDirection.x*direction.x+barDirection.y*direction.y,-1.0,1.0);
+                    if(std::abs(side)<1e-7){
+                        if(dot<0.0)straightBack=true;
+                        continue;
+                    }
+                    Candidate value{direction,std::acos(dot)};
+                    auto& slot=side>0.0?positive:negative;
+                    if(!slot||value.angle<slot->angle)slot=value;
+                }
+                const auto triangle=[&](Point corner,Point join){
+                    const auto center=point(atom->position),edge=point(corner),outer=point(join);
+                    svg<<"<path class='solid-bar-junction bond-"<<bond.id
+                       <<"' d='M "<<center.x<<','<<center.y<<" L "
+                       <<edge.x<<','<<edge.y<<" L "<<outer.x<<','<<outer.y
+                       <<" Z' fill='"<<color<<"' opacity='"<<opacity<<"'/>\n";
+                };
+                const auto fillSide=[&](const Candidate& candidate,double side){
+                    const Point corner{atom->position.x+barNormal.x*halfWidth*side,
+                                       atom->position.y+barNormal.y*halfWidth*side};
+                    const Point edgeNormal=side>0.0
+                        ? Point{candidate.direction.y,-candidate.direction.x}
+                        : Point{-candidate.direction.y,candidate.direction.x};
+                    const Point edgeStart{
+                        atom->position.x+edgeNormal.x*neighbourHalfWidth,
+                        atom->position.y+edgeNormal.y*neighbourHalfWidth};
+                    const double denominator=cross(barDirection,candidate.direction);
+                    const Point delta{edgeStart.x-corner.x,edgeStart.y-corner.y};
+                    const double alongBar=cross(delta,candidate.direction)/denominator;
+                    const double alongNeighbour=cross(delta,barDirection)/denominator;
+                    Point join{corner.x+barDirection.x*alongBar,
+                               corner.y+barDirection.y*alongBar};
+                    const double miterDistance=pointDistance(atom->position,join);
+                    if(alongBar>1e-7||alongNeighbour<0.0||miterDistance>halfWidth*4.0){
+                        const double bevel=std::min(halfWidth*2.0,length*.25);
+                        join={edgeStart.x+candidate.direction.x*bevel,
+                              edgeStart.y+candidate.direction.y*bevel};
+                    }
+                    triangle(corner,join);
+                };
+                if(positive)fillSide(*positive,1.0);
+                if(negative)fillSide(*negative,-1.0);
+                if(straightBack&&!positive&&!negative){
+                    const Point back{-barDirection.x,-barDirection.y};
+                    for(double side:{-1.0,1.0}){
+                        const Point corner{atom->position.x+barNormal.x*halfWidth*side,
+                                           atom->position.y+barNormal.y*halfWidth*side};
+                        const Point join{atom->position.x+back.x*halfWidth+
+                                             barNormal.x*neighbourHalfWidth*side,
+                                         atom->position.y+back.y*halfWidth+
+                                             barNormal.y*neighbourHalfWidth*side};
+                        triangle(corner,join);
+                    }
+                }
+            };
+            fillEndpoint(a,tangent,normal);
+            fillEndpoint(b,{-tangent.x,-tangent.y},{-normal.x,-normal.y});
             continue;
         }
         if (bond.stereo==BondStereo::HashedBar) {
