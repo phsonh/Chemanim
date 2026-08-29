@@ -40,7 +40,6 @@ class StructureCanvas(QWidget):
         self._pan_origin = QPointF()
         self._space_down = False
         self._gesture_active = False
-        self._base_edit = True
         self._fit_pending = True
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -124,7 +123,7 @@ class StructureCanvas(QWidget):
     def _refresh_now(self):
         self._sync_core_viewport()
         try:
-            data = self.session.depict(self.final_effect) if self._base_edit else self.session.depict_at(self.preview_frame,self.final_effect)
+            data = self.session.depict(self.final_effect) if self.session.edit_target_kind=="base_structure" else self.session.depict_at(self.preview_frame,self.final_effect)
         except RuntimeError:
             self._depiction = self._svg = self._raster = None
             self.update()
@@ -143,8 +142,9 @@ class StructureCanvas(QWidget):
         self.session.preview_timeline(self.preview_frame)
         self.request_refresh()
 
-    def set_base_edit(self, enabled: bool):
-        self._base_edit = bool(enabled)
+    def show_edit_frame(self, frame: int):
+        """Update the displayed frame without changing Core's edit target."""
+        self.preview_frame=max(0,int(frame))
         self.request_refresh()
 
     def set_final_effect(self, enabled: bool):
@@ -376,6 +376,8 @@ class StructureCanvas(QWidget):
             self._sync_core_viewport();self.contextRequested.emit(self.session.hit_test(event.position().x(),event.position().y()),event.globalPosition().toPoint());event.accept();return
         if event.button()!=Qt.MouseButton.LeftButton:
             return
+        if self.final_effect:
+            event.accept();return
         self.setFocus();self._sync_core_viewport()
         alt,control,shift=self._mods(event)
         self._gesture_active=True;self._consume(self.session.pointer_down(event.position().x(),event.position().y(),alt,control,shift))

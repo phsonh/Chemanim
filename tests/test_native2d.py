@@ -17,7 +17,18 @@ from chemanim2d.core import CoreSession
 
 
 def session() -> CoreSession:
-    result = CoreSession(); result.add_blank_molecule("manual"); result.set_viewport(960, 540, 1, 0, 0); return result
+    result = CoreSession(); result.add_blank_molecule("manual"); result.set_viewport(960, 540, 1, 0, 0)
+    authorize_structure(result)
+    return result
+
+
+def authorize_structure(core: CoreSession):
+    node = next(item for item in core.project()["nodes"]
+                if item["type"] == "molecule_create" and
+                item.get("params", {}).get("target") == core.active_molecule)
+    core.edit_node(node["id"])
+    assert core.edit_target_kind == "base_structure" and core.can_edit_structure
+    return node["id"]
 
 
 def gesture(core: CoreSession, tool: str, start, end=None):
@@ -33,6 +44,37 @@ def canvas_point(core: CoreSession, atom_id: str):
     depiction = core.depict(False)
     point = next(item["center"] for item in depiction["atoms"] if item["id"] == atom_id)
     return point["x"], point["y"]
+
+
+def test_structure_commands_are_sealed_by_creation_node_context():
+    core=CoreSession();core.add_blank_molecule("sealed");core.set_viewport(960,540,1,0,0)
+    create=next(node for node in core.project()["nodes"] if node["type"]=="molecule_create")
+    assert core.edit_target_kind=="timeline_preview" and not core.can_edit_structure
+
+    core.set_tool("single_bond");core.pointer_down(420,270);result=core.pointer_up(452,270)
+    assert not result["changed"] and not atoms(core) and not bonds(core)
+
+    core.edit_node(create["id"])
+    assert core.edit_target_kind=="base_structure" and core.edit_target_id==create["id"] and core.can_edit_structure
+    gesture(core,"single_bond",(420,270),(452,270));atom_id=atoms(core)[0]["id"]
+    original=(atoms(core)[0]["x"],atoms(core)[0]["y"])
+
+    core.select_all();core.preview_timeline(0)
+    assert core.edit_target_kind=="timeline_preview" and not core.can_edit_structure
+    assert not core.delete_selection()
+    assert not core.set_atom_position(atom_id,99,99)
+    assert (atoms(core)[0]["x"],atoms(core)[0]["y"])==original
+    core.set_tool("eraser");point=canvas_point(core,atom_id);core.pointer_down(*point);core.pointer_up(*point)
+    assert atoms(core)[0]["alive"]
+    assert not core.undo()
+
+
+def test_authoring_undo_is_available_only_after_returning_to_a_node():
+    core=CoreSession();core.add_blank_molecule("nodes")
+    wait=core.add_node("wait",json.dumps({"frames":12}))
+    core.preview_timeline(4);assert not core.undo()
+    core.edit_node(wait);assert core.edit_target_kind=="script_node" and core.undo()
+    assert all(node["id"]!=wait for node in core.project()["nodes"])
 
 
 def test_manual_acetaminophen_from_blank_canvas():
@@ -75,6 +117,7 @@ def test_manual_ibuprofen_uses_ring_double_element_and_wedge():
 def test_stable_ids_survive_save_close_reopen_and_are_not_reused(tmp_path: Path):
     core = session(); gesture(core, "ring5", (480, 270)); before = core.project(); path = tmp_path / "roundtrip.cmm"; core.save(str(path))
     restored = CoreSession(); restored.load(str(path)); assert restored.project()["molecules"][0]["atoms"] == before["molecules"][0]["atoms"]
+    authorize_structure(restored)
     restored.set_viewport(960, 540, 48, 0, 0); removed = restored.project()["molecules"][0]["atoms"][-1]["id"]
     gesture(restored, "eraser", canvas_point(restored, removed)); gesture(restored, "atom_label", (700, 400))
     assert atoms(restored)[-1]["id"] != removed
@@ -190,7 +233,7 @@ def test_atom_hit_normalizes_bond_origin_at_offsets_viewports_and_zoom():
     viewports = [(960, 540, 24, 0, 0), (1280, 720, 48, 2.5, -1.25), (1920, 1080, 96, -3, 2)]
     for width, height, scale, center_x, center_y in viewports:
         for dx, dy in offsets:
-            core = CoreSession(); core.add_blank_molecule(); core.set_viewport(width, height, scale, center_x, center_y)
+            core = CoreSession(); core.add_blank_molecule(); core.set_viewport(width, height, scale, center_x, center_y); authorize_structure(core)
             origin = (width * .5 - center_x * scale, height * .5 + center_y * scale)
             gesture(core, "atom_label", origin)
             core.set_tool("single_bond")
@@ -712,3 +755,33 @@ def test_script_preview_preserves_each_depiction_viewbox_transform():
     assert "transform='matrix(" in drawing["svg"]
     rgba=drawing["rgba"]
     assert any(rgba[index+3] for index in range(0,len(rgba),4))
+
+
+def test_direct_lerp_edit_order_undo_redo_and_reopen_are_one_authoring_model(tmp_path: Path):
+    core=session();gesture(core,"single_bond",(420,270),(452,270));base=json.loads(core.json())
+    wait=core.add_node("wait",json.dumps({"frames":10}))
+    lerp=core.add_node("molecule_lerp_position",json.dumps({"target":core.active_molecule,
+        "x":64.0,"y":0.0,"frames":30,"easing":"linear"}))
+    core.edit_node(lerp);assert core.can_direct_manipulate and not core.can_edit_structure
+    before_node=next(node for node in core.project()["nodes"] if node["id"]==lerp)["params"]
+    first=core.depict(False)["atoms"][0]["center"]
+    core.pointer_down(first["x"],first["y"]);core.pointer_move(first["x"]+20,first["y"])
+    assert core.pointer_up(first["x"]+20,first["y"])["changed"]
+    after_node=next(node for node in core.project()["nodes"] if node["id"]==lerp)["params"]
+    assert after_node["x"]==before_node["x"]+20
+    assert core.project()["molecules"]==base["molecules"]
+
+    assert core.undo()
+    assert next(node for node in core.project()["nodes"] if node["id"]==lerp)["params"]==before_node
+    assert core.redo()
+    assert next(node for node in core.project()["nodes"] if node["id"]==lerp)["params"]==after_node
+
+    timings={item["id"]:item for item in core.node_timings()};assert timings[lerp]["start"]==10
+    core.move_node(lerp,2);timings={item["id"]:item for item in core.node_timings()};assert timings[lerp]["start"]==0
+    core.move_node(lerp,len(core.project()["nodes"])-1)
+    timings={item["id"]:item for item in core.node_timings()};assert timings[lerp]["start"]==10
+
+    path=tmp_path/"animation-roundtrip.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
+    assert restored.project()["nodes"]==core.project()["nodes"]
+    for frame in (0,10,25,40):assert restored.evaluated_project(frame)==core.evaluated_project(frame)
+    lua=restored.generate_lua();assert lua.index("chem.Wait(10)")<lua.index(".LerpPos(")

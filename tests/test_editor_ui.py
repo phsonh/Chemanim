@@ -49,7 +49,7 @@ def test_wheel_zoom_keeps_world_point_under_same_pixel():
 
 
 def test_rectangle_preview_has_explicit_kind_and_normalized_geometry():
-    value=window();canvas=value.canvas;canvas._sync_core_viewport();value.session.edit_base(0);value.session.set_tool("select_rectangle")
+    value=window();canvas=value.canvas;canvas._sync_core_viewport();value.session.set_tool("select_rectangle")
     start=(canvas.width()*.75,canvas.height()*.75);end=(canvas.width()*.25,canvas.height()*.25)
     down=value.session.pointer_down(*start);preview=value.session.pointer_move(*end)["preview"]
     assert down["preview"]["kind"]=="rectangle" and preview["kind"]=="rectangle"
@@ -240,4 +240,53 @@ def test_bond_hover_outline_uses_every_visible_double_and_triple_stroke():
     assert len(extended)==2
     assert extended[0][0].x()==100.0 and extended[0][1].x()==180.0
     assert extended[1][0].x()==96.0 and extended[1][1].x()==184.0
+    value.close()
+
+
+def test_structure_toolbar_requires_selected_creation_node_and_keeps_selection():
+    value=window();create=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
+    assert value.node_list.current_id()==create["id"] and value.session.can_edit_structure
+    value.mode_panel.set_mode("绘制");QApplication.processEvents()
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    assert buttons["single_bond"].isEnabled()
+    value._set_tool("single_bond");assert value.node_list.current_id()==create["id"]
+
+    wait=value._add_node("wait",open_editor=False);assert value.node_list.current_id()==wait
+    assert value.session.edit_target_kind=="script_node" and not value.session.can_edit_structure
+    value.mode_panel.set_mode("绘制");QApplication.processEvents()
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    assert not buttons["single_bond"].isEnabled() and buttons["select_rectangle"].isEnabled()
+    old_tool=value.session.tool;value._set_tool("single_bond")
+    assert value.session.tool==old_tool and value.node_list.current_id()==wait
+    value.close()
+
+
+def test_scrub_play_stop_and_node_return_keep_ui_and_core_state_in_sync():
+    value=window();create=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
+    wait=value._add_node("wait",{"frames":8},open_editor=False)
+    assert value.session.edit_target_id==wait and value.edit_mode.text().startswith("编辑节点")
+
+    value.frame_spin.setValue(3);QApplication.processEvents()
+    assert value.session.edit_target_kind=="timeline_preview" and value.session.preview_frame==3
+    assert value.edit_mode.text()=="预览：只读" and not value.mode_panel._structure_enabled
+
+    value.node_list.refresh(create["id"]);value._node_selected(create["id"])
+    assert value.session.edit_target_kind=="base_structure" and value.edit_mode.text()=="编辑：基础结构节点"
+    value._toggle_play();assert value._playing and value.session.edit_target_kind=="timeline_preview" and value.edit_mode.text()=="播放：只读预览"
+    value._toggle_play();assert not value._playing and value.session.edit_target_kind=="base_structure" and value.node_list.current_id()==create["id"]
+
+    value.actions["final"].setChecked(True);value._toggle_final_effect(True)
+    assert value.canvas.final_effect and value.session.edit_target_kind=="timeline_preview" and value.edit_mode.text()=="最终效果：只读预览"
+    value.actions["final"].setChecked(False);value._toggle_final_effect(False)
+    assert not value.canvas.final_effect and value.session.edit_target_kind=="base_structure"
+    value.close()
+
+
+def test_adding_one_node_is_one_undo_step_and_returns_to_valid_context():
+    value=window();before=[node["id"] for node in value.session.project()["nodes"]]
+    created=value._add_node("wait",{"frames":17},open_editor=False)
+    assert created and len(value.session.project()["nodes"])==len(before)+1
+    value.undo();assert [node["id"] for node in value.session.project()["nodes"]]==before
+    assert value.session.edit_target_kind in ("base_structure","script_node")
+    value.redo();assert any(node["id"]==created for node in value.session.project()["nodes"])
     value.close()

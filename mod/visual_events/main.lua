@@ -11,10 +11,10 @@ local molecule1 = chem.NewMol {
     source_smiles = "CCCC",
     reference_bond_length = 32,
     atoms = {
-        { id="A1", creation_serial=1, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
-        { id="A2", creation_serial=2, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=29.445001708, y=12.5296398358 },
-        { id="A3", creation_serial=3, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.0184889601, y=-6.70565973985 },
-        { id="A4", creation_serial=4, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=84.4634906681, y=5.82398009599 },
+        { id="A1", creation_serial=1, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
+        { id="A2", creation_serial=2, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=29.445001708, y=12.5296398358 },
+        { id="A3", creation_serial=3, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.0184889601, y=-6.70565973985 },
+        { id="A4", creation_serial=4, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=84.4634906681, y=5.82398009599 },
     },
     bonds = {
         { id="B1", a="A1", b="A2", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
@@ -36,7 +36,7 @@ local molecule2 = chem.NewMol {
     source_smiles = "O",
     reference_bond_length = 32,
     atoms = {
-        { id="A5", creation_serial=5, element="O", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
+        { id="A5", creation_serial=5, element="O", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
     },
     bonds = {
     },
@@ -73,9 +73,9 @@ local molecule4 = chem.NewMol {
     source_smiles = "CCC",
     reference_bond_length = 32,
     atoms = {
-        { id="A6", creation_serial=6, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
-        { id="A7", creation_serial=7, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=27.7128129211, y=16 },
-        { id="A8", creation_serial=8, element="C", alias="", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.4256258422, y=-2.84217094304e-14 },
+        { id="A6", creation_serial=6, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
+        { id="A7", creation_serial=7, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=27.7128129211, y=16 },
+        { id="A8", creation_serial=8, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.4256258422, y=-2.84217094304e-14 },
     },
     bonds = {
         { id="B4", a="A6", b="A7", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
@@ -110,4 +110,3 @@ molecule4.SetBondAlpha("B901", 0)
 molecule4.LerpBondAlpha("B901", 255, 30, "linear")
 
 chem.Wait(45)
-

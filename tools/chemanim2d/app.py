@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         self._build_transport()
         center=QWidget();layout=QVBoxLayout(center);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0);layout.addWidget(self.mode_panel);layout.addWidget(split,1);layout.addWidget(self.transport);self.setCentralWidget(center)
         self.play_timer=QTimer(self);self.play_timer.timeout.connect(self._play_tick)
-        self.refresh_all();self.canvas.request_refresh();self.canvas.setFocus();self.statusBar().showMessage(f"Core {BUILD_COMMIT[:12]} · 文档 v{DOCUMENT_VERSION} · 100%")
+        self.refresh_all();self._select_default_authoring_node();self.canvas.request_refresh();self.canvas.setFocus();self.statusBar().showMessage(f"Core {BUILD_COMMIT[:12]} · 文档 v{DOCUMENT_VERSION} · 100%")
 
     def _action(self,text,slot,shortcut=None,checkable=False):
         action=QAction(text,self);action.triggered.connect(slot);action.setCheckable(checkable)
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self):
-        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",lambda checked:self.canvas.set_final_effect(checked),checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M")}
+        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M")}
 
     def _build_menu(self):
         file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();[file.addAction(self.actions[k]) for k in ("lua","render")]
@@ -82,16 +82,47 @@ class MainWindow(QMainWindow):
 
     def _build_transport(self):
         self.transport=QWidget();layout=QHBoxLayout(self.transport);layout.setContentsMargins(8,4,8,4)
-        self.play_button=QPushButton("▶ 播放");self.play_button.clicked.connect(self._toggle_play);self.edit_mode=QLabel("编辑：基础结构")
+        self.play_button=QPushButton("▶ 播放");self.play_button.clicked.connect(self._toggle_play);self.edit_mode=QLabel("预览：只读")
         self.frame_slider=QSlider(Qt.Orientation.Horizontal);self.frame_spin=QSpinBox();self.frame_spin.setRange(0,100000);self.frame_slider.setRange(0,0);self.frame_slider.valueChanged.connect(self.frame_spin.setValue);self.frame_spin.valueChanged.connect(self.frame_slider.setValue);self.frame_spin.valueChanged.connect(self._preview_frame)
         layout.addWidget(self.play_button);layout.addWidget(self.edit_mode);layout.addWidget(QLabel("当前帧"));layout.addWidget(self.frame_slider,1);layout.addWidget(self.frame_spin)
 
     def _toggle_play(self):
-        self._playing=not self._playing;self.play_button.setText("■ 停止" if self._playing else "▶ 播放")
-        if self._playing:self.play_timer.start(max(1,round(1000/max(1,self.session.project().get("scene",{}).get("fps",60)))))
-        else:self.play_timer.stop()
+        if self._playing:
+            self._stop_playback(True);return
+        self._playing=True;self.play_button.setText("■ 停止");self.session.preview_timeline(self.frame_spin.value());self.canvas.show_edit_frame(self.frame_spin.value());self._sync_edit_state("播放：只读预览")
+        self.play_timer.start(max(1,round(1000/max(1,self.session.project().get("scene",{}).get("fps",60)))))
     def _play_tick(self):
         end=max(0,self.session.end_frame);self.frame_spin.setValue(0 if self.frame_spin.value()>=end else self.frame_spin.value()+1)
+
+    def _stop_playback(self,restore_node=False):
+        was_playing=self._playing;self._playing=False;self.play_timer.stop();self.play_button.setText("▶ 播放")
+        if restore_node and was_playing:
+            node_id=self.node_list.current_id()
+            if node_id:self._activate_node(node_id)
+
+    def _sync_edit_state(self,label=None):
+        self.mode_panel.set_structure_enabled(self.session.can_edit_structure and not self.canvas.final_effect and not self._playing)
+        if label:self.edit_mode.setText(label)
+        elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
+        elif self.session.edit_target_kind=="script_node":self.edit_mode.setText("编辑：动画节点")
+        else:self.edit_mode.setText("预览：只读")
+
+    def _activate_node(self,node_id):
+        node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
+        if not node:return False
+        self.session.edit_node(node_id)
+        timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
+        self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
+        self.canvas.show_edit_frame(frame)
+        label="编辑：场景节点" if node["type"]=="scene" else ("编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{node.get("type","")}')
+        self._sync_edit_state(label);return True
+
+    def _select_default_authoring_node(self):
+        project=self.session.project();target=self.session.active_molecule
+        node=next((item for item in project.get("nodes",[]) if item["type"]=="molecule_create" and item.get("params",{}).get("target")==target),None)
+        if not node:node=next((item for item in project.get("nodes",[]) if item["type"]!="scene"),None)
+        if node:self.node_list.refresh(node["id"]);self._activate_node(node["id"])
+        else:self.session.preview_timeline(self.frame_spin.value());self.canvas.show_edit_frame(self.frame_spin.value());self._sync_edit_state()
 
     def mark_dirty(self):self.dirty=True;self._title()
     def _title(self):self.setWindowTitle(("*" if self.dirty else "")+(self.path.name if self.path else "未命名.cmm")+" — Chemanim")
@@ -100,8 +131,13 @@ class MainWindow(QMainWindow):
     def canvas_fit_all(self):self.canvas.fit_all()
     def refresh_all(self,selected_node=""):
         self.node_list.refresh(selected_node);end=max(0,self.session.end_frame);self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.canvas.request_refresh();self._title()
-    def _transaction(self):self.mark_dirty();self.refresh_all(self.node_list.current_id())
-    def _sequence_edited(self):self.mark_dirty();self.refresh_all(self.node_list.current_id());self.canvas.set_preview_frame(self.frame_spin.value())
+    def _transaction(self):
+        node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
+        if node_id:self._activate_node(node_id)
+    def _sequence_edited(self):
+        node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
+        current=self.node_list.current_id()
+        if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
     def _selection(self,atoms,bonds):pass
     def _delete_focused(self):
         focus=QApplication.focusWidget()
@@ -112,8 +148,15 @@ class MainWindow(QMainWindow):
         if focus is self.node_list.tree or self.node_list.isAncestorOf(focus):self.node_list.duplicate()
     def _hover(self,value):
         if value["kind"]!="none":self.statusBar().showMessage(f'{value["kind"]} · Core {BUILD_COMMIT[:12]}')
-    def _set_tool(self,value):self.mode_panel.mode="绘制";self.session.edit_base(self.frame_spin.value());self.canvas.set_base_edit(True);self.session.set_tool(value);self.edit_mode.setText("编辑：基础结构");self.node_list.tree.clearSelection();self.statusBar().showMessage(f"绘制工具：{value}")
-    def _set_element(self,value):self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
+    def _set_tool(self,value):
+        mutates=value in self.mode_panel.STRUCTURE_WRITE_TOOLS
+        if mutates and not self.session.can_edit_structure:
+            self.statusBar().showMessage("请先在左侧选择有效的“创建/引用分子”节点");return
+        self.mode_panel.mode="绘制";self.session.set_tool(value);self._sync_edit_state();self.statusBar().showMessage(f"绘制工具：{value}")
+    def _set_element(self,value):
+        if not self.session.can_edit_structure:
+            self.statusBar().showMessage("请先在左侧选择有效的“创建/引用分子”节点");return
+        self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
     def _edit_atom_text(self,atom_id,side):
         molecule=next((item for item in self.session.project().get("molecules",[]) if item["id"]==self.session.active_molecule),{})
         atom=next((item for item in molecule.get("atoms",[]) if item["id"]==atom_id),{})
@@ -135,31 +178,26 @@ class MainWindow(QMainWindow):
     def _add_node(self,node_type,seed=None,open_editor=True):
         project=self.session.project();nodes=project.get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes))
         if node_type=="scene":self._scene_dialog();return ""
-        node_id=self.session.add_node(node_type,"{}",index);project=self.session.project();node=next(item for item in project["nodes"] if item["id"]==node_id);params=dict(node.get("params",{}));params.update(seed or {})
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
+        params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
         if node_type.startswith("atom_") and self.canvas.selected_atoms and not params.get("atom"):params["atom"]=self.canvas.selected_atoms[-1]
         if node_type.startswith("bond_") and self.canvas.selected_bonds and not params.get("bond"):params["bond"]=self.canvas.selected_bonds[-1]
         if node_type=="arrow_new":
             used=[int(m.group(1)) for item in project["nodes"] if item["type"]=="arrow_new" for m in [re.fullmatch(r"arrow(\d+)",item.get("params",{}).get("target",""))] if m];params["target"]=f"arrow{max(used,default=0)+1}"
         elif node_type.startswith("arrow_") and not params.get("target"):params["target"]=self._latest_arrow(index)
-        self.session.update_node(node_id,json.dumps(params,ensure_ascii=False));self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
+        node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index);self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
         if open_editor:self._edit_node_dialog(node_id)
         return node_id
 
     def _node_selected(self,node_id):
-        node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
-        if not node:return
-        timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});self._set_frame(timing["end"])
-        self.canvas.set_base_edit(False)
-        if node["type"]=="scene":self.edit_mode.setText("编辑：场景")
-        else:self.session.edit_node(node_id);self.edit_mode.setText(f"编辑节点：{node.get('type','')}")
+        self._stop_playback(False);self.actions["final"].setChecked(False);self.canvas.set_final_effect(False);self._activate_node(node_id)
 
     def _edit_node_dialog(self,node_id):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return
         if node["type"]=="scene":self._scene_dialog();return
-        dialog=QDialog(self);dialog.setWindowTitle("节点参数");inspector=NodeInspector(self.session,dialog);inspector.set_node(node_id);inspector.nodeEdited.connect(lambda _id:(self.mark_dirty(),self.refresh_all(node_id),self.canvas.set_preview_frame(self.frame_spin.value())))
+        dialog=QDialog(self);dialog.setWindowTitle("节点参数");inspector=NodeInspector(self.session,dialog);inspector.set_node(node_id);inspector.nodeEdited.connect(lambda _id:self._node_parameters_changed(node_id))
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);buttons.rejected.connect(dialog.reject)
         layout=QVBoxLayout(dialog);layout.addWidget(inspector);layout.addWidget(buttons);dialog.resize(430,max(240,min(720,inspector.sizeHint().height()+100)));dialog.exec()
 
@@ -217,23 +255,34 @@ class MainWindow(QMainWindow):
             if not lerp_menu.actions():lerp_menu.setEnabled(False)
         menu.exec(global_pos)
 
+    def _node_parameters_changed(self,node_id):
+        self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id)
     def _set_frame(self,frame):self.frame_spin.setValue(frame)
-    def _preview_frame(self,frame):self.canvas.set_preview_frame(frame)
-    def new_project(self):self.session.new_project();self.session.add_blank_molecule("molecule1");self.canvas.set_base_edit(True);self.path=None;self.dirty=False;self.refresh_all();self.canvas.fit_artboard()
-    def add_blank(self):stable_id=self.session.add_blank_molecule("");self.mark_dirty();self.refresh_all();self.statusBar().showMessage(f"已新建 {stable_id}")
+    def _preview_frame(self,frame):
+        self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state("播放：只读预览" if self._playing else "预览：只读")
+    def _toggle_final_effect(self,checked):
+        self._stop_playback(False);self.canvas.set_final_effect(bool(checked))
+        if checked:self.session.preview_timeline(self.frame_spin.value());self.canvas.show_edit_frame(self.frame_spin.value());self._sync_edit_state("最终效果：只读预览")
+        else:
+            node_id=self.node_list.current_id()
+            if not node_id or not self._activate_node(node_id):self._preview_frame(self.frame_spin.value())
+    def new_project(self):
+        self._stop_playback(False);self.session.new_project();self.session.add_blank_molecule("molecule1");self.path=None;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
+    def add_blank(self):
+        stable_id=self.session.add_blank_molecule("");self.mark_dirty();self.refresh_all();self._select_default_authoring_node();self.statusBar().showMessage(f"已新建 {stable_id}")
     def add_smiles(self):
         dialog=SmilesDialog(self)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
         try:stable_id=self.session.import_smiles(dialog.name.text().strip(),dialog.smiles.text().strip())
         except Exception as error:QMessageBox.warning(self,"无法导入",str(error));return
-        self.mark_dirty();self.refresh_all();self.canvas.fit_all();self.statusBar().showMessage(f"已导入 {stable_id}")
+        self.mark_dirty();self.refresh_all();self._select_default_authoring_node();self.canvas.fit_all();self.statusBar().showMessage(f"已导入 {stable_id}")
     def open_project(self):
         name,_=QFileDialog.getOpenFileName(self,"打开工程",str(self.root/"mod"),"Chemanim (*.cmm)")
         if name:self.load(Path(name))
     def load(self,path:Path):
         try:self.session.load(str(path))
         except Exception as error:QMessageBox.critical(self,"无法打开",str(error));return
-        self.canvas.set_base_edit(True);self.path=path;self.dirty=False;self.refresh_all();self.canvas.fit_artboard()
+        self._stop_playback(False);self.path=path;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
     def save(self):
         if not self.path:
             name,_=QFileDialog.getSaveFileName(self,"保存工程",str(self.root/"mod"/"native2d.cmm"),"Chemanim (*.cmm)")
@@ -243,9 +292,15 @@ class MainWindow(QMainWindow):
         except Exception as error:QMessageBox.critical(self,"保存失败",str(error));return
         self.dirty=False;self._title();self.statusBar().showMessage(f"已保存 {self.path}")
     def undo(self):
-        if self.session.undo():self.mark_dirty();self.refresh_all()
+        node_id=self.node_list.current_id()
+        if self.session.undo():
+            self.mark_dirty();self.refresh_all(node_id);current=self.node_list.current_id()
+            if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
     def redo(self):
-        if self.session.redo():self.mark_dirty();self.refresh_all()
+        node_id=self.node_list.current_id()
+        if self.session.redo():
+            self.mark_dirty();self.refresh_all(node_id);current=self.node_list.current_id()
+            if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
     def generate_lua(self):
         try:path=self.session.write_mod(str(self.root))
         except Exception as error:QMessageBox.critical(self,"生成失败",str(error));return

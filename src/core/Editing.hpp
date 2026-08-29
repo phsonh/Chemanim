@@ -93,12 +93,16 @@ public:
     void setElement(std::string element);
     void setViewport(Viewport viewport);
     [[nodiscard]] const Viewport& viewport() const;
-    void editBaseStructure(int previewFrame = 0);
+    void editBaseStructure(const std::string& nodeId, int previewFrame = 0);
     void previewTimeline(int frame);
     void editAtomTween(const std::string& tweenId);
     void editPose(const std::string& moleculeId, const std::string& poseId, int previewFrame);
     void editScriptNode(const std::string& nodeId);
     [[nodiscard]] EditTargetKind editTargetKind() const;
+    [[nodiscard]] std::string editTargetId() const;
+    [[nodiscard]] int previewFrame() const;
+    [[nodiscard]] bool canEditStructure() const;
+    [[nodiscard]] bool canDirectManipulate() const;
     [[nodiscard]] Molecule displayMolecule() const;
 
     [[nodiscard]] Hit hitTest(Point canvasPoint) const;

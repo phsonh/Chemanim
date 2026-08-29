@@ -46,9 +46,12 @@ def icon_for(kind: str, text="") -> QIcon:
 class ModeToolPanel(QWidget):
     nodeRequested=pyqtSignal(str);drawToolRequested=pyqtSignal(str);elementRequested=pyqtSignal(str);periodicTableRequested=pyqtSignal()
     SCRIPT_CATEGORIES=("通用","分子","箭头");DRAW_CATEGORIES=("绘制",)
+    STRUCTURE_WRITE_TOOLS={"eraser","atom_label","atom_text","charge_positive","charge_negative",
+        "single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar",
+        "hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"}
 
     def __init__(self,session,parent=None):
-        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle"
+        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle";self._structure_enabled=False
         self.recent_elements=["C","N","O","H","S","P","F","Cl","Br","I"]
         self.text_number_style="subscript"
         self.setObjectName("modeToolPanel");layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0);layout.setSpacing(0)
@@ -105,10 +108,18 @@ class ModeToolPanel(QWidget):
         self.recent_elements=self.recent_elements[:10]
         if self.mode=="绘制":self._build_tertiary()
 
+    def set_structure_enabled(self,enabled):
+        self._structure_enabled=bool(enabled)
+        for button in self.tertiary.findChildren(QToolButton):
+            if button.property("structureWrite"):
+                button.setEnabled(self._structure_enabled)
+
     def _separator(self):line=QFrame();line.setFrameShape(QFrame.Shape.VLine);self.tertiary_layout.addWidget(line)
     def _tool(self,kind,label,signal,checkable=False,tooltip="",show_icon=True,icon_only=False):
         is_draw=getattr(signal,"signal",None)==getattr(self.drawToolRequested,"signal",None)
         button=QToolButton();button.setText(label);button.setToolTip(tooltip or label);button.setCheckable(checkable);button.setMinimumHeight(40)
+        structure_write=kind in self.STRUCTURE_WRITE_TOOLS or (self.mode=="绘制" and not is_draw)
+        button.setProperty("structureWrite",structure_write)
         if show_icon:
             button.setIcon(icon_for(kind,label));button.setIconSize(QSize(28,28))
             if icon_only:button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly);button.setFixedWidth(46)
@@ -179,4 +190,6 @@ class ModeToolPanel(QWidget):
             self._separator()
             for element in self.recent_elements:self._tool(element,element,self.elementRequested,show_icon=False)
             self._separator();button=QToolButton();button.setText("周期表…");button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.clicked.connect(self.periodicTableRequested);self.tertiary_layout.addWidget(button)
+            button.setProperty("structureWrite",True)
         self.tertiary_layout.addStretch()
+        self.set_structure_enabled(self._structure_enabled)

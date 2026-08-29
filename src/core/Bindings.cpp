@@ -9,6 +9,7 @@
 #include <pybind11/stl.h>
 
 #include <filesystem>
+#include <algorithm>
 #include <stdexcept>
 
 namespace py = pybind11;
@@ -107,9 +108,23 @@ public:
     bool canRedo() const { return session_.canRedo(); }
     bool undo() { return session_.undo(); }
     bool redo() { return session_.redo(); }
-    void editBase(int frame) { session_.editBaseStructure(frame); }
+    void editBase(const std::string& nodeId, int frame) { session_.editBaseStructure(nodeId,frame); }
     void previewTimeline(int frame) { session_.previewTimeline(frame); }
     void editNode(const std::string& id){session_.editScriptNode(id);}
+    std::string editTargetKind() const {
+        switch(session_.editTargetKind()){
+            case core::EditTargetKind::BaseStructure:return "base_structure";
+            case core::EditTargetKind::TimelinePreview:return "timeline_preview";
+            case core::EditTargetKind::AtomTween:return "atom_tween";
+            case core::EditTargetKind::Pose:return "pose";
+            case core::EditTargetKind::ScriptNode:return "script_node";
+        }
+        return "timeline_preview";
+    }
+    std::string editTargetId() const{return session_.editTargetId();}
+    int previewFrame() const{return session_.previewFrame();}
+    bool canEditStructure() const{return session_.canEditStructure();}
+    bool canDirectManipulate() const{return session_.canDirectManipulate();}
     py::object nodeRegistry() const{return jsonObject(core::nodeRegistryJson());}
     py::list nodeTimings() const{py::list result;for(const auto& timing:core::compileNodeTimings(session_.project())){py::dict item;item["id"]=timing.id;item["type"]=timing.type;item["target"]=timing.target;item["start"]=timing.startFrame;item["end"]=timing.endFrame;item["enabled"]=timing.enabled;result.append(item);}return result;}
     std::string addNode(const std::string& type,const std::string& params,int index){return session_.addScriptNode(type,params,index<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(index)));}
@@ -143,16 +158,41 @@ public:
     py::dict depictAt(int frame, bool finalEffect) const {
         const core::EvaluatedScene evaluated=core::evaluateNodes(session_.project(),frame);core::DepictionResult composite;composite.width=session_.viewport().width;composite.height=session_.viewport().height;
         composite.svg="<svg xmlns='http://www.w3.org/2000/svg' width='"+std::to_string(composite.width)+"px' height='"+std::to_string(composite.height)+"px' viewBox='0 0 "+std::to_string(composite.width)+" "+std::to_string(composite.height)+"'>\n";
-        for(const auto& [id,molecule]:evaluated.molecules){
+        if(finalEffect){
+            std::string background=session_.project().scene.background;
+            if(background.size()==8){
+                const int alpha=std::stoi(background.substr(6,2),nullptr,16);
+                composite.svg.append("<rect width='100%' height='100%' fill='#"+background.substr(0,6)+"' fill-opacity='"+std::to_string(alpha/255.0)+"'/>\n");
+            }
+        }
+        std::vector<std::pair<std::string,const core::Molecule*>> ordered;
+        for(const auto& [id,molecule]:evaluated.molecules)ordered.push_back({id,&molecule});
+        std::stable_sort(ordered.begin(),ordered.end(),[](const auto& first,const auto& second){
+            if(first.second->layer!=second.second->layer)return first.second->layer<second.second->layer;
+            return first.first<second.first;
+        });
+        for(const auto& [id,moleculePointer]:ordered){
+            const core::Molecule& molecule=*moleculePointer;
             if(!molecule.visible||molecule.retired)continue;
-            const core::DepictionResult depiction=depiction_.depict(molecule,session_.project().style,session_.viewport());
+            core::Viewport depictionViewport=session_.viewport();double translateX=0.0,translateY=0.0;
+            if(finalEffect){
+                const core::Scene& scene=session_.project().scene;
+                const double outputScale=scene.logicWidth>0?static_cast<double>(scene.width)/scene.logicWidth:1.0;
+                depictionViewport.pixelsPerUnit=scene.viewZoom*session_.viewport().pixelsPerUnit/std::max(1e-9,outputScale);
+                if(const auto anchor=molecule.coordinate()){
+                    depictionViewport.center=*anchor;
+                    const core::Point canvas=session_.viewport().modelToCanvas(*anchor);
+                    translateX=canvas.x-composite.width*.5;translateY=canvas.y-composite.height*.5;
+                }
+            }
+            const core::DepictionResult depiction=depiction_.depict(molecule,session_.project().style,depictionViewport);
             const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");
             if(start!=std::string::npos&&end!=std::string::npos){
                 const double viewWidth=depiction.viewBox.right-depiction.viewBox.left;
                 const double viewHeight=depiction.viewBox.bottom-depiction.viewBox.top;
                 if(viewWidth>0.0&&viewHeight>0.0){
                     const double sx=static_cast<double>(composite.width)/viewWidth,sy=static_cast<double>(composite.height)/viewHeight;
-                    composite.svg.append("<g transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
+                    composite.svg.append("<g transform='translate("+std::to_string(translateX)+" "+std::to_string(translateY)+") matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
                     composite.svg.append(depiction.svg.substr(start+1,end-start-1));
                     composite.svg.append("\n</g>\n");
                 }
@@ -198,9 +238,14 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("set_atom_label", &CoreSession::setAtomLabel)
         .def("add_charge_adornment", &CoreSession::addChargeAdornment).def("set_adornment_offset",&CoreSession::setAdornmentOffset).def_property_readonly("can_undo", &CoreSession::canUndo)
         .def_property_readonly("can_redo", &CoreSession::canRedo).def("undo", &CoreSession::undo).def("redo", &CoreSession::redo)
-        .def("edit_base", &CoreSession::editBase, py::arg("frame")=0)
+        .def("edit_base", &CoreSession::editBase, py::arg("node_id"),py::arg("frame")=0)
         .def("preview_timeline", &CoreSession::previewTimeline)
         .def("edit_node",&CoreSession::editNode)
+        .def_property_readonly("edit_target_kind",&CoreSession::editTargetKind)
+        .def_property_readonly("edit_target_id",&CoreSession::editTargetId)
+        .def_property_readonly("preview_frame",&CoreSession::previewFrame)
+        .def_property_readonly("can_edit_structure",&CoreSession::canEditStructure)
+        .def_property_readonly("can_direct_manipulate",&CoreSession::canDirectManipulate)
         .def("node_registry",&CoreSession::nodeRegistry).def("node_timings",&CoreSession::nodeTimings)
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
