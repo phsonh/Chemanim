@@ -12,6 +12,7 @@
 #include <GraphMol/Depictor/RDDepictor.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iomanip>
 #include <memory>
@@ -32,6 +33,51 @@ struct BuiltMolecule {
     std::vector<Point> positions;
 };
 
+std::vector<std::string> labelGroups(const std::string& source) {
+    std::vector<std::string> groups;
+    for (std::size_t index = 0; index < source.size();) {
+        const unsigned char current = static_cast<unsigned char>(source[index]);
+        if (std::isupper(current)) {
+            std::size_t end = index + 1;
+            if (end < source.size() && std::islower(static_cast<unsigned char>(source[end]))) ++end;
+            while (end < source.size() && std::isdigit(static_cast<unsigned char>(source[end]))) ++end;
+            groups.push_back(source.substr(index, end - index)); index = end;
+        } else {
+            std::size_t end = index + 1;
+            while (end < source.size() && std::isdigit(current) ==
+                    std::isdigit(static_cast<unsigned char>(source[end]))) ++end;
+            groups.push_back(source.substr(index, end - index)); index = end;
+        }
+    }
+    return groups;
+}
+
+std::string orientedAlias(const Atom& atom) {
+    if (atom.alias.empty()) return {};
+    std::vector<std::string> groups = labelGroups(atom.alias);
+    if (atom.labelSide == AtomLabelSide::Left) std::reverse(groups.begin(), groups.end());
+    std::string oriented;
+    for (const std::string& group : groups) oriented += group;
+    return oriented;
+}
+
+std::string formattedAlias(const Atom& atom) {
+    const std::string oriented = orientedAlias(atom);
+    const char* tag = atom.numberStyle == AtomNumberStyle::Subscript ? "sub" : "sup";
+    std::string result;
+    for (std::size_t index = 0; index < oriented.size();) {
+        if (!std::isdigit(static_cast<unsigned char>(oriented[index]))) {
+            result.push_back(oriented[index++]); continue;
+        }
+        std::size_t end = index + 1;
+        while (end < oriented.size() && std::isdigit(static_cast<unsigned char>(oriented[end]))) ++end;
+        result += "<" + std::string(tag) + ">" + oriented.substr(index, end - index) +
+                  "</" + std::string(tag) + ">";
+        index = end;
+    }
+    return result;
+}
+
 RDKit::Bond::BondType rdBondType(BondType value) {
     switch (value) {
         case BondType::Double: return RDKit::Bond::DOUBLE;
@@ -50,7 +96,19 @@ BuiltMolecule build(const Molecule& source) {
         if (value.implicitHydrogens > 0) { atom->setNoImplicit(true); atom->setNumExplicitHs(value.implicitHydrogens); }
         const unsigned int index = result.value->addAtom(atom, true, true);
         if (value.hidden) result.value->getAtomWithIdx(index)->setProp(RDKit::common_properties::atomLabel, std::string{});
-        else if (!value.alias.empty()) result.value->getAtomWithIdx(index)->setProp(RDKit::common_properties::atomLabel, value.alias);
+        else if (!value.alias.empty()) {
+            // The atom-label parser intentionally treats digits as
+            // subscripts. Normal-number labels are drawn after the molecule
+            // through the literal drawString overload instead of passing
+            // <lit> through atomLabel (where this RDKit build displays the
+            // tag itself).
+            if (value.numberStyle == AtomNumberStyle::Normal)
+                result.value->getAtomWithIdx(index)->setProp(
+                    RDKit::common_properties::atomLabel, std::string{});
+            else
+                result.value->getAtomWithIdx(index)->setProp(
+                    RDKit::common_properties::atomLabel, formattedAlias(value));
+        }
         result.indices[value.id] = index; result.atomIds.push_back(value.id);result.positions.push_back(value.position);
     }
     for (const Bond& value : source.bonds) {
@@ -185,10 +243,10 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             for(int i=1;i<=hashCount;++i){const double t=t0+(t1-t0)*i/(hashCount+1.0);const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth*1.18,color,opacity,"butt");} continue;
         }
         if (bond.stereo==BondStereo::SolidBar) {
-            // Schrödinger Sketcher keeps wedge width independent from normal
-            // bond pen width.  The equal-width ChemDraw symbol needs 2.5 pen
-            // widths on each side of its centreline (5 pen widths total).
-            const double halfWidth=lineWidth*modelPerPoint*2.5;
+            // Keep the constant-width bond visibly heavier than a normal bond
+            // without overwhelming the atom junction: ChemDraw's document
+            // symbol is about four normal pen widths in total.
+            const double halfWidth=lineWidth*modelPerPoint*2.0;
             const Point n{normal.x*halfWidth,normal.y*halfWidth};
             const auto p0=point(clipped(a,b->position,n));
             const auto p1=point(clipped(b,a->position,n));
@@ -200,14 +258,13 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             continue;
         }
         if (bond.stereo==BondStereo::HashedBar) {
-            const double halfWidth=lineWidth*modelPerPoint*2.5;
+            const double halfWidth=lineWidth*modelPerPoint*2.0;
             const Point first=clipped(a,b->position,{}),second=clipped(b,a->position,{});
-            // Six equal bars match the compact document-style symbol while
-            // avoiding the dotted/comb appearance produced by scaling hash
-            // count directly with zoom or bond length.
-            constexpr int intervals=5;
-            for(int i=0;i<=intervals;++i){
-                const double t=i/static_cast<double>(intervals);
+            // ChemDraw leaves a half-step margin at both atom endpoints.  Bars
+            // at t=0/1 form the conspicuous black caps seen at ring junctions.
+            constexpr int hashCount=6;
+            for(int i=1;i<=hashCount;++i){
+                const double t=i/static_cast<double>(hashCount+1);
                 const Point c{first.x+(second.x-first.x)*t,first.y+(second.y-first.y)*t};
                 appendLine(svg,point({c.x-normal.x*halfWidth,c.y-normal.y*halfWidth}),
                            point({c.x+normal.x*halfWidth,c.y+normal.y*halfWidth}),
@@ -299,6 +356,20 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     if (!style.fontFile.empty()) options.fontFile = style.fontFile;
     RDKit::MolDraw2DUtils::setACS1996Options(options, referenceBondLength);
     drawer.drawMolecule(*built.value);
+    for (const Atom& atom : molecule.atoms) {
+        if (!atom.alive || atom.hidden || atom.alias.empty() ||
+            atom.numberStyle != AtomNumberStyle::Normal) continue;
+        drawer.setColour(RDKit::DrawColour(
+            std::clamp(atom.color.red * molecule.color.red / (255.0 * 255.0), 0.0, 1.0),
+            std::clamp(atom.color.green * molecule.color.green / (255.0 * 255.0), 0.0, 1.0),
+            std::clamp(atom.color.blue * molecule.color.blue / (255.0 * 255.0), 0.0, 1.0),
+            std::clamp(atom.alpha * molecule.alpha / (255.0 * 255.0), 0.0, 1.0)));
+        drawer.drawString(orientedAlias(atom),
+            RDGeom::Point2D(atom.position.x, atom.position.y),
+            atom.labelSide == AtomLabelSide::Left
+                ? RDKit::MolDraw2D_detail::TextAlignType::END
+                : RDKit::MolDraw2D_detail::TextAlignType::START);
+    }
     const auto origin = drawer.getDrawCoords(RDGeom::Point2D(0.0, 0.0));
     const auto unit = drawer.getDrawCoords(RDGeom::Point2D(1.0, 0.0));
     const double canonicalModelScale = std::hypot(unit.x - origin.x, unit.y - origin.y);
@@ -370,8 +441,23 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     // explicit visual bonds these patches become detached black hooks.  Atom
     // glyphs carry atom-* classes, so anonymous paths can be removed safely
     // before inserting the authoritative explicit bond layer.
-    result.svg=std::regex_replace(result.svg,
-        std::regex("<path(?![^>]*class=)[^>]*(?:/>|></path>)"),"");
+    // RDKit emits its anonymous junction patches before the classed atom
+    // glyphs. Literal visual labels drawn after drawMolecule() are anonymous
+    // paths too, so only clean the molecule prefix; removing anonymous paths
+    // from the entire SVG would erase normal-number text such as X2.
+    const std::size_t lastAtomClass = result.svg.rfind("class='atom-");
+    if (lastAtomClass != std::string::npos) {
+        const std::size_t lastAtomEnd = result.svg.find("/>", lastAtomClass);
+        if (lastAtomEnd != std::string::npos) {
+            std::string prefix = result.svg.substr(0, lastAtomEnd + 2);
+            prefix = std::regex_replace(prefix,
+                std::regex("<path(?![^>]*class=)[^>]*(?:/>|></path>)"), "");
+            result.svg = prefix + result.svg.substr(lastAtomEnd + 2);
+        }
+    } else {
+        result.svg=std::regex_replace(result.svg,
+            std::regex("<path(?![^>]*class=)[^>]*(?:/>|></path>)"),"");
+    }
     const std::string explicitBonds=explicitBondSvg(molecule,style,drawer);
     const std::string formalCharges=adornmentSvg(molecule,style,drawer);
     const std::size_t svgRoot=result.svg.find("<svg");

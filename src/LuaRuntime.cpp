@@ -186,7 +186,9 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         atom.id = stringField(state_, -1, "id", "");
         atom.creationSerial = static_cast<std::uint64_t>(numberField(state_, -1, "creation_serial", i));
         atom.element = stringField(state_, -1, "element", "C");
-        atom.alias = stringField(state_, -1, "alias", "");
+        atom.alias = stringField(state_, -1, "label", stringField(state_, -1, "alias", ""));
+        atom.labelSide = core::atomLabelSideFromString(stringField(state_, -1, "label_side", "right"));
+        atom.numberStyle = core::atomNumberStyleFromString(stringField(state_, -1, "number_style", "subscript"));
         atom.isotope = static_cast<int>(numberField(state_, -1, "isotope", 0));
         atom.radicalElectrons = static_cast<int>(numberField(state_, -1, "radical_electrons", 0));
         atom.implicitHydrogens = static_cast<int>(numberField(state_, -1, "implicit_hydrogens", 0));
@@ -801,7 +803,7 @@ int LuaRuntime::mLerpAtomsXY(lua_State* state) {
 int LuaRuntime::mSetAtomElement(lua_State* state) {
     auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
     if(!object.molecule)return luaL_error(state,"SetAtomElement requires a molecule");const std::string id=luaL_checkstring(state,a);
-    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addStringKey(object,"atom:"+id+":element",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);
+    if(!object.molecule->atom(id))return luaL_error(state,"Unknown atom ID");runtime.engine_->addStringKey(object,"atom:"+id+":label",runtime.cursor_,luaL_checkstring(state,a+1));return returnBoundObject(state,object);
 }
 int LuaRuntime::mSetAtomHidden(lua_State* state) {
     auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);

@@ -174,7 +174,7 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
         if (x != object.numericTracks.end()) atom.position.x = x->second.valueAt(currentFrame_);
         if (y != object.numericTracks.end()) atom.position.y = y->second.valueAt(currentFrame_);
-        if(const auto value=object.stringTracks.find("atom:"+atom.id+":element");value!=object.stringTracks.end())atom.element=value->second.valueAt(currentFrame_);
+        if(const auto value=object.stringTracks.find("atom:"+atom.id+":label");value!=object.stringTracks.end())atom.alias=value->second.valueAt(currentFrame_);
         if(const auto value=object.numericTracks.find("atom:"+atom.id+":hidden");value!=object.numericTracks.end())atom.hidden=value->second.valueAt(currentFrame_)>.5;
         if(const auto value=object.numericTracks.find("atom:"+atom.id+":alpha");value!=object.numericTracks.end())atom.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
         if(const auto value=object.numericTracks.find("atom:"+atom.id+":color:r");value!=object.numericTracks.end())atom.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
@@ -195,7 +195,10 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     }
     for(auto& adornment:currentMolecule.adornments){const std::string prefix="adornment:"+adornment.id+":";if(const auto value=object.numericTracks.find(prefix+"x");value!=object.numericTracks.end())adornment.offset.x=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"y");value!=object.numericTracks.end())adornment.offset.y=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"alpha");value!=object.numericTracks.end())adornment.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.stringTracks.find(prefix+"text");value!=object.stringTracks.end())adornment.text=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"color:r");value!=object.numericTracks.end())adornment.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:g");value!=object.numericTracks.end())adornment.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:b");value!=object.numericTracks.end())adornment.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));}
     std::ostringstream geometry; geometry << std::setprecision(12);
-    for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.position.x << ':' << atom.position.y << ':' << atom.alive << ':' << atom.alpha << ':' << atom.color.red << ':' << atom.color.green << ':' << atom.color.blue << ';';
+    for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.alias << ':'
+        << static_cast<int>(atom.labelSide) << ':' << static_cast<int>(atom.numberStyle) << ':'
+        << atom.position.x << ':' << atom.position.y << ':' << atom.alive << ':' << atom.alpha << ':'
+        << atom.color.red << ':' << atom.color.green << ':' << atom.color.blue << ';';
     for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.secondaryLineSide) << ':' << static_cast<int>(bond.stereo) << ':' << bond.alive << ':' << bond.alpha << ':' << bond.color.red << ':' << bond.color.green << ':' << bond.color.blue << ';';
     for(const auto& value:currentMolecule.adornments)geometry<<value.id<<':'<<value.atomId<<':'<<value.text<<':'<<value.offset.x<<':'<<value.offset.y<<':'<<value.alpha<<':'<<value.alive<<';';
     const std::string geometryKey = geometry.str();

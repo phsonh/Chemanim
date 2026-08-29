@@ -26,7 +26,8 @@ std::string moleculeDeclaration(const Molecule& molecule) {
        <<"    source_smiles = "<<quote(molecule.sourceSmiles)<<",\n"
        <<"    reference_bond_length = "<<molecule.referenceBondLength<<",\n    atoms = {\n";
     for(const Atom& atom:molecule.atoms)out<<"        { id="<<quote(atom.id)<<", creation_serial="<<atom.creationSerial<<", element="<<quote(atom.element)
-       <<", alias="<<quote(atom.alias)<<", isotope="<<atom.isotope
+       <<", label="<<quote(atom.alias)<<", label_side="<<quote(toString(atom.labelSide))
+       <<", number_style="<<quote(toString(atom.numberStyle))<<", isotope="<<atom.isotope
        <<", radical_electrons="<<atom.radicalElectrons<<", implicit_hydrogens="<<atom.implicitHydrogens
        <<", hidden="<<(atom.hidden?"true":"false")<<", alive="<<(atom.alive?"true":"false")
        <<", alpha="<<atom.alpha<<", color_r="<<atom.color.red<<", color_g="<<atom.color.green<<", color_b="<<atom.color.blue<<", x="<<(atom.position.x-anchor.x)<<", y="<<(atom.position.y-anchor.y)<<" },\n";

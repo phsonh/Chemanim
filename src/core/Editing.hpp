@@ -15,6 +15,7 @@ enum class Tool {
     Move,
     Eraser,
     AtomLabel,
+    AtomText,
     ChargePositive,
     ChargeNegative,
     SingleBond,
@@ -46,7 +47,7 @@ struct Viewport {
 
 enum class HitKind { None, Atom, Bond, Adornment };
 enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose, ScriptNode };
-enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Move, Pan };
+enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Text, Move, Pan };
 
 struct Hit {
     HitKind kind = HitKind::None;
@@ -109,6 +110,8 @@ public:
     bool deleteSelection();
     bool setAtomPosition(const std::string& atomId, Point position);
     bool setAtomElement(const std::string& atomId, std::string element);
+    bool setAtomLabel(const std::string& atomId, std::string label,
+                      AtomLabelSide side, AtomNumberStyle numberStyle);
     bool addChargeAdornment(const std::string& atomId, int delta);
     bool setAdornmentOffset(const std::string& adornmentId, Point offset);
     [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,

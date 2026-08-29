@@ -19,6 +19,7 @@ class StructureCanvas(QWidget):
     contextRequested = pyqtSignal(dict, object)
     undoRequested = pyqtSignal()
     redoRequested = pyqtSignal()
+    atomTextRequested = pyqtSignal(str, str)
 
     def __init__(self, session: CoreSession, parent=None):
         super().__init__(parent)
@@ -337,6 +338,10 @@ class StructureCanvas(QWidget):
                 painter.drawLine(QPointF(center.x()-4,center.y()),QPointF(center.x()+4,center.y()))
                 if self._preview.get("text")=="⊕":
                     painter.drawLine(QPointF(center.x(),center.y()-4),QPointF(center.x(),center.y()+4))
+            elif kind=="text" and start and current:
+                first=QPointF(start["x"],start["y"]);second=QPointF(current["x"],current["y"])
+                painter.setPen(QPen(QColor(45,145,235,230),2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+                painter.drawLine(first,second);painter.drawEllipse(second,4,4)
 
     @staticmethod
     def _mods(event):
@@ -393,6 +398,8 @@ class StructureCanvas(QWidget):
         alt,control,shift=self._mods(event)
         result=self.session.pointer_up(event.position().x(),event.position().y(),alt,control,shift)
         self._gesture_active=False;self._consume(result);self.request_refresh()
+        if result.get("message","").startswith("atom_text|"):
+            _,atom_id,side=result["message"].split("|",2);self.atomTextRequested.emit(atom_id,side)
         if result["changed"]:
             self.transactionCommitted.emit()
 

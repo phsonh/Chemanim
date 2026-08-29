@@ -101,12 +101,12 @@ def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
     buttons["O"].click();value.canvas._sync_core_viewport()
     center=(value.canvas.width()*.5,value.canvas.height()*.5)
     value.session.pointer_down(*center);value.session.pointer_up(*center)
-    atom=value.session.project()["molecules"][0]["atoms"][0];assert atom["element"]=="O"
+    atom=value.session.project()["molecules"][0]["atoms"][0];assert atom["element"]=="C" and atom["label"]=="O"
     buttons={button.text():button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     buttons["N"].click();point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"])
     atoms=value.session.project()["molecules"][0]["atoms"]
-    assert len(atoms)==1 and atoms[0]["alive"] and atoms[0]["element"]=="N"
+    assert len(atoms)==1 and atoms[0]["alive"] and atoms[0]["element"]=="C" and atoms[0]["label"]=="N"
     assert value.session.depict(False)["svg"]
     value.close()
 
@@ -130,7 +130,7 @@ def test_element_toolbar_tracks_only_ten_most_recent_elements():
     value._set_element("Xe")
     assert value.mode_panel.recent_elements==["Xe","C","N","O","H","S","P","F","Cl","Br"]
     QApplication.processEvents()
-    buttons=[button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.property("drawKind") is None and button.text()!="周期表…"]
+    buttons=[button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.property("drawKind") is None and button.property("textNumberStyle") is None and button.text()!="周期表…"]
     assert buttons==value.mode_panel.recent_elements and len(buttons)==10
     value.close()
 
@@ -161,6 +161,17 @@ def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
     assert "charge_positive" in buttons and "charge_negative" in buttons
     assert buttons["charge_positive"].toolTip()=="形式正电荷（带圈 +）"
     assert {"select_rectangle","single_bond","ring6","solid_bar","hashed_bar"}<set(buttons)
+    value.close()
+
+
+def test_text_tool_number_style_controls_are_only_enabled_for_text():
+    value=window();value.mode_panel.set_mode("绘制")
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    styles={button.property("textNumberStyle"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("textNumberStyle")}
+    assert set(styles)=={"normal","subscript","superscript"} and not any(button.isEnabled() for button in styles.values())
+    buttons["atom_text"].click();assert all(button.isEnabled() for button in styles.values())
+    styles["superscript"].click();assert value.mode_panel.text_number_style=="superscript" and styles["superscript"].isChecked()
+    buttons["single_bond"].click();assert not any(button.isEnabled() for button in styles.values())
     value.close()
 
 

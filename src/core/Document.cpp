@@ -345,9 +345,28 @@ SecondaryLineSide secondaryLineSideFromString(const std::string& value) {
     if (value == "right") return SecondaryLineSide::Right;
     return SecondaryLineSide::Center;
 }
+const char* toString(AtomLabelSide value) {
+    return value == AtomLabelSide::Left ? "left" : "right";
+}
+AtomLabelSide atomLabelSideFromString(const std::string& value) {
+    return value == "left" ? AtomLabelSide::Left : AtomLabelSide::Right;
+}
+const char* toString(AtomNumberStyle value) {
+    switch (value) {
+        case AtomNumberStyle::Normal: return "normal";
+        case AtomNumberStyle::Superscript: return "superscript";
+        case AtomNumberStyle::Subscript: return "subscript";
+    }
+    return "subscript";
+}
+AtomNumberStyle atomNumberStyleFromString(const std::string& value) {
+    if (value == "normal") return AtomNumberStyle::Normal;
+    if (value == "superscript") return AtomNumberStyle::Superscript;
+    return AtomNumberStyle::Subscript;
+}
 
 std::string toJson(const Project& project, int indent) {
-    json root{{"format", "chemanim-native-2d"}, {"version", 5}, {"mod", project.mod},
+    json root{{"format", "chemanim-native-2d"}, {"version", 6}, {"mod", project.mod},
         {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId},
         {"next_node_id",project.nextNodeId}, {"next_creation_serial", project.nextCreationSerial}};
     root["scene"] = {{"width", project.scene.width}, {"height", project.scene.height},
@@ -368,7 +387,9 @@ std::string toJson(const Project& project, int indent) {
         colorToJson(item["color"], molecule.color);
         item["atoms"] = json::array();
         for (const Atom& atom : molecule.atoms) item["atoms"].push_back({{"id", atom.id}, {"element", atom.element},
-            {"creation_serial", atom.creationSerial}, {"alias", atom.alias}, {"isotope", atom.isotope},
+            {"creation_serial", atom.creationSerial}, {"label", atom.alias},
+            {"label_side", toString(atom.labelSide)}, {"number_style", toString(atom.numberStyle)},
+            {"isotope", atom.isotope},
             {"radical_electrons", atom.radicalElectrons}, {"implicit_hydrogens", atom.implicitHydrogens},
             {"hidden", atom.hidden}, {"alive", atom.alive}, {"alpha", atom.alpha},
             {"color", {{"r", atom.color.red}, {"g", atom.color.green}, {"b", atom.color.blue}}},
@@ -405,7 +426,7 @@ Project fromJson(const std::string& source) {
     const json root = json::parse(source);
     if (root.value("format", "") != "chemanim-native-2d") throw std::runtime_error("Not a Chemanim native 2D project");
     const int version = root.value("version", 0);
-    if (version < 2 || version > 5) throw std::runtime_error("Unsupported Chemanim native 2D project version");
+    if (version < 2 || version > 6) throw std::runtime_error("Unsupported Chemanim native 2D project version");
     Project project;
     std::map<std::string,std::pair<Point,double>> legacyTransforms;
     project.mod = root.value("mod", project.mod);
@@ -440,7 +461,10 @@ Project fromJson(const std::string& source) {
         molecule.visible=raw.value("visible",true); molecule.retired=raw.value("retired",false);
         if (const auto color = raw.find("color"); color != raw.end()) molecule.color = colorFromJson(*color, {255,255,255});
         for (const json& value : raw.value("atoms", json::array())) {
-            Atom atom; atom.id = value.value("id", ""); atom.element = value.value("element", "C"); atom.alias = value.value("alias", "");
+            Atom atom; atom.id = value.value("id", ""); atom.element = value.value("element", "C");
+            atom.alias = value.value("label", value.value("alias", ""));
+            atom.labelSide = atomLabelSideFromString(value.value("label_side", "right"));
+            atom.numberStyle = atomNumberStyleFromString(value.value("number_style", "subscript"));
             atom.creationSerial = version >= 5 ? value.value("creation_serial", std::uint64_t{0}) : project.allocateCreationSerial();
             if (atom.creationSerial == 0) atom.creationSerial = project.allocateCreationSerial();
             project.nextCreationSerial = std::max(project.nextCreationSerial, atom.creationSerial + 1);

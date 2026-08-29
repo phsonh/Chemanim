@@ -18,6 +18,11 @@ try:
     CoreSession = _native.CoreSession
     BUILD_COMMIT = _native.BUILD_COMMIT
     DOCUMENT_VERSION = _native.DOCUMENT_VERSION
+    if DOCUMENT_VERSION < 6 or not hasattr(CoreSession, "set_atom_label"):
+        raise RuntimeError(
+            "chemanim_core.pyd 缺少当前编辑器需要的文字工具 API。"
+            "请先关闭旧编辑器窗口，再运行 .\\build.ps1 -Configuration Release。"
+        )
     try:
         source_commit = subprocess.run(
             ["git", "rev-parse", "HEAD"],

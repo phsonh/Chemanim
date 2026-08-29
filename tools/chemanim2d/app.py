@@ -8,7 +8,7 @@ import subprocess
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeySequence
 from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QInputDialog,
     QPushButton, QSlider, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
 from .canvas import StructureCanvas
@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         self._build_actions();self._build_menu()
         self.mode_panel=ModeToolPanel(self.session);self.mode_panel.nodeRequested.connect(self._add_node);self.mode_panel.drawToolRequested.connect(self._set_tool);self.mode_panel.elementRequested.connect(self._set_element);self.mode_panel.periodicTableRequested.connect(self.choose_element)
         self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(420);self.node_list.setMaximumWidth(600);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited);self.node_list.undoRequested.connect(self.undo);self.node_list.redoRequested.connect(self.redo)
-        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo)
+        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo);self.canvas.atomTextRequested.connect(self._edit_atom_text)
         split=QSplitter();split.addWidget(self.node_list);split.addWidget(self.canvas);split.setSizes([440,1160])
         self._build_transport()
         center=QWidget();layout=QVBoxLayout(center);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0);layout.addWidget(self.mode_panel);layout.addWidget(split,1);layout.addWidget(self.transport);self.setCentralWidget(center)
@@ -114,6 +114,12 @@ class MainWindow(QMainWindow):
         if value["kind"]!="none":self.statusBar().showMessage(f'{value["kind"]} · Core {BUILD_COMMIT[:12]}')
     def _set_tool(self,value):self.mode_panel.mode="绘制";self.session.edit_base(self.frame_spin.value());self.canvas.set_base_edit(True);self.session.set_tool(value);self.edit_mode.setText("编辑：基础结构");self.node_list.tree.clearSelection();self.statusBar().showMessage(f"绘制工具：{value}")
     def _set_element(self,value):self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
+    def _edit_atom_text(self,atom_id,side):
+        molecule=next((item for item in self.session.project().get("molecules",[]) if item["id"]==self.session.active_molecule),{})
+        atom=next((item for item in molecule.get("atoms",[]) if item["id"]==atom_id),{})
+        initial=atom.get("label") or atom.get("element","C")
+        value,ok=QInputDialog.getText(self,"编辑原子文字","显示文字",QLineEdit.EchoMode.Normal,initial)
+        if ok and value.strip() and self.session.set_atom_label(atom_id,value.strip(),side,self.mode_panel.text_number_style):self._transaction()
     def choose_element(self):
         dialog=PeriodicTableDialog(self)
         if dialog.exec()==QDialog.DialogCode.Accepted and dialog.selected_element:self._set_element(dialog.selected_element)

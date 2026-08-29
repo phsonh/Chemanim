@@ -36,7 +36,7 @@ py::dict hit(const core::Hit& value) {
 py::dict editResult(const core::EditResult& value) {
     py::dict result; result["changed"] = value.changed; result["message"] = value.message;
     result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds;
-    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","move","pan"};
+    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","text","move","pan"};
     py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
     preview["text"] = value.preview.text;
@@ -96,6 +96,11 @@ public:
     bool deleteSelection() { return session_.deleteSelection(); }
     bool setAtomPosition(const std::string& id, double x, double y) { return session_.setAtomPosition(id,{x,y}); }
     bool setAtomElement(const std::string& id, const std::string& value) { return session_.setAtomElement(id,value); }
+    bool setAtomLabel(const std::string& id, const std::string& value,
+                      const std::string& side, const std::string& numberStyle) {
+        return session_.setAtomLabel(id, value, core::atomLabelSideFromString(side),
+                                     core::atomNumberStyleFromString(numberStyle));
+    }
     bool addChargeAdornment(const std::string& id, int delta) { return session_.addChargeAdornment(id,delta); }
     bool setAdornmentOffset(const std::string& id,double x,double y){return session_.setAdornmentOffset(id,{x,y});}
     bool canUndo() const { return session_.canUndo(); }
@@ -175,7 +180,7 @@ PYBIND11_MODULE(chemanim_core, module) {
 #else
     module.attr("BUILD_COMMIT")="unknown";
 #endif
-    module.attr("DOCUMENT_VERSION")=5;
+    module.attr("DOCUMENT_VERSION")=6;
     py::class_<CoreSession>(module, "CoreSession")
         .def(py::init<>()).def("new_project", &CoreSession::newProject).def("load", &CoreSession::load)
         .def("save", &CoreSession::save).def("json", &CoreSession::json).def("project", &CoreSession::project)
@@ -190,6 +195,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("pointer_up", &CoreSession::pointerUp, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll).def("delete_selection", &CoreSession::deleteSelection)
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
+        .def("set_atom_label", &CoreSession::setAtomLabel)
         .def("add_charge_adornment", &CoreSession::addChargeAdornment).def("set_adornment_offset",&CoreSession::setAdornmentOffset).def_property_readonly("can_undo", &CoreSession::canUndo)
         .def_property_readonly("can_redo", &CoreSession::canRedo).def("undo", &CoreSession::undo).def("redo", &CoreSession::redo)
         .def("edit_base", &CoreSession::editBase, py::arg("frame")=0)

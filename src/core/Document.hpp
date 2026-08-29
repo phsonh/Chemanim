@@ -35,6 +35,8 @@ enum class BondStereo {
     Wavy,
 };
 enum class SecondaryLineSide { Left, Right, Center };
+enum class AtomLabelSide { Left, Right };
+enum class AtomNumberStyle { Normal, Subscript, Superscript };
 
 struct Color {
     int red = 0;
@@ -47,6 +49,8 @@ struct Atom {
     std::uint64_t creationSerial = 0;
     std::string element = "C";
     std::string alias;
+    AtomLabelSide labelSide = AtomLabelSide::Right;
+    AtomNumberStyle numberStyle = AtomNumberStyle::Subscript;
     int isotope = 0;
     int radicalElectrons = 0;
     int implicitHydrogens = 0;
@@ -220,8 +224,12 @@ void saveProject(const Project& project, const std::filesystem::path& path);
 [[nodiscard]] const char* toString(BondType value);
 [[nodiscard]] const char* toString(BondStereo value);
 [[nodiscard]] const char* toString(SecondaryLineSide value);
+[[nodiscard]] const char* toString(AtomLabelSide value);
+[[nodiscard]] const char* toString(AtomNumberStyle value);
 [[nodiscard]] BondType bondTypeFromString(const std::string& value);
 [[nodiscard]] BondStereo bondStereoFromString(const std::string& value);
 [[nodiscard]] SecondaryLineSide secondaryLineSideFromString(const std::string& value);
+[[nodiscard]] AtomLabelSide atomLabelSideFromString(const std::string& value);
+[[nodiscard]] AtomNumberStyle atomNumberStyleFromString(const std::string& value);
 
 }  // namespace chem::core

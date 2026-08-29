@@ -36,7 +36,7 @@ class NodeInspector(QWidget):
             by_id = {item["id"]: item for item in project.get("molecules", [])}
             return [(by_id[value]["name"], value) for value in alive if value in by_id]
         molecule = next((item for item in project.get("molecules", []) if item["id"] == target), None)
-        if kind == "atom": return [(f'{item["element"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("atoms", []) if item.get("alive",True)]
+        if kind == "atom": return [(f'{item.get("label") or "C"} · {item["id"]}', item["id"]) for item in (molecule or {}).get("atoms", []) if item.get("alive",True)]
         if kind == "bond": return [(f'{item["a"]}—{item["b"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("bonds", []) if item.get("alive",True)]
         if kind == "pose": return [(key, key) for key in (molecule or {}).get("poses", {})]
         if kind == "arrow":

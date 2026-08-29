@@ -270,12 +270,9 @@ struct EditorSession::Impl {
         if (!gesture || gesture->startHit.kind != HitKind::Atom || !molecule()) return {};
         const Atom* atom = molecule()->atom(gesture->startHit.id);
         if (!atom) return {};
-        const double largeRadius = molecule()->referenceBondLength * .78;
-        const double smallRadius = largeRadius * .5;
-        const Point raw = viewport.canvasToModel(gesture->currentCanvas);
-        const double rawRadius = distance(atom->position, raw);
-        const double length = rawRadius > (smallRadius + largeRadius) * .5
-            ? largeRadius : smallRadius;
+        // Formal-charge placement is a single, predictable document-space
+        // radius.  At 100% editor zoom this is exactly 20 screen pixels.
+        constexpr double length = 20.0;
         if (distance(gesture->pressCanvas, gesture->currentCanvas) <= 12.0) {
             const Point offset = sketcher_geometry::bestPlacementAroundOrigin(
                 neighborOffsets(*molecule(), *atom), length);
@@ -283,6 +280,47 @@ struct EditorSession::Impl {
         }
         return snappedDirection(atom->position, viewport.canvasToModel(gesture->currentCanvas),
                                 length, alt);
+    }
+
+    AtomLabelSide textSide() const {
+        if (!gesture || gesture->startHit.kind != HitKind::Atom || !molecule())
+            return AtomLabelSide::Right;
+        const Atom* atom = molecule()->atom(gesture->startHit.id);
+        if (!atom) return AtomLabelSide::Right;
+        if (distance(gesture->pressCanvas, gesture->currentCanvas) > 12.0) {
+            return viewport.canvasToModel(gesture->currentCanvas).x < atom->position.x
+                ? AtomLabelSide::Left : AtomLabelSide::Right;
+        }
+        const std::vector<Point> neighbours = neighborOffsets(*molecule(), *atom);
+        if (neighbours.empty()) return AtomLabelSide::Right;
+        // A label has only two legal layouts. Score both horizontal
+        // directions against every adjacent bond and use the side with the
+        // larger minimum angular clearance. This matters for degree-two and
+        // higher vertices: reducing a general largest-sector direction to
+        // its x sign can choose the crowded side. Exact ties deliberately
+        // prefer the conventional right-hand layout.
+        const auto angularClearance = [&](double candidateAngle) {
+            double clearance = std::numbers::pi;
+            for (const Point& neighbour : neighbours) {
+                const double neighbourAngle = std::atan2(neighbour.y, neighbour.x);
+                const double separation = std::remainder(
+                    candidateAngle - neighbourAngle, 2.0 * std::numbers::pi);
+                clearance = std::min(clearance, std::abs(separation));
+            }
+            return clearance;
+        };
+        const double right = angularClearance(0.0);
+        const double left = angularClearance(std::numbers::pi);
+        return left > right + 1e-9 ? AtomLabelSide::Left : AtomLabelSide::Right;
+    }
+
+    Point textEndpoint() const {
+        if (!gesture || gesture->startHit.kind != HitKind::Atom || !molecule()) return {};
+        const Atom* atom = molecule()->atom(gesture->startHit.id);
+        if (!atom) return {};
+        const double direction = textSide() == AtomLabelSide::Left ? -1.0 : 1.0;
+        return {atom->position.x + direction * molecule()->referenceBondLength * .55,
+                atom->position.y};
     }
 
     std::vector<Point> ringPolygon(int count, Point cursor, bool disableAngle = false) const {
@@ -450,6 +488,9 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
         gesture.previewKind=GesturePreviewKind::Adornment;
         gesture.previewText=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
     }
+    else if (impl_->tool==Tool::AtomText && gesture.startHit.kind==HitKind::Atom) {
+        gesture.previewKind=GesturePreviewKind::Text;
+    }
     else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
     else if (impl_->tool==Tool::SelectRectangle) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Rectangle;
     else if (impl_->tool==Tool::Move) gesture.previewKind=GesturePreviewKind::Move;
@@ -490,6 +531,9 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     impl_->gesture = std::move(gesture);
     if (impl_->gesture->previewKind==GesturePreviewKind::Adornment) {
         impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->adornmentEndpoint(false));
+    }
+    if (impl_->gesture->previewKind==GesturePreviewKind::Text) {
+        impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->textEndpoint());
     }
     if (impl_->tool == Tool::Eraser && impl_->gesture) {
         const Hit hit = impl_->gesture->startHit;
@@ -532,6 +576,9 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     } else if (impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative) {
         if (impl_->gesture->startHit.kind==HitKind::Atom)
             impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->adornmentEndpoint(alt));
+    } else if (impl_->tool==Tool::AtomText) {
+        if (impl_->gesture->startHit.kind==HitKind::Atom)
+            impl_->gesture->currentCanvas=impl_->viewport.modelToCanvas(impl_->textEndpoint());
     } else if (impl_->tool == Tool::Eraser) {
         const Hit hit = impl_->hit(canvasPoint);
         if (hit.kind == HitKind::Atom && impl_->gesture->erasedAtoms.insert(hit.id).second)
@@ -651,11 +698,25 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             }
             impl_->gesture->changed = true;
         }
+    } else if (impl_->tool == Tool::AtomText) {
+        std::string request;
+        if (impl_->gesture->startHit.kind == HitKind::Atom) {
+            request = "atom_text|" + impl_->gesture->startHit.id + "|" +
+                (impl_->textSide() == AtomLabelSide::Left ? "left" : "right");
+        }
+        impl_->commit();
+        EditResult result = impl_->result(canvasPoint); result.message = std::move(request); return result;
     } else if (impl_->tool == Tool::AtomLabel) {
-        if (impl_->gesture->startHit.kind == HitKind::Atom) molecule->atom(impl_->gesture->startHit.id)->element = impl_->element;
+        if (impl_->gesture->startHit.kind == HitKind::Atom) {
+            Atom* atom=molecule->atom(impl_->gesture->startHit.id);
+            // Element buttons are presets for the same visual label edited by
+            // AtomText; they do not switch to a second chemical data path.
+            atom->alias=impl_->element=="C" ? "" : impl_->element;
+            atom->labelSide=impl_->textSide();atom->numberStyle=AtomNumberStyle::Subscript;
+        }
         else {
-            const std::string atomId = molecule->addAtom(impl_->gesture->startModel, impl_->element, impl_->project.allocateCreationSerial());
-            (void)atomId;
+            const std::string atomId = molecule->addAtom(impl_->gesture->startModel, "C", impl_->project.allocateCreationSerial());
+            if(Atom* atom=molecule->atom(atomId))atom->alias=impl_->element=="C" ? "" : impl_->element;
         }
         impl_->gesture->changed = true;
     } else if (impl_->tool == Tool::ChargePositive || impl_->tool == Tool::ChargeNegative) {
@@ -700,8 +761,18 @@ bool EditorSession::setAtomPosition(const std::string& atomId, Point position) {
 }
 bool EditorSession::setAtomElement(const std::string& atomId, std::string element) {
     Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
-    if (!atom || atom->element == element || element.empty()) return false;
-    Project before = impl_->project; atom->element = std::move(element); impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
+    const std::string label=element=="C" ? "" : element;
+    if (!atom || atom->alias == label || element.empty()) return false;
+    Project before = impl_->project; atom->alias = label; impl_->undo.push_back({std::move(before), impl_->project}); impl_->redo.clear(); return true;
+}
+bool EditorSession::setAtomLabel(const std::string& atomId, std::string label,
+                                 AtomLabelSide side, AtomNumberStyle numberStyle) {
+    Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
+    if (!atom || label.empty() ||
+        (atom->alias == label && atom->labelSide == side && atom->numberStyle == numberStyle)) return false;
+    Project before = impl_->project; atom->alias = std::move(label); atom->labelSide = side;
+    atom->numberStyle = numberStyle; impl_->undo.push_back({std::move(before), impl_->project});
+    impl_->redo.clear(); return true;
 }
 bool EditorSession::addChargeAdornment(const std::string& atomId, int delta) {
     Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
@@ -764,7 +835,7 @@ bool EditorSession::undo() { if (impl_->undo.empty()) return false; const auto h
 bool EditorSession::redo() { if (impl_->redo.empty()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot)); return true; }
 
 const char* toString(Tool value) {
-    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
+    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","atom_text","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
     return names[static_cast<int>(value)];
 }
 Tool toolFromString(const std::string& value) {

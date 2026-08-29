@@ -48,8 +48,8 @@ def test_manual_acetaminophen_from_blank_canvas():
     core.set_element("O"); gesture(core, "atom_label", canvas_point(core, carbonyl_o))
     gesture(core, "single_bond", canvas_point(core, carbonyl), (cpoint[0] + 62, cpoint[1] + 25))
     assert len(atoms(core)) == 11
-    assert sum(atom["element"] == "O" for atom in atoms(core)) == 2
-    assert sum(atom["element"] == "N" for atom in atoms(core)) == 1
+    assert sum(atom["label"] == "O" for atom in atoms(core)) == 2
+    assert sum(atom["label"] == "N" for atom in atoms(core)) == 1
     assert any(bond["type"] == "double" for bond in bonds(core))
     assert "explicit-visual-bonds" in core.depict(False)["svg"]
 
@@ -68,7 +68,7 @@ def test_manual_ibuprofen_uses_ring_double_element_and_wedge():
     gesture(core, "single_bond", canvas_point(core, acid), (ap[0] + 55, ap[1] + 35)); o2 = atoms(core)[-1]["id"]
     core.set_element("O"); gesture(core, "atom_label", canvas_point(core, o2))
     assert any(bond["stereo"] == "wedge" for bond in bonds(core))
-    assert sum(atom["element"] == "O" for atom in atoms(core)) == 2
+    assert sum(atom["label"] == "O" for atom in atoms(core)) == 2
     assert sum(bond["type"] == "double" for bond in bonds(core)) >= 4
 
 
@@ -498,9 +498,9 @@ def test_view_zoom_scales_font_and_stroke_with_bonds():
         assert abs(label_boxes[2][dimension] / label_boxes[0][dimension] - 4) < 0.1
 
 
-def test_v5_serialization_contains_no_runtime_aromatic_fields(tmp_path: Path):
+def test_v6_serialization_contains_visual_labels_and_no_runtime_aromatic_fields(tmp_path: Path):
     core=CoreSession();core.import_smiles("benzene","c1ccccc1");path=tmp_path/"flat.cmm";core.save(str(path));raw=path.read_text(encoding="utf-8")
-    assert '"version": 5' in raw and '"secondary_line_side"' in raw
+    assert '"version": 6' in raw and '"secondary_line_side"' in raw and '"label"' in raw
     assert '"aromatic"' not in raw and '"display_type"' not in raw and '"formal_charge"' not in raw
 
 
@@ -586,14 +586,51 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
     assert "class='formal-charge'" in svg and "<circle" in svg
 
 
-def test_formal_charge_uses_small_default_and_large_outward_snap_radii():
+def test_formal_charge_uses_one_fixed_twenty_unit_radius():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
     gesture(core,"charge_positive",point)
-    small=core.project()["molecules"][0]["adornments"][-1]
+    clicked=core.project()["molecules"][0]["adornments"][-1]
     gesture(core,"charge_negative",point,(point[0]+100,point[1]))
-    large=core.project()["molecules"][0]["adornments"][-1]
-    assert math.isclose(math.hypot(small["x"],small["y"]),32*.78*.5,rel_tol=1e-9)
-    assert math.isclose(math.hypot(large["x"],large["y"]),32*.78,rel_tol=1e-9)
+    dragged=core.project()["molecules"][0]["adornments"][-1]
+    assert math.isclose(math.hypot(clicked["x"],clicked["y"]),20,rel_tol=1e-9)
+    assert math.isclose(math.hypot(dragged["x"],dragged["y"]),20,rel_tol=1e-9)
+
+
+def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
+    core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=core.project()["molecules"][0]
+    left,right=molecule["atoms"][0],molecule["atoms"][1]
+    core.set_tool("atom_text");left_point=canvas_point(core,left["id"]);right_point=canvas_point(core,right["id"])
+    core.pointer_down(*left_point);left_request=core.pointer_up(*left_point)["message"]
+    core.pointer_down(*right_point);right_request=core.pointer_up(*right_point)["message"]
+    assert left_request==f'atom_text|{left["id"]}|left'
+    assert right_request==f'atom_text|{right["id"]}|right'
+    core.pointer_down(*right_point);dragged=core.pointer_up(right_point[0]-80,right_point[1])["message"]
+    assert dragged==f'atom_text|{right["id"]}|left'
+    assert core.set_atom_label(right["id"],"NO2","left","superscript")
+    stored=next(atom for atom in core.project()["molecules"][0]["atoms"] if atom["id"]==right["id"])
+    assert stored["label"]=="NO2" and stored["label_side"]=="left" and stored["number_style"]=="superscript"
+    raw=json.loads(core.json());saved=next(atom for atom in raw["molecules"][0]["atoms"] if atom["id"]==right["id"])
+    assert saved["label"]=="NO2" and "alias" not in saved
+
+
+def test_atom_text_click_scores_both_sides_for_degree_two_vertices_and_ties_right():
+    core=session();gesture(core,"single_bond",(480,270),(448,252));center=atoms(core)[0]
+    center_point=canvas_point(core,center["id"])
+    gesture(core,"single_bond",center_point,(448,288))
+    core.set_tool("atom_text");core.pointer_down(*center_point)
+    assert core.pointer_up(*center_point)["message"]==f'atom_text|{center["id"]}|right'
+
+    mirrored=session();gesture(mirrored,"single_bond",(480,270),(512,252));middle=atoms(mirrored)[0]
+    middle_point=canvas_point(mirrored,middle["id"])
+    gesture(mirrored,"single_bond",middle_point,(512,288))
+    mirrored.set_tool("atom_text");mirrored.pointer_down(*middle_point)
+    assert mirrored.pointer_up(*middle_point)["message"]==f'atom_text|{middle["id"]}|left'
+
+    tied=session();gesture(tied,"single_bond",(480,270),(480,238));origin=atoms(tied)[0]
+    origin_point=canvas_point(tied,origin["id"])
+    gesture(tied,"single_bond",origin_point,(480,302))
+    tied.set_tool("atom_text");tied.pointer_down(*origin_point)
+    assert tied.pointer_up(*origin_point)["message"]==f'atom_text|{origin["id"]}|right'
 
 
 def test_control_drag_is_rectangle_selection_without_switching_drawing_tool():

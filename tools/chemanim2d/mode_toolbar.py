@@ -33,6 +33,8 @@ def icon_for(kind: str, text="") -> QIcon:
     elif kind in ("charge_positive","charge_negative"):
         painter.drawEllipse(5,5,18,18);painter.drawLine(9,14,19,14)
         if kind=="charge_positive":painter.drawLine(14,9,14,19)
+    elif kind=="atom_text":
+        painter.drawText(7,21,"A")
     else:
         # Generic script-node icon.  Never squeeze the localized label into a
         # 28 px pixmap: at high DPI that looked like duplicated/garbled text.
@@ -48,6 +50,7 @@ class ModeToolPanel(QWidget):
     def __init__(self,session,parent=None):
         super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle"
         self.recent_elements=["C","N","O","H","S","P","F","Cl","Br","I"]
+        self.text_number_style="subscript"
         self.setObjectName("modeToolPanel");layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0);layout.setSpacing(0)
         self.primary=QTabBar();self.primary.setObjectName("primaryTabs");self.primary.setShape(QTabBar.Shape.RoundedNorth);self.primary.setExpanding(False);self.primary.setDrawBase(False)
         for name in ("脚本","绘制"):self.primary.addTab(name)
@@ -116,8 +119,27 @@ class ModeToolPanel(QWidget):
             if is_draw:
                 self._active_draw_tool=kind
                 for child in self.tertiary.findChildren(QToolButton):child.setChecked(child.property("drawKind")==kind)
+                self._update_text_style_buttons()
             signal.emit(kind)
         button.clicked.connect(clicked);self.tertiary_layout.addWidget(button);return button
+
+    def _text_style_button(self,label,style,tooltip):
+        button=QToolButton();button.setText(label);button.setToolTip(tooltip);button.setCheckable(True)
+        button.setProperty("textNumberStyle",style);button.setMinimumHeight(40);button.setFixedWidth(42)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        button.clicked.connect(lambda _checked=False,value=style:self._set_text_number_style(value))
+        self.tertiary_layout.addWidget(button);return button
+
+    def _set_text_number_style(self,style):
+        if self._active_draw_tool!="atom_text" or style not in ("normal","subscript","superscript"):return
+        self.text_number_style=style;self._update_text_style_buttons()
+
+    def _update_text_style_buttons(self):
+        enabled=self._active_draw_tool=="atom_text"
+        for button in self.tertiary.findChildren(QToolButton):
+            style=button.property("textNumberStyle")
+            if style:
+                button.setEnabled(enabled);button.setChecked(enabled and style==self.text_number_style)
 
     @staticmethod
     def _script_scope_for(node_type):
@@ -148,6 +170,12 @@ class ModeToolPanel(QWidget):
             self._separator()
             self._tool("charge_positive","⊕",self.drawToolRequested,True,"形式正电荷（带圈 +）",icon_only=True)
             self._tool("charge_negative","⊖",self.drawToolRequested,True,"形式负电荷（带圈 −）",icon_only=True)
+            self._separator()
+            self._tool("atom_text","文字",self.drawToolRequested,True,"原子文字：点击后输入，左右拖动决定排版",icon_only=True)
+            self._text_style_button("X2","normal","数字正常排列")
+            self._text_style_button("X₂","subscript","数字作为下标")
+            self._text_style_button("X²","superscript","数字作为上标")
+            self._update_text_style_buttons()
             self._separator()
             for element in self.recent_elements:self._tool(element,element,self.elementRequested,show_icon=False)
             self._separator();button=QToolButton();button.setText("周期表…");button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.clicked.connect(self.periodicTableRequested);self.tertiary_layout.addWidget(button)
