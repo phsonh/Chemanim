@@ -167,6 +167,9 @@ public:
         }
         std::vector<std::pair<std::string,const core::Molecule*>> ordered;
         for(const auto& [id,molecule]:evaluated.molecules)ordered.push_back({id,&molecule});
+        const core::EvaluatedScene finalEvaluated=finalEffect
+            ?core::evaluateNodes(session_.project(),core::nodeSequenceEndFrame(session_.project()))
+            :core::EvaluatedScene{};
         std::stable_sort(ordered.begin(),ordered.end(),[](const auto& first,const auto& second){
             if(first.second->layer!=second.second->layer)return first.second->layer<second.second->layer;
             return first.first<second.first;
@@ -174,27 +177,73 @@ public:
         for(const auto& [id,moleculePointer]:ordered){
             const core::Molecule& molecule=*moleculePointer;
             if(!molecule.visible||molecule.retired)continue;
-            core::Viewport depictionViewport=session_.viewport();double translateX=0.0,translateY=0.0;
+            core::Molecule depictedMolecule=molecule;
+            core::Viewport depictionViewport=session_.viewport();
+            std::string outerTransform;
             if(finalEffect){
                 const core::Scene& scene=session_.project().scene;
-                const double outputScale=scene.logicWidth>0?static_cast<double>(scene.width)/scene.logicWidth:1.0;
-                depictionViewport.pixelsPerUnit=scene.viewZoom*session_.viewport().pixelsPerUnit/std::max(1e-9,outputScale);
-                if(const auto anchor=molecule.coordinate()){
-                    depictionViewport.center=*anchor;
-                    const core::Point canvas=session_.viewport().modelToCanvas(*anchor);
-                    translateX=canvas.x-composite.width*.5;translateY=canvas.y-composite.height*.5;
+                const core::Point anchor=molecule.coordinate().value_or(core::Point{});
+                const double objectScale=molecule.scale;
+                const double radians=molecule.rotation*3.14159265358979323846/180.0;
+                const double cosine=std::cos(radians),sine=std::sin(radians);
+                const auto localize=[&](core::Molecule value){
+                    const core::Point valueAnchor=value.coordinate().value_or(core::Point{});
+                    const double valueScale=std::abs(value.scale)<1e-9?1.0:value.scale;
+                    const double valueRadians=value.rotation*3.14159265358979323846/180.0;
+                    const double c=std::cos(valueRadians),s=std::sin(valueRadians);
+                    for(core::Atom& atom:value.atoms){
+                        const double x=(atom.position.x-valueAnchor.x)/valueScale;
+                        const double y=(atom.position.y-valueAnchor.y)/valueScale;
+                        atom.position={x*c+y*s,-x*s+y*c};
+                    }
+                    value.scale=1.0;value.rotation=0.0;
+                    return value;
+                };
+                depictedMolecule=localize(molecule);
+                core::Molecule extent=depictedMolecule;
+                if(const auto found=finalEvaluated.molecules.find(id);found!=finalEvaluated.molecules.end()){
+                    core::Molecule finalLocal=localize(found->second);
+                    extent.atoms.insert(extent.atoms.end(),finalLocal.atoms.begin(),finalLocal.atoms.end());
                 }
+                if(!extent.atoms.empty()){
+                    double minX=extent.atoms.front().position.x,maxX=minX;
+                    double minY=extent.atoms.front().position.y,maxY=minY;
+                    for(const core::Atom& atom:extent.atoms){
+                        minX=std::min(minX,atom.position.x);maxX=std::max(maxX,atom.position.x);
+                        minY=std::min(minY,atom.position.y);maxY=std::max(maxY,atom.position.y);
+                    }
+                    const double canonicalPixelsPerUnit=14.4/std::max(.01,molecule.referenceBondLength);
+                    depictionViewport.width=std::max(64,static_cast<int>(std::ceil((maxX-minX)*canonicalPixelsPerUnit+64.0)));
+                    depictionViewport.height=std::max(64,static_cast<int>(std::ceil((maxY-minY)*canonicalPixelsPerUnit+64.0)));
+                    depictionViewport.pixelsPerUnit=canonicalPixelsPerUnit;
+                    depictionViewport.center={(minX+maxX)*.5,(minY+maxY)*.5};
+                }
+                const double canvasScaleX=scene.logicWidth>0?static_cast<double>(composite.width)/scene.logicWidth:1.0;
+                const double canvasScaleY=scene.logicHeight>0?static_cast<double>(composite.height)/scene.logicHeight:1.0;
+                const double localX=depictionViewport.center.x*objectScale;
+                const double localY=depictionViewport.center.y*objectScale;
+                const double offsetX=localX*cosine-localY*sine;
+                const double offsetY=localX*sine+localY*cosine;
+                const double centerX=composite.width*.5+(anchor.x+offsetX)*canvasScaleX;
+                const double centerY=composite.height*.5-(anchor.y+offsetY)*canvasScaleY;
+                outerTransform="translate("+std::to_string(centerX)+" "+std::to_string(centerY)+") rotate("+
+                    std::to_string(molecule.rotation)+") scale("+std::to_string(scene.viewZoom*objectScale)+") translate("+
+                    std::to_string(-depictionViewport.width*.5)+" "+std::to_string(-depictionViewport.height*.5)+")";
             }
-            const core::DepictionResult depiction=depiction_.depict(molecule,session_.project().style,depictionViewport);
+            const core::DepictionResult depiction=depiction_.depict(depictedMolecule,session_.project().style,depictionViewport);
             const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");
             if(start!=std::string::npos&&end!=std::string::npos){
                 const double viewWidth=depiction.viewBox.right-depiction.viewBox.left;
                 const double viewHeight=depiction.viewBox.bottom-depiction.viewBox.top;
                 if(viewWidth>0.0&&viewHeight>0.0){
-                    const double sx=static_cast<double>(composite.width)/viewWidth,sy=static_cast<double>(composite.height)/viewHeight;
-                    composite.svg.append("<g transform='translate("+std::to_string(translateX)+" "+std::to_string(translateY)+") matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
+                    const double targetWidth=finalEffect?depictionViewport.width:composite.width;
+                    const double targetHeight=finalEffect?depictionViewport.height:composite.height;
+                    const double sx=targetWidth/viewWidth,sy=targetHeight/viewHeight;
+                    if(finalEffect)composite.svg.append("<g transform='"+outerTransform+"'>\n");
+                    composite.svg.append("<g transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
                     composite.svg.append(depiction.svg.substr(start+1,end-start-1));
                     composite.svg.append("\n</g>\n");
+                    if(finalEffect)composite.svg.append("</g>\n");
                 }
             }
             if(id==session_.activeMoleculeId()){composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;}

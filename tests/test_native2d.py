@@ -747,6 +747,23 @@ def test_visual_events_generate_runtime_lua_without_chemical_fields():
     assert "aromatic" not in lua and "formal_charge" not in lua and "displayType" not in lua
 
 
+def test_repository_visual_events_is_one_reversible_authoring_model():
+    core=CoreSession();core.load(str(ROOT/"mod"/"visual_events"/"visual_events.cmm"))
+    before=core.json();assert core.end_frame==120
+    forward={frame:core.evaluated_molecules(frame) for frame in (0,30,52,75,120)}
+    backward={frame:core.evaluated_molecules(frame) for frame in (120,75,52,30,0)}
+    assert all(forward[frame]==backward[frame] for frame in forward)
+    assert core.json()==before
+    assert forward[30]["molecule3"]["has_coordinate"]
+    assert forward[52]["molecule3"]["alpha"]==130
+    assert not forward[75]["molecule2"]["exists"]
+    assert forward[75]["molecule3"]["alpha"]==0
+    assert core.generate_lua()==(ROOT/"mod"/"visual_events"/"main.lua").read_text(encoding="utf-8")
+    core.set_viewport(1920,1080,2.0,0.0,0.0)
+    final=core.depict_at(120,True)
+    assert len(final["rgba"])==1920*1080*4 and any(final["rgba"])
+
+
 def test_script_preview_preserves_each_depiction_viewbox_transform():
     core=session();gesture(core,"ring6",(480,270))
     core.add_node("atom_lerp_xy",json.dumps({"target":core.active_molecule,"atom":atoms(core)[0]["id"],"x":12,"y":5,"frames":30,"easing":"linear"}))
