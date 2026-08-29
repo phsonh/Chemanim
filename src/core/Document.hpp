@@ -26,7 +26,14 @@ struct Rect {
 };
 
 enum class BondType { Single, Double, Triple };
-enum class BondStereo { None, SolidWedge, DashedWedge, Wavy };
+enum class BondStereo {
+    None,
+    SolidWedge,
+    DashedWedge,
+    SolidBar,
+    HashedBar,
+    Wavy,
+};
 enum class SecondaryLineSide { Left, Right, Center };
 
 struct Color {

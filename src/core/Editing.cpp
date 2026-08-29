@@ -23,7 +23,8 @@ double pointSegmentDistance(Point point, Point first, Point second) {
 }
 bool isBondTool(Tool tool) {
     return tool == Tool::SingleBond || tool == Tool::DoubleBond || tool == Tool::TripleBond ||
-           tool == Tool::SolidWedge || tool == Tool::DashedWedge || tool == Tool::WavyBond;
+           tool == Tool::SolidWedge || tool == Tool::DashedWedge ||
+           tool == Tool::SolidBar || tool == Tool::HashedBar || tool == Tool::WavyBond;
 }
 bool isRingTool(Tool tool) { return tool >= Tool::Ring3 && tool <= Tool::Benzene; }
 int ringSize(Tool tool) { return tool == Tool::Benzene ? 6 : 3 + static_cast<int>(tool) - static_cast<int>(Tool::Ring3); }
@@ -33,6 +34,8 @@ std::pair<BondType, BondStereo> bondStyle(Tool tool) {
         case Tool::TripleBond: return {BondType::Triple, BondStereo::None};
         case Tool::SolidWedge: return {BondType::Single, BondStereo::SolidWedge};
         case Tool::DashedWedge: return {BondType::Single, BondStereo::DashedWedge};
+        case Tool::SolidBar: return {BondType::Single, BondStereo::SolidBar};
+        case Tool::HashedBar: return {BondType::Single, BondStereo::HashedBar};
         case Tool::WavyBond: return {BondType::Single, BondStereo::Wavy};
         default: return {BondType::Single, BondStereo::None};
     }
@@ -267,7 +270,12 @@ struct EditorSession::Impl {
         if (!gesture || gesture->startHit.kind != HitKind::Atom || !molecule()) return {};
         const Atom* atom = molecule()->atom(gesture->startHit.id);
         if (!atom) return {};
-        const double length = molecule()->referenceBondLength * .78;
+        const double largeRadius = molecule()->referenceBondLength * .78;
+        const double smallRadius = largeRadius * .5;
+        const Point raw = viewport.canvasToModel(gesture->currentCanvas);
+        const double rawRadius = distance(atom->position, raw);
+        const double length = rawRadius > (smallRadius + largeRadius) * .5
+            ? largeRadius : smallRadius;
         if (distance(gesture->pressCanvas, gesture->currentCanvas) <= 12.0) {
             const Point offset = sketcher_geometry::bestPlacementAroundOrigin(
                 neighborOffsets(*molecule(), *atom), length);
@@ -431,7 +439,12 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     Impl::Gesture gesture{.before = impl_->project, .pressCanvas = canvasPoint, .pressModel = pressModel,
                           .startCanvas = canvasPoint, .currentCanvas = canvasPoint,
                           .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
-    if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
+    if (control && gesture.startHit.kind == HitKind::None) {
+        // Ctrl-drag is a tool-independent rectangular selection gesture.  It
+        // keeps the current drawing tool active once the gesture ends.
+        gesture.previewKind=GesturePreviewKind::Rectangle;
+    }
+    else if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
     else if (isRingTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Ring;
     else if ((impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative)&&gesture.startHit.kind==HitKind::Atom) {
         gesture.previewKind=GesturePreviewKind::Adornment;
@@ -508,6 +521,9 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
         impl_->gesture->changed=std::hypot(delta.x,delta.y)>1e-9;
     } else if (impl_->tool == Tool::SelectLasso) {
         if (impl_->gesture->lasso.empty() || distance(canvasPoint, impl_->gesture->lasso.back()) > 3.0) impl_->gesture->lasso.push_back(canvasPoint);
+    } else if (impl_->gesture->previewKind==GesturePreviewKind::Rectangle) {
+        // The rectangle is rendered by the editor overlay; no model mutation
+        // occurs until pointerUp performs the selection.
     } else if (isBondTool(impl_->tool)) {
         impl_->gesture->currentCanvas = impl_->viewport.modelToCanvas(impl_->gestureEndpoint(alt));
     } else if (isRingTool(impl_->tool)) {
@@ -559,7 +575,7 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 }
             }
         }
-    } else if (impl_->tool == Tool::SelectRectangle && impl_->gesture->original.empty() && impl_->gesture->originalAdornments.empty()) {
+    } else if (impl_->gesture->previewKind == GesturePreviewKind::Rectangle && impl_->gesture->original.empty() && impl_->gesture->originalAdornments.empty()) {
         const double left = std::min(impl_->gesture->pressCanvas.x, canvasPoint.x), right = std::max(impl_->gesture->pressCanvas.x, canvasPoint.x);
         const double top = std::min(impl_->gesture->pressCanvas.y, canvasPoint.y), bottom = std::max(impl_->gesture->pressCanvas.y, canvasPoint.y);
         if (!control) impl_->selectedAtoms.clear();
@@ -659,6 +675,16 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
 }
 
 void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl_->project.nextCreationSerial;impl_->project = std::move(impl_->gesture->before);impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->gesture.reset(); } }
+EditResult EditorSession::selectAll() {
+    impl_->selectedAtoms.clear();
+    impl_->selectedBonds.clear();
+    if (const Molecule* molecule=impl_->molecule()) {
+        for (const Atom& atom:molecule->atoms) if (atom.alive) impl_->selectedAtoms.insert(atom.id);
+        for (const Bond& bond:molecule->bonds) if (bond.alive&&bond.visible)
+            impl_->selectedBonds.insert(bond.id);
+    }
+    return impl_->result({-1e9,-1e9});
+}
 bool EditorSession::deleteSelection() {
     Molecule* molecule = impl_->molecule(); if (!molecule) return false;
     Project before = impl_->project; bool changed = false;
@@ -738,7 +764,7 @@ bool EditorSession::undo() { if (impl_->undo.empty()) return false; const auto h
 bool EditorSession::redo() { if (impl_->redo.empty()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot)); return true; }
 
 const char* toString(Tool value) {
-    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
+    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
     return names[static_cast<int>(value)];
 }
 Tool toolFromString(const std::string& value) {

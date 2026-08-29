@@ -313,6 +313,8 @@ const char* toString(BondStereo value) {
         case BondStereo::None: return "none";
         case BondStereo::SolidWedge: return "wedge";
         case BondStereo::DashedWedge: return "dash";
+        case BondStereo::SolidBar: return "solid_bar";
+        case BondStereo::HashedBar: return "hashed_bar";
         case BondStereo::Wavy: return "wavy";
     }
     return "none";
@@ -325,6 +327,8 @@ BondType bondTypeFromString(const std::string& value) {
 BondStereo bondStereoFromString(const std::string& value) {
     if (value == "wedge") return BondStereo::SolidWedge;
     if (value == "dash") return BondStereo::DashedWedge;
+    if (value == "solid_bar" || value == "bold") return BondStereo::SolidBar;
+    if (value == "hashed_bar" || value == "hashed") return BondStereo::HashedBar;
     if (value == "wavy" || value == "either") return BondStereo::Wavy;
     return BondStereo::None;
 }

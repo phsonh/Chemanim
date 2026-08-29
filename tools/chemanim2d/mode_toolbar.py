@@ -14,13 +14,17 @@ def icon_for(kind: str, text="") -> QIcon:
         count=6 if kind=="benzene" else int(kind[-1]);points=[QPointF(14+10*cos(-pi/2+i*2*pi/count),14+10*sin(-pi/2+i*2*pi/count)) for i in range(count)];painter.drawPolygon(QPolygonF(points))
         if kind=="benzene":
             for i in (0,2,4):painter.drawLine(points[i]*.72+QPointF(3.9,3.9),points[(i+1)%6]*.72+QPointF(3.9,3.9))
-    elif kind in ("single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","wavy_bond"):
+    elif kind in ("single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond"):
         if kind=="double_bond":painter.drawLine(4,10,24,10);painter.drawLine(4,18,24,18)
         elif kind=="triple_bond":
             for y in (8,14,20):painter.drawLine(4,y,24,y)
         elif kind=="solid_wedge":painter.setBrush(QColor(225,230,238));painter.drawPolygon(QPolygonF([QPointF(4,14),QPointF(24,7),QPointF(24,21)]))
         elif kind=="dashed_wedge":
             for i in range(5):painter.drawLine(5+i*4,14-i,5+i*4,14+i)
+        elif kind=="solid_bar":
+            painter.setPen(QPen(QColor(225,230,238),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.FlatCap));painter.drawLine(4,14,24,14)
+        elif kind=="hashed_bar":
+            for x in (4,8,12,16,20,24):painter.drawLine(x,9,x,19)
         elif kind=="wavy_bond":painter.drawLine(4,18,9,10);painter.drawLine(9,10,14,18);painter.drawLine(14,18,19,10);painter.drawLine(19,10,24,18)
         else:painter.drawLine(4,20,24,8)
     elif kind=="select_lasso":painter.drawEllipse(4,6,20,16)
@@ -39,7 +43,7 @@ def icon_for(kind: str, text="") -> QIcon:
 
 class ModeToolPanel(QWidget):
     nodeRequested=pyqtSignal(str);drawToolRequested=pyqtSignal(str);elementRequested=pyqtSignal(str);periodicTableRequested=pyqtSignal()
-    SCRIPT_CATEGORIES=("通用","分子","箭头");DRAW_CATEGORIES=("工具","结构","元素")
+    SCRIPT_CATEGORIES=("通用","分子","箭头");DRAW_CATEGORIES=("绘制",)
 
     def __init__(self,session,parent=None):
         super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle"
@@ -71,6 +75,7 @@ class ModeToolPanel(QWidget):
         self.category=(self.SCRIPT_CATEGORIES if mode=="脚本" else self.DRAW_CATEGORIES)[0];self._build_secondary()
     def set_category(self,category):
         categories=self.SCRIPT_CATEGORIES if self.mode=="脚本" else self.DRAW_CATEGORIES
+        if self.mode=="绘制" and category in ("工具","结构","元素"):category="绘制"
         if category not in categories:return
         self.category=category;self.script_scope="对象";index=categories.index(category)
         if self.secondary.currentIndex()!=index:self.secondary.blockSignals(True);self.secondary.setCurrentIndex(index);self.secondary.blockSignals(False)
@@ -85,6 +90,7 @@ class ModeToolPanel(QWidget):
 
     def _build_secondary(self):
         categories=self.SCRIPT_CATEGORIES if self.mode=="脚本" else self.DRAW_CATEGORIES
+        self.secondary_row.setVisible(self.mode=="脚本")
         self.secondary.blockSignals(True)
         while self.secondary.count():self.secondary.removeTab(0)
         for name in categories:self.secondary.addTab(name)
@@ -94,7 +100,7 @@ class ModeToolPanel(QWidget):
         if not element:return
         self.recent_elements=[element]+[value for value in self.recent_elements if value!=element]
         self.recent_elements=self.recent_elements[:10]
-        if self.mode=="绘制" and self.category=="元素":self._build_tertiary()
+        if self.mode=="绘制":self._build_tertiary()
 
     def _separator(self):line=QFrame();line.setFrameShape(QFrame.Shape.VLine);self.tertiary_layout.addWidget(line)
     def _tool(self,kind,label,signal,checkable=False,tooltip="",show_icon=True,icon_only=False):
@@ -132,17 +138,17 @@ class ModeToolPanel(QWidget):
             definitions=[item for item in self.session.node_registry() if item["category"]==self.category]
             if scoped:definitions=[item for item in definitions if self._script_scope_for(item["type"])==self.script_scope]
             for item in definitions:self._tool(item["type"],item["label"],self.nodeRequested,show_icon=False)
-        elif self.category=="工具":
+        else:
             for key,label,shortcut in (("select_rectangle","框选","V"),("select_lasso","套索","L"),("eraser","橡皮擦","E")):self._tool(key,label,self.drawToolRequested,True,f"{label} · {shortcut}",icon_only=True)
-        elif self.category=="结构":
-            for key,label in (("single_bond","单键"),("double_bond","双键"),("triple_bond","三键"),("solid_wedge","实楔"),("dashed_wedge","虚楔"),("wavy_bond","波浪键")):self._tool(key,label,self.drawToolRequested,True,label,icon_only=True)
+            self._separator()
+            for key,label in (("single_bond","单键"),("double_bond","双键"),("triple_bond","三键"),("solid_wedge","渐宽实楔"),("dashed_wedge","渐宽虚楔"),("solid_bar","等宽实键"),("hashed_bar","等宽虚键"),("wavy_bond","波浪键")):self._tool(key,label,self.drawToolRequested,True,label,icon_only=True)
             self._separator()
             for count in range(3,9):self._tool(f"ring{count}",f"{count} 元环",self.drawToolRequested,True,f"{count} 元环",icon_only=True)
             self._tool("benzene","单双键苯环",self.drawToolRequested,True,"显式单双键苯环",icon_only=True)
             self._separator()
             self._tool("charge_positive","⊕",self.drawToolRequested,True,"形式正电荷（带圈 +）",icon_only=True)
             self._tool("charge_negative","⊖",self.drawToolRequested,True,"形式负电荷（带圈 −）",icon_only=True)
-        elif self.category=="元素":
+            self._separator()
             for element in self.recent_elements:self._tool(element,element,self.elementRequested,show_icon=False)
             self._separator();button=QToolButton();button.setText("周期表…");button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.clicked.connect(self.periodicTableRequested);self.tertiary_layout.addWidget(button)
         self.tertiary_layout.addStretch()

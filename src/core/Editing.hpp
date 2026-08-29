@@ -22,6 +22,8 @@ enum class Tool {
     TripleBond,
     SolidWedge,
     DashedWedge,
+    SolidBar,
+    HashedBar,
     WavyBond,
     Ring3,
     Ring4,
@@ -103,6 +105,7 @@ public:
     [[nodiscard]] EditResult pointerMove(Point canvasPoint, bool alt, bool control, bool shift);
     [[nodiscard]] EditResult pointerUp(Point canvasPoint, bool alt, bool control, bool shift);
     void cancelGesture();
+    [[nodiscard]] EditResult selectAll();
     bool deleteSelection();
     bool setAtomPosition(const std::string& atomId, Point position);
     bool setAtomElement(const std::string& atomId, std::string element);

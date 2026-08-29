@@ -184,6 +184,37 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             constexpr int hashCount=5;
             for(int i=1;i<=hashCount;++i){const double t=t0+(t1-t0)*i/(hashCount+1.0);const double w=modelSpacing*t;Point c{a->position.x+dx*t,a->position.y+dy*t};appendLine(svg,point({c.x-normal.x*w,c.y-normal.y*w}),point({c.x+normal.x*w,c.y+normal.y*w}),lineWidth*1.18,color,opacity,"butt");} continue;
         }
+        if (bond.stereo==BondStereo::SolidBar) {
+            // Schrödinger Sketcher keeps wedge width independent from normal
+            // bond pen width.  The equal-width ChemDraw symbol needs 2.5 pen
+            // widths on each side of its centreline (5 pen widths total).
+            const double halfWidth=lineWidth*modelPerPoint*2.5;
+            const Point n{normal.x*halfWidth,normal.y*halfWidth};
+            const auto p0=point(clipped(a,b->position,n));
+            const auto p1=point(clipped(b,a->position,n));
+            const auto p2=point(clipped(b,a->position,{-n.x,-n.y}));
+            const auto p3=point(clipped(a,b->position,{-n.x,-n.y}));
+            svg<<"<path d='M "<<p0.x<<','<<p0.y<<" L "<<p1.x<<','<<p1.y
+               <<" L "<<p2.x<<','<<p2.y<<" L "<<p3.x<<','<<p3.y
+               <<" Z' fill='"<<color<<"' opacity='"<<opacity<<"'/>\n";
+            continue;
+        }
+        if (bond.stereo==BondStereo::HashedBar) {
+            const double halfWidth=lineWidth*modelPerPoint*2.5;
+            const Point first=clipped(a,b->position,{}),second=clipped(b,a->position,{});
+            // Six equal bars match the compact document-style symbol while
+            // avoiding the dotted/comb appearance produced by scaling hash
+            // count directly with zoom or bond length.
+            constexpr int intervals=5;
+            for(int i=0;i<=intervals;++i){
+                const double t=i/static_cast<double>(intervals);
+                const Point c{first.x+(second.x-first.x)*t,first.y+(second.y-first.y)*t};
+                appendLine(svg,point({c.x-normal.x*halfWidth,c.y-normal.y*halfWidth}),
+                           point({c.x+normal.x*halfWidth,c.y+normal.y*halfWidth}),
+                           lineWidth,color,opacity,"butt");
+            }
+            continue;
+        }
         if (bond.stereo==BondStereo::Wavy) {
             const double t0=pointDistance(a->position,clipped(a,b->position,{}))/length,t1=1.0-pointDistance(b->position,clipped(b,a->position,{}))/length;
             // Sample densely enough that NanoSVG produces a smooth wave rather
@@ -324,7 +355,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
             const double lineSpacing=style.doubleBondSpacing*referenceBondLength*result.modelScale;
             result.bonds.push_back({bond.id, a->center, b->center,
                                     bondHitPolygon(a->center, b->center, 7.0),
-                                    bond.type, bond.secondaryLineSide,
+                                    bond.type, bond.secondaryLineSide, bond.stereo,
                                     lineSpacing,
                                     extension(modelA,true,-1.0),extension(modelA,true,1.0),
                                     extension(modelB,false,-1.0),extension(modelB,false,1.0)});

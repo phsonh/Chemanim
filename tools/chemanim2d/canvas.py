@@ -413,6 +413,8 @@ class StructureCanvas(QWidget):
         self.request_refresh();event.accept()
 
     def keyPressEvent(self,event:QKeyEvent):
+        if event.matches(QKeySequence.StandardKey.SelectAll):
+            self._consume(self.session.select_all());self.request_refresh();event.accept();return
         if event.matches(QKeySequence.StandardKey.Undo):
             self.undoRequested.emit();event.accept();return
         if event.matches(QKeySequence.StandardKey.Redo) or (event.key()==Qt.Key.Key_Z and event.modifiers()==(Qt.KeyboardModifier.ControlModifier|Qt.KeyboardModifier.ShiftModifier)):

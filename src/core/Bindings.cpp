@@ -92,6 +92,7 @@ public:
     py::dict pointerMove(double x, double y, bool alt, bool control, bool shift) { return editResult(session_.pointerMove({x,y},alt,control,shift)); }
     py::dict pointerUp(double x, double y, bool alt, bool control, bool shift) { return editResult(session_.pointerUp({x,y},alt,control,shift)); }
     void cancelGesture() { session_.cancelGesture(); }
+    py::dict selectAll() { return editResult(session_.selectAll()); }
     bool deleteSelection() { return session_.deleteSelection(); }
     bool setAtomPosition(const std::string& id, double x, double y) { return session_.setAtomPosition(id,{x,y}); }
     bool setAtomElement(const std::string& id, const std::string& value) { return session_.setAtomElement(id,value); }
@@ -129,7 +130,7 @@ public:
         py::dict result; result["width"] = depiction.width; result["height"] = depiction.height; result["svg"] = depiction.svg;
         py::dict transform; transform["origin"] = point(depiction.modelOrigin); transform["pixels_per_unit"] = depiction.modelScale; result["transform"] = transform;
         py::list atoms; for (const auto& atom : depiction.atoms) { py::dict item; item["id"] = atom.id; item["center"] = point(atom.center); item["bounds"] = py::make_tuple(atom.labelBounds.left,atom.labelBounds.top,atom.labelBounds.right,atom.labelBounds.bottom); atoms.append(item); } result["atoms"] = atoms;
-        py::list bonds; for (const auto& bond : depiction.bonds) { py::dict item; item["id"] = bond.id; item["first"] = point(bond.first); item["second"] = point(bond.second); item["type"] = core::toString(bond.type); item["secondary_line_side"] = core::toString(bond.secondaryLineSide); item["line_spacing"] = bond.lineSpacing; item["first_extensions"] = py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension); item["second_extensions"] = py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension); py::list polygon; for (auto value : bond.hitPolygon) polygon.append(point(value)); item["hit_polygon"] = polygon; bonds.append(item); } result["bonds"] = bonds;
+        py::list bonds; for (const auto& bond : depiction.bonds) { py::dict item; item["id"] = bond.id; item["first"] = point(bond.first); item["second"] = point(bond.second); item["type"] = core::toString(bond.type); item["secondary_line_side"] = core::toString(bond.secondaryLineSide); item["stereo"] = core::toString(bond.stereo); item["line_spacing"] = bond.lineSpacing; item["first_extensions"] = py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension); item["second_extensions"] = py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension); py::list polygon; for (auto value : bond.hitPolygon) polygon.append(point(value)); item["hit_polygon"] = polygon; bonds.append(item); } result["bonds"] = bonds;
         if (finalEffect) { const auto raster = depiction_.rasterize(depiction); result["rgba"] = py::bytes(reinterpret_cast<const char*>(raster.rgba.data()), raster.rgba.size()); } else result["rgba"] = py::none();
         return result;
     }
@@ -156,7 +157,7 @@ public:
         composite.svg+="</svg>";
         py::dict result; result["width"] = composite.width; result["height"] = composite.height; result["svg"] = composite.svg;
         py::list atoms; for (const auto& atom : composite.atoms) { py::dict item; item["id"] = atom.id; item["center"] = point(atom.center); atoms.append(item); } result["atoms"] = atoms;
-        py::list bonds;for(const auto& bond:composite.bonds){py::dict item;item["id"]=bond.id;item["first"]=point(bond.first);item["second"]=point(bond.second);item["type"]=core::toString(bond.type);item["secondary_line_side"]=core::toString(bond.secondaryLineSide);item["line_spacing"]=bond.lineSpacing;item["first_extensions"]=py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension);item["second_extensions"]=py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension);bonds.append(item);}result["bonds"]=bonds;
+        py::list bonds;for(const auto& bond:composite.bonds){py::dict item;item["id"]=bond.id;item["first"]=point(bond.first);item["second"]=point(bond.second);item["type"]=core::toString(bond.type);item["secondary_line_side"]=core::toString(bond.secondaryLineSide);item["stereo"]=core::toString(bond.stereo);item["line_spacing"]=bond.lineSpacing;item["first_extensions"]=py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension);item["second_extensions"]=py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension);bonds.append(item);}result["bonds"]=bonds;
         if (finalEffect) { const auto raster = depiction_.rasterize(composite); result["rgba"] = py::bytes(reinterpret_cast<const char*>(raster.rgba.data()), raster.rgba.size()); } else result["rgba"] = py::none();
         return result;
     }
@@ -187,7 +188,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("pointer_down", &CoreSession::pointerDown, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_move", &CoreSession::pointerMove, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_up", &CoreSession::pointerUp, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
-        .def("cancel_gesture", &CoreSession::cancelGesture).def("delete_selection", &CoreSession::deleteSelection)
+        .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll).def("delete_selection", &CoreSession::deleteSelection)
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
         .def("add_charge_adornment", &CoreSession::addChargeAdornment).def("set_adornment_offset",&CoreSession::setAdornmentOffset).def_property_readonly("can_undo", &CoreSession::canUndo)
         .def_property_readonly("can_redo", &CoreSession::canRedo).def("undo", &CoreSession::undo).def("redo", &CoreSession::redo)

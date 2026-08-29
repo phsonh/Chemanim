@@ -22,6 +22,7 @@ struct BondGeometry {
     std::vector<Point> hitPolygon;
     BondType type = BondType::Single;
     SecondaryLineSide secondaryLineSide = SecondaryLineSide::Center;
+    BondStereo stereo = BondStereo::None;
     double lineSpacing = 0.0;
     double firstNegativeExtension = 0.0;
     double firstPositiveExtension = 0.0;

@@ -384,6 +384,22 @@ def test_acs_visual_primitives_use_flat_secondary_caps_and_five_hash_wedge_bars(
     assert group.count(" L ")>=64 and "stroke-linejoin='round'" in group
 
 
+def test_equal_width_solid_and_hashed_bonds_are_distinct_persistent_styles(tmp_path: Path):
+    solid=session();gesture(solid,"solid_bar",(420,250),(452,250))
+    assert bonds(solid)[0]["stereo"]=="solid_bar"
+    group=solid.depict(False)["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    assert " Z' fill='" in group
+
+    hashed=session();gesture(hashed,"hashed_bar",(420,250),(452,250))
+    assert bonds(hashed)[0]["stereo"]=="hashed_bar"
+    group=hashed.depict(False)["svg"].split("<g id='explicit-visual-bonds'>",1)[1].split("</g>",1)[0]
+    segments=re.findall(r"M ([\d.e+-]+),([\d.e+-]+) L ([\d.e+-]+),([\d.e+-]+)",group)
+    lengths=[math.dist((float(x1),float(y1)),(float(x2),float(y2))) for x1,y1,x2,y2 in segments]
+    assert len(lengths)==6 and max(lengths)-min(lengths)<1e-7
+    path=tmp_path/"bars.cmm";hashed.save(str(path));restored=CoreSession();restored.load(str(path))
+    assert restored.project()["molecules"][0]["bonds"][0]["stereo"]=="hashed_bar"
+
+
 def test_centered_double_bond_keeps_chemdraw_geometry_without_rdkit_junction_patches():
     core=session();gesture(core,"double_bond",(420,270),(452,270))
     bond=bonds(core)[0]
@@ -568,6 +584,26 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
     snapped=math.degrees(math.atan2(charge["y"],charge["x"]));assert abs(snapped-15)<1e-9
     svg=core.depict(False)["svg"]
     assert "class='formal-charge'" in svg and "<circle" in svg
+
+
+def test_formal_charge_uses_small_default_and_large_outward_snap_radii():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
+    gesture(core,"charge_positive",point)
+    small=core.project()["molecules"][0]["adornments"][-1]
+    gesture(core,"charge_negative",point,(point[0]+100,point[1]))
+    large=core.project()["molecules"][0]["adornments"][-1]
+    assert math.isclose(math.hypot(small["x"],small["y"]),32*.78*.5,rel_tol=1e-9)
+    assert math.isclose(math.hypot(large["x"],large["y"]),32*.78,rel_tol=1e-9)
+
+
+def test_control_drag_is_rectangle_selection_without_switching_drawing_tool():
+    core=session();gesture(core,"ring6",(480,270));core.set_tool("single_bond")
+    down=core.pointer_down(350,150,False,True,False)
+    assert down["preview"]["kind"]=="rectangle"
+    core.pointer_move(610,390,False,True,False)
+    up=core.pointer_up(610,390,False,True,False)
+    assert set(up["selected_atoms"])=={atom["id"] for atom in atoms(core) if atom["alive"]}
+    assert core.tool=="single_bond"
 
 
 def test_anchor_deletion_and_detach_preserve_world_coordinates():

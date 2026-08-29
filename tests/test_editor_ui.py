@@ -130,7 +130,7 @@ def test_element_toolbar_tracks_only_ten_most_recent_elements():
     value._set_element("Xe")
     assert value.mode_panel.recent_elements==["Xe","C","N","O","H","S","P","F","Cl","Br"]
     QApplication.processEvents()
-    buttons=[button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()!="周期表…"]
+    buttons=[button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.property("drawKind") is None and button.text()!="周期表…"]
     assert buttons==value.mode_panel.recent_elements and len(buttons)==10
     value.close()
 
@@ -156,11 +156,11 @@ def test_main_menu_has_no_redundant_second_row_toolbar_and_nodes_have_no_checks(
 
 def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
     value=window();value.mode_panel.set_mode("绘制")
-    assert value.mode_panel.DRAW_CATEGORIES==("工具","结构","元素")
-    value.mode_panel.set_category("结构")
+    assert value.mode_panel.DRAW_CATEGORIES==("绘制",) and not value.mode_panel.secondary_row.isVisible()
     buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     assert "charge_positive" in buttons and "charge_negative" in buttons
     assert buttons["charge_positive"].toolTip()=="形式正电荷（带圈 +）"
+    assert {"select_rectangle","single_bond","ring6","solid_bar","hashed_bar"}<set(buttons)
     value.close()
 
 
@@ -186,6 +186,31 @@ def test_canvas_keyboard_undo_redo_and_delete_operate_on_structure():
     atom=value.session.project()["molecules"][0]["atoms"][0];value._set_tool("select_rectangle");point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"]);canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Delete)
     assert not value.session.project()["molecules"][0]["atoms"][0]["alive"]
+    value.close()
+
+
+def test_canvas_control_a_selects_all_alive_structure():
+    value=window();canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("ring5")
+    center=(canvas.width()*.5,canvas.height()*.5);value.session.pointer_down(*center);value.session.pointer_up(*center);value.refresh_all()
+    QTest.keyClick(canvas,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier)
+    molecule=value.session.project()["molecules"][0]
+    assert set(canvas.selected_atoms)=={atom["id"] for atom in molecule["atoms"] if atom["alive"]}
+    assert set(canvas.selected_bonds)=={bond["id"] for bond in molecule["bonds"] if bond["alive"]}
+    value.close()
+
+
+def test_canvas_control_drag_rect_selects_without_leaving_current_draw_tool():
+    value=window();canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("ring5")
+    center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
+    points=[item["center"] for item in value.session.depict(False)["atoms"]]
+    start=QPoint(round(min(point["x"] for point in points)-20),round(min(point["y"] for point in points)-20))
+    end=QPoint(round(max(point["x"] for point in points)+20),round(max(point["y"] for point in points)+20))
+    value._set_tool("single_bond")
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ControlModifier,pos=start)
+    QTest.mouseMove(canvas,end,80)
+    assert canvas._preview["kind"]=="rectangle"
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.ControlModifier,pos=end)
+    assert value.session.tool=="single_bond" and len(canvas.selected_atoms)==5 and len(canvas.selected_bonds)==5
     value.close()
 
 
