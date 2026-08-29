@@ -248,12 +248,47 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
             // symbol is about four normal pen widths in total.
             const double halfWidth=lineWidth*modelPerPoint*2.0;
             const Point n{normal.x*halfWidth,normal.y*halfWidth};
-            const auto p0=point(clipped(a,b->position,n));
-            const auto p1=point(clipped(b,a->position,n));
-            const auto p2=point(clipped(b,a->position,{-n.x,-n.y}));
-            const auto p3=point(clipped(a,b->position,{-n.x,-n.y}));
-            svg<<"<path d='M "<<p0.x<<','<<p0.y<<" L "<<p1.x<<','<<p1.y
-               <<" L "<<p2.x<<','<<p2.y<<" L "<<p3.x<<','<<p3.y
+            const auto joinsOtherBond=[&](const Atom* atom){
+                if(!atom||labelExtents(atom).x>0.0)return false;
+                return std::any_of(molecule.bonds.begin(),molecule.bonds.end(),
+                    [&](const Bond& candidate){
+                        if(candidate.id==bond.id||!candidate.alive||!candidate.visible)return false;
+                        if(candidate.atomA!=atom->id&&candidate.atomB!=atom->id)return false;
+                        const Atom* other=molecule.atom(
+                            candidate.atomA==atom->id?candidate.atomB:candidate.atomA);
+                        return other&&other->alive;
+                    });
+            };
+            const bool fillStart=joinsOtherBond(a),fillEnd=joinsOtherBond(b);
+            const double shoulder=std::min(halfWidth,length*.25);
+            const Point startTip=clipped(a,b->position,{});
+            const Point endTip=clipped(b,a->position,{});
+            const Point startUpper=fillStart
+                ? Point{startTip.x+tangent.x*shoulder+n.x,
+                        startTip.y+tangent.y*shoulder+n.y}
+                : clipped(a,b->position,n);
+            const Point startLower=fillStart
+                ? Point{startTip.x+tangent.x*shoulder-n.x,
+                        startTip.y+tangent.y*shoulder-n.y}
+                : clipped(a,b->position,{-n.x,-n.y});
+            const Point endUpper=fillEnd
+                ? Point{endTip.x-tangent.x*shoulder+n.x,
+                        endTip.y-tangent.y*shoulder+n.y}
+                : clipped(b,a->position,n);
+            const Point endLower=fillEnd
+                ? Point{endTip.x-tangent.x*shoulder-n.x,
+                        endTip.y-tangent.y*shoulder-n.y}
+                : clipped(b,a->position,{-n.x,-n.y});
+            const auto startUpperDraw=point(startUpper),endUpperDraw=point(endUpper);
+            const auto endLowerDraw=point(endLower),startLowerDraw=point(startLower);
+            svg<<"<path class='solid-bar bond-"<<bond.id<<"' d='";
+            if(fillStart){const auto tip=point(startTip);svg<<"M "<<tip.x<<','<<tip.y<<" L ";}
+            else svg<<"M ";
+            svg<<startUpperDraw.x<<','<<startUpperDraw.y<<" L "
+               <<endUpperDraw.x<<','<<endUpperDraw.y;
+            if(fillEnd){const auto tip=point(endTip);svg<<" L "<<tip.x<<','<<tip.y;}
+            svg<<" L "<<endLowerDraw.x<<','<<endLowerDraw.y<<" L "
+               <<startLowerDraw.x<<','<<startLowerDraw.y
                <<" Z' fill='"<<color<<"' opacity='"<<opacity<<"'/>\n";
             continue;
         }

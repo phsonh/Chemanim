@@ -400,6 +400,27 @@ def test_equal_width_solid_and_hashed_bonds_are_distinct_persistent_styles(tmp_p
     assert restored.project()["molecules"][0]["bonds"][0]["stereo"]=="hashed_bar"
 
 
+def test_solid_bar_fills_its_root_only_when_joined_to_other_bonds():
+    joined=session();gesture(joined,"single_bond",(480,270),(448,252));root=atoms(joined)[0]
+    root_point=canvas_point(joined,root["id"]);gesture(joined,"single_bond",root_point,(448,288))
+    gesture(joined,"solid_bar",root_point,(512,270));bar=bonds(joined)[-1]
+    svg=joined.depict(False)["svg"]
+    path=re.search(rf"<path class='solid-bar bond-{bar['id']}' d='([^']+)'",svg)
+    assert path and path.group(1).count(" L ")==4  # tip plus four full-width corners
+
+    reversed_bar=session();gesture(reversed_bar,"single_bond",(480,270),(448,252));root=atoms(reversed_bar)[0]
+    root_point=canvas_point(reversed_bar,root["id"]);gesture(reversed_bar,"single_bond",root_point,(448,288))
+    gesture(reversed_bar,"solid_bar",(512,270),root_point);bar=bonds(reversed_bar)[-1]
+    svg=reversed_bar.depict(False)["svg"]
+    path=re.search(rf"<path class='solid-bar bond-{bar['id']}' d='([^']+)'",svg)
+    assert path and path.group(1).count(" L ")==4  # endpoint order does not matter
+
+    isolated=session();gesture(isolated,"solid_bar",(420,250),(452,250));bar=bonds(isolated)[0]
+    svg=isolated.depict(False)["svg"]
+    path=re.search(rf"<path class='solid-bar bond-{bar['id']}' d='([^']+)'",svg)
+    assert path and path.group(1).count(" L ")==3  # flat-ended rectangle
+
+
 def test_centered_double_bond_keeps_chemdraw_geometry_without_rdkit_junction_patches():
     core=session();gesture(core,"double_bond",(420,270),(452,270))
     bond=bonds(core)[0]
