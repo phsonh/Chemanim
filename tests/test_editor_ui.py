@@ -204,6 +204,64 @@ def test_gradient_start_current_end_modes_gate_endpoint_editing():
     value.close()
 
 
+def test_gradient_endpoint_single_bond_tool_stays_authoritative_for_two_clicks_after_upstream_nodes():
+    value=window();target=value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    value._add_node("molecule_set_position",{"target":target,"x":120.0,"y":-40.0},False)
+    value._add_node("molecule_set_scale",{"target":target,"value":0.5},False)
+    value._add_node("molecule_lerp_scale",{"target":target,"value":0.2,"frames":12,"easing":"linear"},False)
+    value._add_node("molecule_lerp_alpha",{"target":target,"value":180,"frames":8,"easing":"linear"},False)
+    value._add_node("wait",{"frames":6},False)
+    node=value._add_node("molecule_gradient_structure",{"frames":30,"easing":"linear"},False)
+    start=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["start_snapshot"]
+    original_ids=[atom["id"] for atom in start["atoms"] if atom.get("alive",True)]
+
+    panel=value.mode_panel;panel.set_mode("绘制");QApplication.processEvents()
+    single=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("drawKind")=="single_bond")
+    single.click();assert single.isChecked();value.canvas._sync_core_viewport()
+    for atom_id in (original_ids[0],original_ids[2]):
+        point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom_id)
+        value.session.pointer_down(point["x"],point["y"]);result=value.session.pointer_up(point["x"],point["y"])
+        assert result["changed"];value._transaction();QApplication.processEvents()
+
+    params=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]
+    end=params["end_snapshot"]
+    assert len([atom for atom in end["atoms"] if atom["id"] not in original_ids and atom.get("alive",True)])==2
+    assert len([bond for bond in end["bonds"] if bond["id"] not in {item["id"] for item in start["bonds"]} and bond.get("alive",True)])==2
+    assert value.session.tool=="single_bond"
+    assert single.isChecked() and panel._active_draw_tool==value.session.tool
+    value.close()
+
+
+def test_draw_tool_ui_follows_core_across_element_eraser_undo_redo_and_real_node_switch():
+    value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    wait=value._add_node("wait",{"frames":5},False);node=value._add_node("molecule_gradient_structure",{"frames":20},False)
+    start=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["start_snapshot"]
+    ids=[atom["id"] for atom in start["atoms"] if atom.get("alive",True)]
+    panel=value.mode_panel;panel.set_mode("绘制");QApplication.processEvents();value.canvas._sync_core_viewport()
+
+    h_button=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("elementKind")=="H")
+    h_button.click();assert value.session.tool=="atom_label" and value.session.element=="H" and h_button.isChecked()
+    for atom_id in ids[:2]:
+        point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom_id)
+        value.session.pointer_down(point["x"],point["y"]);assert value.session.pointer_up(point["x"],point["y"])["changed"];value._transaction()
+        assert value.session.tool=="atom_label" and h_button.isChecked()
+    end=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["end_snapshot"]
+    assert all(next(atom for atom in end["atoms"] if atom["id"]==atom_id)["label"]=="H" for atom_id in ids[:2])
+
+    eraser=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("drawKind")=="eraser")
+    eraser.click();points=[next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom_id) for atom_id in ids[2:4]]
+    value.session.pointer_down(points[0]["x"],points[0]["y"]);value.session.pointer_move(points[1]["x"],points[1]["y"])
+    assert value.session.pointer_up(points[1]["x"],points[1]["y"])["changed"];value._transaction()
+    assert value.session.tool=="eraser" and eraser.isChecked()
+    value.undo();assert value.session.tool=="eraser" and eraser.isChecked()
+    value.redo();assert value.session.tool=="eraser" and eraser.isChecked()
+
+    value.node_list.refresh(wait);value._node_selected(wait)
+    rectangle=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("drawKind")=="select_rectangle")
+    assert value.session.tool=="select_rectangle" and rectangle.isChecked() and panel._active_draw_tool==value.session.tool
+    value.close()
+
+
 def test_main_menu_has_no_redundant_second_row_toolbar_and_nodes_have_no_checks():
     value=window();assert value.findChildren(QToolBar)==[]
     item=value.node_list.tree.topLevelItem(0)

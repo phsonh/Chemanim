@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
             if node_id:self._activate_node(node_id)
 
     def _sync_edit_state(self,label=None):
+        self.mode_panel.sync_draw_tool()
         self.mode_panel.set_structure_enabled(self.session.can_edit_structure and not self.canvas.final_effect and not self._playing)
         if label:self.edit_mode.setText(label)
         elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return False
         self.session.edit_node(node_id)
+        self.mode_panel.sync_draw_tool()
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
         self.canvas.show_edit_frame(frame)
@@ -128,11 +130,12 @@ class MainWindow(QMainWindow):
         for key,button in self.gradient_buttons.items():button.setChecked(is_gradient and key=="end")
         definition=next((item for item in self.session.node_registry() if item["type"]==node["type"]),{})
         target=node.get("params",{}).get("target","");human_target=molecule_name(self.session.project(),target) if target else ""
+        legacy_gradient=is_gradient and self.session.gradient_summary(node_id).get("legacy_coordinate_space",False)
         if node["type"] in LEGACY_STRUCTURE_TYPES:human="旧版结构节点，仅用于兼容"
         elif is_gradient:human=f"渐变结构 · {human_target}"
         else:human=definition.get("label","节点")
-        label="编辑：场景节点" if node["type"]=="scene" else ("正在编辑：渐变结构终态" if is_gradient else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{human}')
-        self.statusBar().showMessage(human)
+        label="编辑：场景节点" if node["type"]=="scene" else ("旧渐变结构使用了显示坐标，需要重建终态" if legacy_gradient else "正在编辑：渐变结构终态" if is_gradient else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{human}')
+        self.statusBar().showMessage(label if legacy_gradient else human)
         self._sync_edit_state(label);return True
 
     def _show_gradient_phase(self,phase):
@@ -141,7 +144,7 @@ class MainWindow(QMainWindow):
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"start":0,"end":0})
         for key,button in self.gradient_buttons.items():button.setChecked(key==phase)
         if phase=="end":
-            self.session.edit_node(node_id);frame=int(timing["end"]);self.canvas.show_edit_frame(frame);self._sync_edit_state("正在编辑：渐变结构终态")
+            self.session.edit_node(node_id);frame=int(timing["end"]);self.canvas.show_edit_frame(frame);label="正在编辑：渐变结构终态" if self.session.can_edit_structure else "旧渐变结构使用了显示坐标，需要重建终态";self._sync_edit_state(label)
         else:
             frame=int(timing["start"] if phase=="start" else self.frame_spin.value());self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state("渐变结构起点：只读" if phase=="start" else "渐变结构当前帧：只读")
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False);self.canvas.request_refresh()
@@ -162,7 +165,10 @@ class MainWindow(QMainWindow):
         self.node_list.refresh(selected_node);end=max(0,self.session.end_frame);self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.canvas.request_refresh();self._title()
     def _transaction(self):
         node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
-        if node_id:self._activate_node(node_id)
+        # The Core has already committed the active draft and undo record.  A
+        # list/canvas refresh must not reactivate the same node, reload its
+        # draft, or silently replace the persistent drawing tool.
+        self.mode_panel.sync_draw_tool();self._sync_edit_state()
     def _sequence_edited(self):
         node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
         current=self.node_list.current_id()
@@ -180,8 +186,8 @@ class MainWindow(QMainWindow):
     def _set_tool(self,value):
         mutates=value in self.mode_panel.STRUCTURE_WRITE_TOOLS
         if mutates and not self.session.can_edit_structure:
-            self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
-        self.mode_panel.mode="绘制";self.session.set_tool(value);self._sync_edit_state();self.statusBar().showMessage(f"绘制工具：{value}")
+            self.mode_panel.sync_draw_tool();self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
+        self.mode_panel.mode="绘制";self.session.set_tool(value);self.mode_panel.sync_draw_tool();self._sync_edit_state();self.statusBar().showMessage(f"绘制工具：{value}")
     def _set_element(self,value):
         if not self.session.can_edit_structure:
             self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return

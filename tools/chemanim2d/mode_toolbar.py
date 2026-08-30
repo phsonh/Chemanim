@@ -51,7 +51,7 @@ class ModeToolPanel(QWidget):
         "hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"}
 
     def __init__(self,session,parent=None):
-        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self.script_section="";self._active_draw_tool="select_rectangle";self._structure_enabled=False
+        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self.script_section="";self._active_draw_tool=self.session.tool;self._structure_enabled=False
         self.recent_elements=["C","N","O","H","S","P","F","Cl","Br","I"]
         self.text_number_style="subscript"
         self.setObjectName("modeToolPanel");layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0);layout.setSpacing(0)
@@ -132,7 +132,9 @@ class ModeToolPanel(QWidget):
     def _separator(self):line=QFrame();line.setFrameShape(QFrame.Shape.VLine);self.tertiary_layout.addWidget(line)
     def _tool(self,kind,label,signal,checkable=False,tooltip="",show_icon=True,icon_only=False):
         is_draw=getattr(signal,"signal",None)==getattr(self.drawToolRequested,"signal",None)
+        is_element=getattr(signal,"signal",None)==getattr(self.elementRequested,"signal",None)
         button=QToolButton();button.setText(label);button.setToolTip(tooltip or label);button.setCheckable(checkable);button.setMinimumHeight(40)
+        if is_element:button.setCheckable(True);button.setProperty("elementKind",kind)
         structure_write=kind in self.STRUCTURE_WRITE_TOOLS or (self.mode=="绘制" and not is_draw)
         button.setProperty("structureWrite",structure_write)
         if show_icon:
@@ -140,14 +142,22 @@ class ModeToolPanel(QWidget):
             if icon_only:button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly);button.setFixedWidth(46)
             else:button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon);button.setMinimumWidth(button.fontMetrics().horizontalAdvance(label)+50)
         else:button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly);button.setMinimumWidth(max(44,button.fontMetrics().horizontalAdvance(label)+26))
-        if checkable:button.setChecked(kind==self._active_draw_tool);button.setProperty("drawKind",kind)
+        if checkable:button.setChecked(kind==self.session.tool);button.setProperty("drawKind",kind)
+        if is_element:button.setChecked(self.session.tool=="atom_label" and self.session.element==kind)
         def clicked(_checked=False):
-            if is_draw:
-                self._active_draw_tool=kind
-                for child in self.tertiary.findChildren(QToolButton):child.setChecked(child.property("drawKind")==kind)
-                self._update_text_style_buttons()
             signal.emit(kind)
+            if is_draw or is_element:self.sync_draw_tool()
         button.clicked.connect(clicked);self.tertiary_layout.addWidget(button);return button
+
+    def sync_draw_tool(self):
+        """Mirror the authoritative Core tool; never invent a parallel UI state."""
+        self._active_draw_tool=self.session.tool
+        for child in self.tertiary.findChildren(QToolButton):
+            kind=child.property("drawKind")
+            if kind:child.setChecked(kind==self._active_draw_tool)
+            element=child.property("elementKind")
+            if element:child.setChecked(self.session.tool=="atom_label" and self.session.element==element)
+        self._update_text_style_buttons()
 
     def _text_style_button(self,label,style,tooltip):
         button=QToolButton();button.setText(label);button.setToolTip(tooltip);button.setCheckable(True)
@@ -157,17 +167,18 @@ class ModeToolPanel(QWidget):
         self.tertiary_layout.addWidget(button);return button
 
     def _set_text_number_style(self,style):
-        if self._active_draw_tool!="atom_text" or style not in ("normal","subscript","superscript"):return
+        if self.session.tool!="atom_text" or style not in ("normal","subscript","superscript"):return
         self.text_number_style=style;self._update_text_style_buttons()
 
     def _update_text_style_buttons(self):
-        enabled=self._active_draw_tool=="atom_text"
+        enabled=self.session.tool=="atom_text"
         for button in self.tertiary.findChildren(QToolButton):
             style=button.property("textNumberStyle")
             if style:
                 button.setEnabled(enabled);button.setChecked(enabled and style==self.text_number_style)
 
     def _build_tertiary(self):
+        self._active_draw_tool=self.session.tool
         self._clear(self.tertiary_layout)
         scripted=self.mode=="脚本"
         self.scope_row.setVisible(scripted);self.section_row.setVisible(scripted)

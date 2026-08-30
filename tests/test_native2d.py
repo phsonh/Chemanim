@@ -996,6 +996,92 @@ def test_gradient_structure_adds_explicit_h_without_exposing_member_ids_and_roun
     assert restored.evaluated_project(15)==core.evaluated_project(15)
 
 
+def test_gradient_snapshots_are_molecule_local_after_upstream_object_and_global_transforms():
+    core=CoreSession();target=core.import_smiles("苯","c1ccccc1");core.set_viewport(960,540,1,0,0)
+    core.add_node("molecule_set_position",json.dumps({"target":target,"x":125.0,"y":-75.0}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":target,"value":0.2}))
+    core.add_node("molecule_set_scale_y",json.dumps({"target":target,"value":0.35}))
+    core.add_node("molecule_set_rotation",json.dumps({"target":target,"value":30.0}))
+    core.add_node("molecule_global_set_scale",json.dumps({"value":1.7}))
+    core.add_node("wait",json.dumps({"frames":8}))
+    node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    start=params["start_snapshot"]
+    assert params["coordinate_space"]=="molecule_local_v1"
+    by_id={atom["id"]:atom for atom in start["atoms"]}
+    original=start["bonds"][0];a=by_id[original["a"]];b=by_id[original["b"]]
+    assert math.isclose(math.hypot(a["x"]-b["x"],a["y"]-b["y"]),start["reference_bond_length"],rel_tol=1e-6)
+
+    point=next(item["center"] for item in core.depict(False)["atoms"] if item["id"]==a["id"])
+    core.set_tool("single_bond");core.pointer_down(point["x"],point["y"]);assert core.pointer_up(point["x"],point["y"])["changed"]
+    end=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]["end_snapshot"]
+    added=next(bond for bond in end["bonds"] if bond["id"] not in {item["id"] for item in start["bonds"]})
+    end_atoms={atom["id"]:atom for atom in end["atoms"]};first=end_atoms[added["a"]];second=end_atoms[added["b"]]
+    assert math.isclose(math.hypot(first["x"]-second["x"],first["y"]-second["y"]),end["reference_bond_length"],rel_tol=1e-6)
+
+
+def test_gradient_local_coordinate_space_matrix_two_outward_click_bonds_and_roundtrip():
+    transform_cases=[
+        [],
+        [("molecule_set_position",{"x":80.0,"y":-45.0})],
+        [("molecule_set_scale",{"value":0.2})],
+        [("molecule_set_scale",{"value":2.0})],
+        [("molecule_set_scale_x",{"value":0.35}),("molecule_set_scale_y",{"value":1.8})],
+        [("molecule_set_rotation",{"value":37.0})],
+        [("molecule_global_set_scale",{"value":1.6})],
+        [("molecule_set_position",{"x":-70.0,"y":55.0}),("molecule_set_scale_x",{"value":0.4}),("molecule_set_scale_y",{"value":1.7}),("molecule_set_rotation",{"value":-28.0}),("molecule_global_set_scale_x",{"value":1.3}),("molecule_global_set_scale_y",{"value":0.75}),("molecule_lerp_scale",{"value":0.8,"frames":6,"easing":"linear"})],
+    ]
+    for case_index,case in enumerate(transform_cases):
+        for canvas_zoom in (0.5,1.39,2.0):
+            core=CoreSession();target=core.import_smiles(f"matrix-{case_index}-{canvas_zoom}","c1ccccc1")
+            for node_type,params in case:core.add_node(node_type,json.dumps({"target":target,**params} if not node_type.startswith("molecule_global_") else params))
+            core.add_node("wait",json.dumps({"frames":8}))
+            node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
+            params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+            assert params["coordinate_space"]=="molecule_local_v1"
+            start=params["start_snapshot"];original_atoms={atom["id"]:atom for atom in start["atoms"] if atom.get("alive",True)};original_bonds={bond["id"] for bond in start["bonds"]}
+            center=(sum(atom["x"] for atom in original_atoms.values())/len(original_atoms),sum(atom["y"] for atom in original_atoms.values())/len(original_atoms))
+            ppu=48.0*canvas_zoom;core.set_viewport(960,540,ppu,0,0);core.set_tool("single_bond")
+            for atom_id in list(original_atoms)[:2]:
+                atom=original_atoms[atom_id];screen=(480+atom["x"]*ppu,270-atom["y"]*ppu)
+                core.pointer_down(*screen);assert core.pointer_up(*screen)["changed"]
+            end=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]["end_snapshot"]
+            end_atoms={atom["id"]:atom for atom in end["atoms"] if atom.get("alive",True)};added_bonds=[bond for bond in end["bonds"] if bond["id"] not in original_bonds and bond.get("alive",True)]
+            assert len(added_bonds)==2
+            lengths=[]
+            for bond in added_bonds:
+                a,b=end_atoms[bond["a"]],end_atoms[bond["b"]];lengths.append(math.hypot(a["x"]-b["x"],a["y"]-b["y"]))
+                attachment=a if a["id"] in original_atoms else b;terminal=b if attachment is a else a
+                outward=(attachment["x"]-center[0],attachment["y"]-center[1]);new_vector=(terminal["x"]-attachment["x"],terminal["y"]-attachment["y"])
+                assert outward[0]*new_vector[0]+outward[1]*new_vector[1]>0
+            assert all(math.isclose(length,end["reference_bond_length"],rel_tol=1e-6) for length in lengths)
+            assert math.isclose(lengths[0],lengths[1],rel_tol=1e-9)
+            for bond in start["bonds"]:
+                a,b=original_atoms[bond["a"]],original_atoms[bond["b"]]
+                assert math.isclose(math.hypot(a["x"]-b["x"],a["y"]-b["y"]),start["reference_bond_length"],rel_tol=1e-6)
+
+            finish=next(item for item in core.evaluated_project(38)["molecules"] if item["id"]==target);finish_atoms={atom["id"]:atom for atom in finish["atoms"] if atom.get("alive",True)}
+            values=core.evaluated_molecules(38)[target];anchor=min(end_atoms.values(),key=lambda atom:atom["creation_serial"]);radians=math.radians(values["rotation"]);c,s=math.cos(radians),math.sin(radians)
+            for atom_id,local in end_atoms.items():
+                x=(local["x"]-anchor["x"])*values["scale_x"];y=(local["y"]-anchor["y"])*values["scale_y"]
+                expected=(values["x"]+x*c-y*s,values["y"]+x*s+y*c);actual=finish_atoms[atom_id]
+                assert math.isclose(actual["x"],expected[0],abs_tol=1e-7) and math.isclose(actual["y"],expected[1],abs_tol=1e-7)
+            restored=CoreSession();restored.replace_json(core.json());saved=next(item for item in restored.project()["nodes"] if item["id"]==node)["params"]
+            assert saved["start_snapshot"]==start and saved["end_snapshot"]==end
+            assert restored.evaluated_project(38)==core.evaluated_project(38) and "LerpStructure" in restored.generate_lua()
+
+
+def test_unmarked_b719_gradient_requires_explicit_local_space_rebuild():
+    core=CoreSession();core.import_smiles("旧渐变","c1ccccc1");node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30}))
+    raw=json.loads(core.json());stored=next(item for item in raw["nodes"] if item["id"]==node);stored["params"].pop("coordinate_space")
+    legacy=CoreSession();legacy.replace_json(json.dumps(raw));legacy.edit_node(node)
+    assert not legacy.can_edit_structure and legacy.edit_target_kind=="script_node"
+    summary=legacy.gradient_summary(node);assert summary["legacy_coordinate_space"] and summary["needs_review"]
+    assert any("旧渐变结构使用了显示坐标" in item["message"] for item in legacy.diagnostics(30))
+    assert legacy.rebuild_gradient(node);rebuilt=next(item for item in legacy.project()["nodes"] if item["id"]==node)["params"]
+    assert rebuilt["coordinate_space"]=="molecule_local_v1" and legacy.can_edit_structure
+
+
 def test_gradient_structure_deletion_motion_and_visual_change_crossfade():
     core=CoreSession();target=core.import_smiles("苯","c1ccccc1");core.set_viewport(960,540,1,0,0)
     node=core.add_node("molecule_gradient_structure",json.dumps({"frames":20,"easing":"linear"}))

@@ -338,7 +338,8 @@ int nodeSequenceEndFrame(const Project& project) {
     int result=0; for(const NodeTiming& timing:compileNodeTimings(project)) result=std::max(result,timing.endFrame); return result;
 }
 
-EvaluatedScene evaluateNodes(const Project& project, int frame) {
+static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
+                                             bool applyObjectVisualTransforms) {
     EvaluatedScene result;for(const Molecule& molecule:project.molecules)result.molecules.emplace(molecule.id,molecule);
     for(const ScriptNode& node:project.nodes)if(node.enabled&&node.type=="bond_form"){const json p=parseParams(node);auto found=result.molecules.find(targetOf(p));if(found!=result.molecules.end())if(Bond* bond=found->second.bond(p.value("bond",""))){bond->alive=false;bond->alpha=0;}}
     const auto timings=compileNodeTimings(project);std::map<std::string,NumberTrack> tracks;
@@ -385,6 +386,15 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
         }
         else if(node.type=="molecule_gradient_structure"&&molecule&&frame>=timing.startFrame){
             try{
+                const bool localSpace=p.value("coordinate_space","")=="molecule_local_v1";
+                if(!localSpace){
+                    result.diagnostics.push_back({node.id,"warning","旧渐变结构使用了显示坐标，需要重建终态"});
+                    // Old b719729 snapshots contain already transformed display
+                    // coordinates.  Preserve their legacy final-preview behaviour,
+                    // but never feed those coordinates into a new local-space
+                    // structure snapshot.
+                    if(!applyObjectVisualTransforms)continue;
+                }
                 json startJson=p.value("start_snapshot",json::object()),endJson=p.value("end_snapshot",json::object());
                 if(startJson.is_string())startJson=json::parse(startJson.get<std::string>());if(endJson.is_string())endJson=json::parse(endJson.get<std::string>());
                 const auto start=moleculeSnapshot(startJson),end=moleculeSnapshot(endJson);
@@ -456,10 +466,26 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
         for(Atom& atom:molecule.atoms){const std::string p=id+":atom:"+atom.id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())atom.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())atom.position.y=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())atom.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())atom.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())atom.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())atom.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
         for(Bond& bond:molecule.bonds){const std::string p=id+":bond:"+bond.id+":";if(auto it=tracks.find(p+"alpha");it!=tracks.end())bond.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())bond.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())bond.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())bond.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
         for(AtomAdornment& value:molecule.adornments){const std::string p=id+":adornment:"+value.id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())value.offset.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())value.offset.y=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())value.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())value.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())value.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())value.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
+        if(!applyObjectVisualTransforms){
+            // This is the authoritative molecule-local structure layer.  Object
+            // position/scale/rotation and scene-global visual multipliers are
+            // deliberately not baked into atom coordinates or molecule values.
+            molecule.scaleX=1.0;molecule.scaleY=1.0;molecule.rotation=0.0;
+            molecule.alpha=255;molecule.color={255,255,255};molecule.layer=0;
+            continue;
+        }
         const double localScaleX=tracks.contains(id+":scale_x")?tracks[id+":scale_x"].at(frame):molecule.scaleX;const double localScaleY=tracks.contains(id+":scale_y")?tracks[id+":scale_y"].at(frame):molecule.scaleY;const double scaleX=localScaleX*result.globals.moleculeScaleX,scaleY=localScaleY*result.globals.moleculeScaleY;const double rotation=tracks.contains(id+":rotation")?tracks[id+":rotation"].at(frame):molecule.rotation;const auto anchor=molecule.coordinate();if(anchor){const double radians=rotation*3.14159265358979323846/180.0,c=std::cos(radians),s=std::sin(radians);for(Atom& atom:molecule.atoms)if(atom.alive){const double x=(atom.position.x-anchor->x)*scaleX,y=(atom.position.y-anchor->y)*scaleY;atom.position={anchor->x+x*c-y*s,anchor->y+x*s+y*c};}const double desiredX=tracks.contains(id+":anchor:x")?tracks[id+":anchor:x"].at(frame):anchor->x;const double desiredY=tracks.contains(id+":anchor:y")?tracks[id+":anchor:y"].at(frame):anchor->y;for(Atom& atom:molecule.atoms)if(atom.alive){atom.position.x+=desiredX-anchor->x;atom.position.y+=desiredY-anchor->y;}}molecule.scaleX=scaleX;molecule.scaleY=scaleY;molecule.rotation=rotation;if(auto it=tracks.find(id+":alpha");it!=tracks.end())molecule.alpha=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=byte(it->second.at(frame));molecule.alpha=byte(molecule.alpha*result.globals.moleculeAlpha/255.0);molecule.color.red=byte(molecule.color.red*result.globals.moleculeRed/255.0);molecule.color.green=byte(molecule.color.green*result.globals.moleculeGreen/255.0);molecule.color.blue=byte(molecule.color.blue*result.globals.moleculeBlue/255.0);
     }
     for(auto& [id,arrow]:result.arrows){const std::string p="arrow:"+id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())arrow.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())arrow.position.y=it->second.at(frame);if(auto it=tracks.find(p+"progress");it!=tracks.end())arrow.progress=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())arrow.alpha=it->second.at(frame);if(auto it=tracks.find(p+"r");it!=tracks.end())arrow.red=it->second.at(frame);if(auto it=tracks.find(p+"g");it!=tracks.end())arrow.green=it->second.at(frame);if(auto it=tracks.find(p+"b");it!=tracks.end())arrow.blue=it->second.at(frame);if(auto it=tracks.find(p+"width");it!=tracks.end())arrow.width=it->second.at(frame);const double sx=(tracks.contains(p+"scale_x")?tracks[p+"scale_x"].at(frame):arrow.scaleX)*result.globals.arrowScaleX;const double sy=(tracks.contains(p+"scale_y")?tracks[p+"scale_y"].at(frame):arrow.scaleY)*result.globals.arrowScaleY;const Point origin=arrow.start;const auto scaled=[&](Point value){return Point{origin.x+(value.x-origin.x)*sx,origin.y+(value.y-origin.y)*sy};};arrow.control1=scaled(arrow.control1);arrow.control2=scaled(arrow.control2);arrow.end=scaled(arrow.end);arrow.scaleX=sx;arrow.scaleY=sy;arrow.alpha=std::clamp(arrow.alpha*result.globals.arrowAlpha/255.0,0.0,255.0);arrow.red=std::clamp(arrow.red*result.globals.arrowRed/255.0,0.0,255.0);arrow.green=std::clamp(arrow.green*result.globals.arrowGreen/255.0,0.0,255.0);arrow.blue=std::clamp(arrow.blue*result.globals.arrowBlue/255.0,0.0,255.0);arrow.width*=result.globals.arrowWidth;}
     return result;
+}
+
+EvaluatedScene evaluateNodes(const Project& project,int frame){
+    return evaluateNodesInternal(project,frame,true);
+}
+
+EvaluatedScene evaluateStructureNodes(const Project& project,int frame){
+    return evaluateNodesInternal(project,frame,false);
 }
 
 }  // namespace chem::core

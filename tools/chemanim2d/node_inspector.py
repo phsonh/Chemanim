@@ -107,14 +107,17 @@ class NodeInspector(QWidget):
                 editor.setEnabled(False);editor.setToolTip("新建分子的目标由 Core 分配，不可重新指向")
         if node["type"]=="molecule_gradient_structure":
             summary=self.session.gradient_summary(self.node_id)
-            if summary.get("needs_review"):
+            if summary.get("legacy_coordinate_space"):
+                warning=QLabel("旧渐变结构使用了显示坐标，需要重建终态");warning.setWordWrap(True);warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
+            elif summary.get("needs_review"):
                 warning=QLabel("起点结构已变化，需要检查");warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
+            if summary.get("needs_review"):
                 rebuild=QPushButton("以新起点重建终态");rebuild.clicked.connect(lambda:self.rebuildRequested.emit(self.node_id));self.layout.addRow(rebuild)
             values=[]
             for key,label in (("added_atoms","新增原子"),("added_bonds","新增键"),("moved_atoms","移动原子"),("deleted_objects","删除对象"),("changed_objects","改变样式")):
                 values.append(f'{label} {summary.get(key,0)} 个')
             text=QLabel("\n".join(values));self.layout.addRow("变化摘要",text)
-            edit=QPushButton("编辑终态结构");edit.clicked.connect(lambda:self.editStructureRequested.emit(self.node_id));self.layout.addRow(edit)
+            edit=QPushButton("编辑终态结构");edit.setEnabled(not summary.get("legacy_coordinate_space"));edit.clicked.connect(lambda:self.editStructureRequested.emit(self.node_id));self.layout.addRow(edit)
         self._updating = False
 
     def apply(self):

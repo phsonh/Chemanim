@@ -69,6 +69,7 @@ public:
     void setTool(const std::string& value) { session_.setTool(core::toolFromString(value)); }
     std::string tool() const { return core::toString(session_.tool()); }
     void setElement(const std::string& value) { session_.setElement(value); }
+    std::string element() const { return session_.element(); }
     void setViewport(int width, int height, double pixelsPerUnit, double centerX, double centerY) {
         session_.setViewport({width, height, pixelsPerUnit, {centerX, centerY}});
     }
@@ -265,7 +266,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("add_blank_molecule", &CoreSession::addBlankMolecule, py::arg("name")="")
         .def("import_smiles", &CoreSession::importSmiles).def("set_active_molecule", &CoreSession::setActiveMolecule)
         .def_property_readonly("active_molecule", &CoreSession::activeMolecule).def("set_tool", &CoreSession::setTool)
-        .def_property_readonly("tool", &CoreSession::tool).def("set_element", &CoreSession::setElement)
+        .def_property_readonly("tool", &CoreSession::tool).def_property_readonly("element", &CoreSession::element).def("set_element", &CoreSession::setElement)
         .def("set_viewport", &CoreSession::setViewport).def("hit_test", &CoreSession::hitTest)
         .def("pointer_down", &CoreSession::pointerDown, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_move", &CoreSession::pointerMove, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)

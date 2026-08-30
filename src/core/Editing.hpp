@@ -91,6 +91,7 @@ public:
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const;
     void setElement(std::string element);
+    [[nodiscard]] std::string element() const;
     void setViewport(Viewport viewport);
     [[nodiscard]] const Viewport& viewport() const;
     void editBaseStructure(const std::string& nodeId, int previewFrame = 0);

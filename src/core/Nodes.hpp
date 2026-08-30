@@ -81,6 +81,9 @@ struct EvaluatedScene {
 [[nodiscard]] const NodeMetadata& nodeMetadata(const std::string& type);
 [[nodiscard]] std::vector<NodeTiming> compileNodeTimings(const Project& project);
 [[nodiscard]] EvaluatedScene evaluateNodes(const Project& project, int frame);
+// Evaluates lifecycle, topology, stable-member structure and member-local
+// tracks only. Object transforms and global visual tracks remain unapplied.
+[[nodiscard]] EvaluatedScene evaluateStructureNodes(const Project& project, int frame);
 [[nodiscard]] int nodeSequenceEndFrame(const Project& project);
 // Stable IDs define correspondence. Transient ghost records produced here
 // exist only for depiction and are never persisted into the project.
