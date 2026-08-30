@@ -137,12 +137,36 @@ def test_element_toolbar_tracks_only_ten_most_recent_elements():
 
 def test_script_tools_are_text_only_and_molecule_arrow_use_scope_tabs():
     value=window();value.mode_panel.set_mode("脚本");value.mode_panel.set_category("分子")
-    assert [value.mode_panel.scope_tabs.tabText(i) for i in range(value.mode_panel.scope_tabs.count())]==["对象","设定","变换"]
-    for scope in ("对象","设定","变换"):
+    assert [value.mode_panel.scope_tabs.tabText(i) for i in range(value.mode_panel.scope_tabs.count())]==["对象","全局","设定","变换"]
+    for scope in ("对象","全局","设定","变换"):
         value.mode_panel.set_script_scope(scope);QApplication.processEvents()
         buttons=[button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]
         assert buttons and all(button.icon().isNull() for button in buttons)
     value.mode_panel.set_category("箭头");assert value.mode_panel.scope_row.isVisible()
+    value.close()
+
+
+def test_primary_node_toolbar_is_registry_driven_and_has_exact_object_commands():
+    value=window();value.mode_panel.set_mode("脚本");value.mode_panel.set_category("分子")
+    value.mode_panel.set_script_scope("对象");QApplication.processEvents()
+    assert [button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["新建分子","删除分子","合并分子"]
+    value.mode_panel.set_category("箭头");value.mode_panel.set_script_scope("对象");QApplication.processEvents()
+    assert [button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["新建箭头","删除箭头"]
+    value.close()
+
+
+def test_primary_node_toolbar_uses_exact_section_menus_and_short_action_names():
+    value=window();panel=value.mode_panel;panel.set_mode("脚本");panel.set_category("分子")
+    def visible_menus(scope):
+        panel.set_script_scope(scope);QApplication.processEvents()
+        return {button.text():[action.text() for action in button.menu().actions()]
+                for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.menu()}
+    assert visible_menus("全局")=={"颜色":["透明度","颜色"],"缩放":["缩放","横向缩放","纵向缩放"]}
+    assert visible_menus("设定")=={"结构":["分子结构"],"位置":["坐标","横坐标","纵坐标"],"缩放":["缩放","横向缩放","纵向缩放"],"旋转":["旋转角度"],"颜色":["透明度","颜色"],"排列":["图层"]}
+    assert visible_menus("变换")["结构"]==["结构形变","成键","断键","选区显现","选区消失"]
+    panel.set_category("箭头")
+    assert visible_menus("设定")=={"曲线":["箭头曲线"],"绘制":["绘制进度"],"缩放":["缩放","横向缩放","纵向缩放"],"颜色":["透明度","颜色"],"线条":["线宽"]}
+    assert "位置" not in visible_menus("设定") and "位置" not in visible_menus("变换")
     value.close()
 
 

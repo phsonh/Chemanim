@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import cos, pi, sin
 from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QScrollArea,
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QMenu, QScrollArea,
                              QTabBar, QToolButton, QVBoxLayout, QWidget)
 
 
@@ -87,11 +87,14 @@ class ModeToolPanel(QWidget):
         if self.secondary.currentIndex()!=index:self.secondary.blockSignals(True);self.secondary.setCurrentIndex(index);self.secondary.blockSignals(False)
         self._build_tertiary()
 
+    SCOPE_NAMES=(("对象","object"),("全局","global"),("设定","set"),("变换","transform"))
+
     def set_script_scope(self,scope):
-        if scope not in ("对象","设定","变换"):return
+        names=[name for name,_ in self.SCOPE_NAMES]
+        if scope not in names:return
         self.script_scope=scope
-        if self.scope_tabs.currentIndex()!=("对象","设定","变换").index(scope):
-            self.scope_tabs.blockSignals(True);self.scope_tabs.setCurrentIndex(("对象","设定","变换").index(scope));self.scope_tabs.blockSignals(False)
+        if self.scope_tabs.currentIndex()!=names.index(scope):
+            self.scope_tabs.blockSignals(True);self.scope_tabs.setCurrentIndex(names.index(scope));self.scope_tabs.blockSignals(False)
         self._build_tertiary()
 
     def _build_secondary(self):
@@ -152,12 +155,6 @@ class ModeToolPanel(QWidget):
             if style:
                 button.setEnabled(enabled);button.setChecked(enabled and style==self.text_number_style)
 
-    @staticmethod
-    def _script_scope_for(node_type):
-        if "_lerp_" in node_type or node_type=="selection_fade":return "变换"
-        if "_set_" in node_type or node_type.startswith("adornment_set_"):return "设定"
-        return "对象"
-
     def _build_tertiary(self):
         self._clear(self.tertiary_layout)
         scoped=self.mode=="脚本" and self.category in ("分子","箭头")
@@ -165,12 +162,29 @@ class ModeToolPanel(QWidget):
         if scoped:
             self.scope_tabs.blockSignals(True)
             while self.scope_tabs.count():self.scope_tabs.removeTab(0)
-            for name in ("对象","设定","变换"):self.scope_tabs.addTab(name)
-            self.scope_tabs.setCurrentIndex(("对象","设定","变换").index(self.script_scope));self.scope_tabs.blockSignals(False)
+            names=[name for name,_ in self.SCOPE_NAMES]
+            for name in names:self.scope_tabs.addTab(name)
+            self.scope_tabs.setCurrentIndex(names.index(self.script_scope));self.scope_tabs.blockSignals(False)
         if self.mode=="脚本":
-            definitions=[item for item in self.session.node_registry() if item["category"]==self.category]
-            if scoped:definitions=[item for item in definitions if self._script_scope_for(item["type"])==self.script_scope]
-            for item in definitions:self._tool(item["type"],item["label"],self.nodeRequested,show_icon=False)
+            definitions=[item for item in self.session.node_registry() if item["category"]==self.category and item.get("exposure")=="primary"]
+            if scoped:
+                scope_key=dict(self.SCOPE_NAMES)[self.script_scope]
+                definitions=[item for item in definitions if item.get("scope")==scope_key]
+            definitions.sort(key=lambda item:(item.get("order",0),item.get("label","")))
+            if not scoped or self.script_scope=="对象":
+                for item in definitions:self._tool(item["type"],item.get("tool_label",item["label"]),self.nodeRequested,show_icon=False)
+            else:
+                sections=[]
+                for item in definitions:
+                    section=item.get("section") or "其他"
+                    if section not in sections:sections.append(section)
+                for section in sections:
+                    button=QToolButton();button.setText(section);button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+                    button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);button.setMinimumHeight(40)
+                    menu=QMenu(button)
+                    for item in [value for value in definitions if (value.get("section") or "其他")==section]:
+                        action=menu.addAction(item.get("tool_label",item["label"]));action.setData(item["type"]);action.triggered.connect(lambda _checked=False,t=item["type"]:self.nodeRequested.emit(t))
+                    button.setMenu(menu);self.tertiary_layout.addWidget(button)
         else:
             for key,label,shortcut in (("select_rectangle","框选","V"),("select_lasso","套索","L"),("eraser","橡皮擦","E")):self._tool(key,label,self.drawToolRequested,True,f"{label} · {shortcut}",icon_only=True)
             self._separator()

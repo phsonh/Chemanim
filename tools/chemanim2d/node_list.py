@@ -54,7 +54,10 @@ class NodeList(QWidget):
         for node in project.get("nodes", []):
             timing = timings.get(node["id"], {}); definition = registry.get(node["type"], {})
             duration = max(0, timing.get("end", 0) - timing.get("start", 0))
-            item = QTreeWidgetItem([definition.get("label", node["type"]), timing.get("target", ""),
+            target=timing.get("target", "")
+            if definition.get("target_kind")=="global_molecule":target="所有分子"
+            elif definition.get("target_kind")=="global_arrow":target="所有箭头"
+            item = QTreeWidgetItem([definition.get("label", node["type"]), target,
                                     f"{duration} 帧" if duration else "—",
                                     f'{timing.get("start", 0)} → {timing.get("end", 0)}'])
             item.setFlags(item.flags()&~Qt.ItemFlag.ItemIsUserCheckable)

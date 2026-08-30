@@ -28,18 +28,18 @@ const json& registry() {
         definition("wait", "等待", "通用", "时间", {field("frames","帧数","int",30)}),
         definition("raw_lua", "Lua 代码", "通用", "脚本", {field("code","Lua 代码","multiline","-- Lua code")} ),
 
-        definition("molecule_create", "创建/引用分子", "分子", "分子对象", {field("target","分子","molecule","")}),
-        definition("molecule_set_position", "设定位置", "分子", "分子对象", {field("target","分子","molecule",""),field("x","X","float",0),field("y","Y","float",0)}),
-        definition("molecule_lerp_position", "插值位置", "分子", "分子对象", {field("target","分子","molecule",""),field("x","目标 X","float",0),field("y","目标 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("molecule_set_scale", "设定缩放", "分子", "分子对象", {field("target","分子","molecule",""),field("value","缩放","float",1)}),
-        definition("molecule_lerp_scale", "插值缩放", "分子", "分子对象", {field("target","分子","molecule",""),field("value","目标缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("molecule_set_rotation", "设定旋转", "分子", "分子对象", {field("target","分子","molecule",""),field("value","角度","float",0)}),
-        definition("molecule_lerp_rotation", "插值旋转", "分子", "分子对象", {field("target","分子","molecule",""),field("value","目标角度","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("molecule_set_alpha", "设定透明度", "分子", "分子对象", {field("target","分子","molecule",""),field("value","Alpha","alpha",255)}),
-        definition("molecule_lerp_alpha", "插值透明度", "分子", "分子对象", {field("target","分子","molecule",""),field("value","目标 Alpha","alpha",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_create", "新建分子", "分子", "对象", {field("target","分子","molecule","")}),
+        definition("molecule_set_position", "设定分子坐标", "分子", "位置", {field("target","分子","molecule",""),field("x","X","float",0),field("y","Y","float",0)}),
+        definition("molecule_lerp_position", "变换分子坐标", "分子", "位置", {field("target","分子","molecule",""),field("x","目标 X","float",0),field("y","目标 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_scale", "设定分子缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","缩放","float",1)}),
+        definition("molecule_lerp_scale", "变换分子缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","目标缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_rotation", "设定分子旋转角度", "分子", "旋转", {field("target","分子","molecule",""),field("value","角度","float",0)}),
+        definition("molecule_lerp_rotation", "变换分子旋转角度", "分子", "旋转", {field("target","分子","molecule",""),field("value","目标角度","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_alpha", "设定分子透明度", "分子", "颜色", {field("target","分子","molecule",""),field("value","Alpha","alpha",255)}),
+        definition("molecule_lerp_alpha", "变换分子透明度", "分子", "颜色", {field("target","分子","molecule",""),field("value","目标 Alpha","alpha",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("molecule_set_color", "设定分子颜色", "分子", "分子对象", {field("target","分子","molecule",""),field("r","R","byte",255),field("g","G","byte",255),field("b","B","byte",255)}),
-        definition("molecule_lerp_color", "插值分子颜色", "分子", "分子对象", {field("target","分子","molecule",""),field("r","目标 R","byte",255),field("g","目标 G","byte",255),field("b","目标 B","byte",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("molecule_set_layer", "设定层级", "分子", "分子对象", {field("target","分子","molecule",""),field("value","层级","int",0)}),
+        definition("molecule_lerp_color", "变换分子颜色", "分子", "颜色", {field("target","分子","molecule",""),field("r","目标 R","byte",255),field("g","目标 G","byte",255),field("b","目标 B","byte",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_layer", "设定分子图层", "分子", "排列", {field("target","分子","molecule",""),field("value","层级","int",0)}),
         definition("molecule_set_visible", "设定可见", "分子", "分子对象", {field("target","分子","molecule",""),field("value","可见","bool",true)}),
         definition("molecule_delete", "删除分子", "分子", "分子对象", {field("target","分子","molecule","")}),
 
@@ -78,18 +78,112 @@ const json& registry() {
 
         definition("arrow_new", "新建箭头", "箭头", "对象", {field("target","箭头名","arrow","arrow1")}),
         definition("arrow_delete", "删除箭头", "箭头", "对象", {field("target","箭头","arrow","")}),
-        definition("arrow_set_curve", "设定曲线", "箭头", "曲线", {field("target","箭头","arrow",""),field("x1","起点 X","float",0),field("y1","起点 Y","float",0),field("cx1","控制点 1 X","float",80),field("cy1","控制点 1 Y","float",80),field("cx2","控制点 2 X","float",-80),field("cy2","控制点 2 Y","float",80),field("x2","终点 X","float",160),field("y2","终点 Y","float",0)}),
+        definition("arrow_set_curve", "设定箭头曲线", "箭头", "曲线", {field("target","箭头","arrow",""),field("x1","起点 X","float",0),field("y1","起点 Y","float",0),field("cx1","控制点 1 X","float",80),field("cy1","控制点 1 Y","float",80),field("cx2","控制点 2 X","float",-80),field("cy2","控制点 2 Y","float",80),field("x2","终点 X","float",160),field("y2","终点 Y","float",0)}),
         definition("arrow_set_position", "设定位置", "箭头", "变换", {field("target","箭头","arrow",""),field("x","X","float",0),field("y","Y","float",0)}),
         definition("arrow_lerp_position", "插值位置", "箭头", "变换", {field("target","箭头","arrow",""),field("x","目标 X","float",0),field("y","目标 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_set_progress", "设定进度", "箭头", "显示", {field("target","箭头","arrow",""),field("value","进度","float01",0)}),
-        definition("arrow_lerp_progress", "插值进度", "箭头", "显示", {field("target","箭头","arrow",""),field("value","目标进度","float01",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_set_alpha", "设定透明度", "箭头", "显示", {field("target","箭头","arrow",""),field("value","Alpha","alpha",255)}),
-        definition("arrow_lerp_alpha", "插值透明度", "箭头", "显示", {field("target","箭头","arrow",""),field("value","目标 Alpha","alpha",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_set_color", "设定颜色", "箭头", "显示", {field("target","箭头","arrow",""),field("r","R","byte",25),field("g","G","byte",25),field("b","B","byte",25)}),
-        definition("arrow_lerp_color", "插值颜色", "箭头", "显示", {field("target","箭头","arrow",""),field("r","目标 R","byte",25),field("g","目标 G","byte",25),field("b","目标 B","byte",25),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_set_width", "设定线宽", "箭头", "显示", {field("target","箭头","arrow",""),field("value","线宽","float",3)})
+        definition("arrow_set_progress", "设定箭头绘制进度", "箭头", "绘制", {field("target","箭头","arrow",""),field("value","进度","float01",0)}),
+        definition("arrow_lerp_progress", "变换箭头绘制进度", "箭头", "绘制", {field("target","箭头","arrow",""),field("value","目标进度","float01",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_set_alpha", "设定箭头透明度", "箭头", "颜色", {field("target","箭头","arrow",""),field("value","Alpha","alpha",255)}),
+        definition("arrow_lerp_alpha", "变换箭头透明度", "箭头", "颜色", {field("target","箭头","arrow",""),field("value","目标 Alpha","alpha",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_set_color", "设定箭头颜色", "箭头", "颜色", {field("target","箭头","arrow",""),field("r","R","byte",25),field("g","G","byte",25),field("b","B","byte",25)}),
+        definition("arrow_lerp_color", "变换箭头颜色", "箭头", "颜色", {field("target","箭头","arrow",""),field("r","目标 R","byte",25),field("g","目标 G","byte",25),field("b","目标 B","byte",25),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_set_width", "设定箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","线宽","float",3)}),
+
+        definition("molecule_set_x", "设定分子横坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","X","float",0)}),
+        definition("molecule_set_y", "设定分子纵坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","Y","float",0)}),
+        definition("molecule_lerp_x", "变换分子横坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","目标 X","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_lerp_y", "变换分子纵坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","目标 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_scale_x", "设定分子横向缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","横向缩放","float",1)}),
+        definition("molecule_set_scale_y", "设定分子纵向缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","纵向缩放","float",1)}),
+        definition("molecule_lerp_scale_x", "变换分子横向缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","目标横向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_lerp_scale_y", "变换分子纵向缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","目标纵向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_set_structure", "设定分子结构", "分子", "结构", {field("target","分子","molecule",""),field("snapshot","结构快照","multiline","{}")}),
+        definition("molecule_lerp_structure", "变换分子结构形变", "分子", "结构", {field("target","分子","molecule",""),field("atoms","稳定原子坐标","multiline","{}"),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("selection_show", "变换分子选区显现", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("selection_hide", "变换分子选区消失", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_global_set_alpha", "设定全局分子透明度", "分子", "颜色", {field("value","Alpha","alpha",255)}),
+        definition("molecule_global_set_color", "设定全局分子颜色", "分子", "颜色", {field("r","R","byte",255),field("g","G","byte",255),field("b","B","byte",255)}),
+        definition("molecule_global_set_scale", "设定全局分子缩放", "分子", "缩放", {field("value","缩放","float",1)}),
+        definition("molecule_global_set_scale_x", "设定全局分子横向缩放", "分子", "缩放", {field("value","横向缩放","float",1)}),
+        definition("molecule_global_set_scale_y", "设定全局分子纵向缩放", "分子", "缩放", {field("value","纵向缩放","float",1)}),
+
+        definition("arrow_set_scale", "设定箭头缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","缩放","float",1)}),
+        definition("arrow_set_scale_x", "设定箭头横向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","横向缩放","float",1)}),
+        definition("arrow_set_scale_y", "设定箭头纵向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","纵向缩放","float",1)}),
+        definition("arrow_lerp_scale", "变换箭头缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_lerp_scale_x", "变换箭头横向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标横向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_lerp_scale_y", "变换箭头纵向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标纵向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_lerp_width", "变换箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","目标线宽","float",3),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_global_set_alpha", "设定全局箭头透明度", "箭头", "颜色", {field("value","Alpha","alpha",255)}),
+        definition("arrow_global_set_color", "设定全局箭头颜色", "箭头", "颜色", {field("r","R","byte",255),field("g","G","byte",255),field("b","B","byte",255)}),
+        definition("arrow_global_set_scale", "设定全局箭头缩放", "箭头", "缩放", {field("value","缩放","float",1)}),
+        definition("arrow_global_set_scale_x", "设定全局箭头横向缩放", "箭头", "缩放", {field("value","横向缩放","float",1)}),
+        definition("arrow_global_set_scale_y", "设定全局箭头纵向缩放", "箭头", "缩放", {field("value","纵向缩放","float",1)}),
+        definition("arrow_global_set_width", "设定全局箭头线宽倍率", "箭头", "线条", {field("value","线宽倍率","float",1)})
     });
     return value;
+}
+
+NodeMetadata metadata(std::string category,std::string scope,std::string section,int order,
+                      std::string exposure,std::string targetKind,std::string capability="none",
+                      bool duration=false,bool immutable=false) {
+    return {std::move(category),std::move(scope),std::move(section),order,std::move(exposure),
+            std::move(targetKind),std::move(capability),duration,immutable};
+}
+
+const std::map<std::string,NodeMetadata>& metadataRegistry() {
+    static const std::map<std::string,NodeMetadata> value = [] {
+        std::map<std::string,NodeMetadata> m;
+        const auto put=[&](const char* type,NodeMetadata value){m.emplace(type,std::move(value));};
+        put("scene",metadata("通用","object","工程",0,"primary","scene"));
+        put("wait",metadata("通用","object","时间",10,"primary","none"));
+        put("raw_lua",metadata("通用","object","高级",90,"legacy","none"));
+        put("molecule_create",metadata("分子","object","对象",0,"primary","molecule","base",false,true));
+        put("molecule_delete",metadata("分子","object","对象",10,"primary","molecule"));
+        put("merge_molecules",metadata("分子","object","对象",20,"primary","molecule","none",true));
+        const auto moleculeSet=[&](const char* type,const char* section,int order,const char* capability="none"){put(type,metadata("分子","set",section,order,"primary","molecule",capability));};
+        moleculeSet("molecule_set_structure","结构",0,"snapshot");
+        moleculeSet("molecule_set_position","位置",10);moleculeSet("molecule_set_x","位置",11);moleculeSet("molecule_set_y","位置",12);
+        moleculeSet("molecule_set_scale","缩放",20);moleculeSet("molecule_set_scale_x","缩放",21);moleculeSet("molecule_set_scale_y","缩放",22);
+        moleculeSet("molecule_set_rotation","旋转",30);moleculeSet("molecule_set_alpha","颜色",40);moleculeSet("molecule_set_color","颜色",41);moleculeSet("molecule_set_layer","排列",50);
+        const auto moleculeTransform=[&](const char* type,const char* section,int order,const char* capability="none"){put(type,metadata("分子","transform",section,order,"primary","molecule",capability,true));};
+        moleculeTransform("molecule_lerp_structure","结构",0,"transform");moleculeTransform("bond_form","结构",1,"transform");moleculeTransform("bond_break","结构",2,"transform");moleculeTransform("selection_show","结构",3,"transform");moleculeTransform("selection_hide","结构",4,"transform");
+        moleculeTransform("molecule_lerp_position","位置",10);moleculeTransform("molecule_lerp_x","位置",11);moleculeTransform("molecule_lerp_y","位置",12);
+        moleculeTransform("molecule_lerp_scale","缩放",20);moleculeTransform("molecule_lerp_scale_x","缩放",21);moleculeTransform("molecule_lerp_scale_y","缩放",22);
+        moleculeTransform("molecule_lerp_rotation","旋转",30);moleculeTransform("molecule_lerp_alpha","颜色",40);moleculeTransform("molecule_lerp_color","颜色",41);
+        const auto moleculeGlobal=[&](const char* type,const char* section,int order){put(type,metadata("分子","global",section,order,"primary","global_molecule"));};
+        moleculeGlobal("molecule_global_set_alpha","颜色",0);moleculeGlobal("molecule_global_set_color","颜色",1);moleculeGlobal("molecule_global_set_scale","缩放",10);moleculeGlobal("molecule_global_set_scale_x","缩放",11);moleculeGlobal("molecule_global_set_scale_y","缩放",12);
+        put("arrow_new",metadata("箭头","object","对象",0,"primary","arrow"));put("arrow_delete",metadata("箭头","object","对象",10,"primary","arrow"));
+        const auto arrowSet=[&](const char* type,const char* section,int order){put(type,metadata("箭头","set",section,order,"primary","arrow"));};
+        arrowSet("arrow_set_curve","曲线",0);arrowSet("arrow_set_progress","绘制",10);arrowSet("arrow_set_scale","缩放",20);arrowSet("arrow_set_scale_x","缩放",21);arrowSet("arrow_set_scale_y","缩放",22);arrowSet("arrow_set_alpha","颜色",30);arrowSet("arrow_set_color","颜色",31);arrowSet("arrow_set_width","线条",40);
+        const auto arrowTransform=[&](const char* type,const char* section,int order){put(type,metadata("箭头","transform",section,order,"primary","arrow","none",true));};
+        arrowTransform("arrow_lerp_progress","绘制",10);arrowTransform("arrow_lerp_scale","缩放",20);arrowTransform("arrow_lerp_scale_x","缩放",21);arrowTransform("arrow_lerp_scale_y","缩放",22);arrowTransform("arrow_lerp_alpha","颜色",30);arrowTransform("arrow_lerp_color","颜色",31);arrowTransform("arrow_lerp_width","线条",40);
+        const auto arrowGlobal=[&](const char* type,const char* section,int order){put(type,metadata("箭头","global",section,order,"primary","global_arrow"));};
+        arrowGlobal("arrow_global_set_alpha","颜色",0);arrowGlobal("arrow_global_set_color","颜色",1);arrowGlobal("arrow_global_set_scale","缩放",10);arrowGlobal("arrow_global_set_scale_x","缩放",11);arrowGlobal("arrow_global_set_scale_y","缩放",12);arrowGlobal("arrow_global_set_width","线条",20);
+        // Hidden compatibility nodes retain execution and serialization.
+        put("arrow_set_position",metadata("箭头","set","位置",90,"legacy","arrow"));
+        put("arrow_lerp_position",metadata("箭头","transform","位置",90,"legacy","arrow","none",true));
+        for(const char* type:{"atom_set_xy","atom_lerp_xy","atom_lerp_pose","atom_set_element","atom_set_alpha","atom_lerp_alpha","atom_set_color","atom_lerp_color","atom_set_hidden","bond_delete","bond_set_order","bond_set_secondary_side","bond_set_stereo","bond_set_visible","bond_set_alpha","bond_lerp_alpha","bond_set_color","bond_lerp_color","detach_subgraph","adornment_set_offset","adornment_lerp_offset","adornment_set_alpha","adornment_lerp_alpha","adornment_set_color","adornment_lerp_color"})
+            if(!m.contains(type)) put(type,metadata("分子","set","兼容",900,"contextual","molecule"));
+        for(const char* type:{"atom_lerp_xy","atom_lerp_pose","atom_lerp_alpha","atom_lerp_color","bond_lerp_alpha","bond_lerp_color","adornment_lerp_offset","adornment_lerp_alpha","adornment_lerp_color"})
+            m.at(type).hasDuration=true;
+        put("selection_fade",metadata("分子","transform","兼容",900,"legacy","molecule","none",true));
+        put("molecule_set_visible",metadata("分子","set","兼容",900,"legacy","molecule"));
+        return m;
+    }();
+    return value;
+}
+
+const std::map<std::string,std::string>& toolLabels(){
+    static const std::map<std::string,std::string> value={
+        {"molecule_create","新建分子"},{"molecule_delete","删除分子"},{"merge_molecules","合并分子"},
+        {"molecule_global_set_alpha","透明度"},{"molecule_global_set_color","颜色"},{"molecule_global_set_scale","缩放"},{"molecule_global_set_scale_x","横向缩放"},{"molecule_global_set_scale_y","纵向缩放"},
+        {"molecule_set_structure","分子结构"},{"molecule_set_position","坐标"},{"molecule_set_x","横坐标"},{"molecule_set_y","纵坐标"},{"molecule_set_scale","缩放"},{"molecule_set_scale_x","横向缩放"},{"molecule_set_scale_y","纵向缩放"},{"molecule_set_rotation","旋转角度"},{"molecule_set_alpha","透明度"},{"molecule_set_color","颜色"},{"molecule_set_layer","图层"},
+        {"molecule_lerp_structure","结构形变"},{"bond_form","成键"},{"bond_break","断键"},{"selection_show","选区显现"},{"selection_hide","选区消失"},{"molecule_lerp_position","坐标"},{"molecule_lerp_x","横坐标"},{"molecule_lerp_y","纵坐标"},{"molecule_lerp_scale","缩放"},{"molecule_lerp_scale_x","横向缩放"},{"molecule_lerp_scale_y","纵向缩放"},{"molecule_lerp_rotation","旋转角度"},{"molecule_lerp_alpha","透明度"},{"molecule_lerp_color","颜色"},
+        {"arrow_new","新建箭头"},{"arrow_delete","删除箭头"},{"arrow_global_set_alpha","透明度"},{"arrow_global_set_color","颜色"},{"arrow_global_set_scale","缩放"},{"arrow_global_set_scale_x","横向缩放"},{"arrow_global_set_scale_y","纵向缩放"},{"arrow_global_set_width","线宽倍率"},
+        {"arrow_set_curve","箭头曲线"},{"arrow_set_progress","绘制进度"},{"arrow_set_scale","缩放"},{"arrow_set_scale_x","横向缩放"},{"arrow_set_scale_y","纵向缩放"},{"arrow_set_alpha","透明度"},{"arrow_set_color","颜色"},{"arrow_set_width","线宽"},
+        {"arrow_lerp_progress","绘制进度"},{"arrow_lerp_scale","缩放"},{"arrow_lerp_scale_x","横向缩放"},{"arrow_lerp_scale_y","纵向缩放"},{"arrow_lerp_alpha","透明度"},{"arrow_lerp_color","颜色"},{"arrow_lerp_width","线宽"}
+    };return value;
 }
 
 json parseParams(const ScriptNode& node) {
@@ -97,10 +191,8 @@ json parseParams(const ScriptNode& node) {
     catch (...) { return json::object(); }
 }
 int framesOf(const json& params) { return std::max(0, params.value("frames", 30)); }
-bool isLerp(std::string_view type) { return type.find("_lerp_") != std::string_view::npos; }
 bool hasDuration(std::string_view type) {
-    return isLerp(type) || type == "selection_fade" || type == "bond_form" ||
-           type == "bond_break" || type == "merge_molecules";
+    return nodeMetadata(std::string(type)).hasDuration;
 }
 std::string targetOf(const json& params) { return params.value("target", ""); }
 
@@ -140,9 +232,36 @@ std::vector<std::string> idList(const json& params,const char* key){
     return result;
 }
 
+std::optional<Molecule> moleculeSnapshot(const json& snapshot) {
+    if(!snapshot.is_object())return std::nullopt;
+    try{
+        json wrapper={{"format","chemanim-native-2d"},{"version",7},{"molecules",json::array({snapshot})},{"nodes",json::array()}};
+        Project loaded=fromJson(wrapper.dump());if(!loaded.molecules.empty())return loaded.molecules.front();
+    }catch(...){}
+    return std::nullopt;
+}
+
 }  // namespace
 
-std::string nodeRegistryJson() { return registry().dump(); }
+const NodeMetadata& nodeMetadata(const std::string& type) {
+    static const NodeMetadata legacy=metadata("","object","兼容",999,"legacy","none");
+    const auto found=metadataRegistry().find(type);
+    return found==metadataRegistry().end()?legacy:found->second;
+}
+
+std::string nodeRegistryJson() {
+    json exposed=registry();
+    for(json& item:exposed) {
+        const NodeMetadata& meta=nodeMetadata(item.value("type",""));
+        item["category"]=meta.category.empty()?item.value("category",""):meta.category;
+        item["scope"]=meta.scope;item["section"]=meta.section;item["order"]=meta.order;
+        item["exposure"]=meta.exposure;item["target_kind"]=meta.targetKind;
+        item["structure_edit_capability"]=meta.structureEditCapability;
+        item["has_duration"]=meta.hasDuration;item["target_immutable"]=meta.targetImmutable;
+        if(const auto label=toolLabels().find(item.value("type",""));label!=toolLabels().end())item["tool_label"]=label->second;
+    }
+    return exposed.dump();
+}
 
 std::string defaultNodeParamsJson(const std::string& type) {
     for(const json& item:registry()) if(item.value("type","")==type){
@@ -178,17 +297,57 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
     const auto addColor=[&](const std::string& prefix,Color base,const json& p,int start,int duration,Easing easing){add(prefix+":r",base.red,start,duration,p.value("r",base.red),easing);add(prefix+":g",base.green,start,duration,p.value("g",base.green),easing);add(prefix+":b",base.blue,start,duration,p.value("b",base.blue),easing);};
     std::set<std::string> explicitCreates;for(const ScriptNode& node:project.nodes)if(node.enabled&&node.type=="molecule_create")explicitCreates.insert(targetOf(parseParams(node)));
     if(!explicitCreates.empty())for(auto& [_,molecule]:result.molecules)molecule.visible=false;
+    std::set<std::string> liveTargets=explicitCreates.empty()?std::set<std::string>{}:std::set<std::string>{};
+    if(explicitCreates.empty())for(const auto& [id,_]:result.molecules)liveTargets.insert(id);
+    std::map<std::string,int> createCounts;
+    const auto diagnostic=[&](const ScriptNode& node,const std::string& message){result.diagnostics.push_back({node.id,"error",message});};
     for(std::size_t index=0;index<project.nodes.size();++index){
         const ScriptNode& node=project.nodes[index];const NodeTiming& timing=timings[index];if(!node.enabled)continue;
         const json p=parseParams(node);const std::string target=targetOf(p);auto found=result.molecules.find(target);Molecule* molecule=found==result.molecules.end()?nullptr:&found->second;
         const int duration=hasDuration(node.type)?framesOf(p):0;const Easing easing=easingOf(p);
-        if(node.type=="molecule_create"&&molecule&&frame>=timing.startFrame){molecule->visible=true;molecule->retired=false;}
-        else if(node.type=="molecule_delete"&&molecule&&frame>=timing.startFrame){molecule->visible=false;molecule->retired=true;}
+        const NodeMetadata& meta=nodeMetadata(node.type);
+        if(node.type=="molecule_create"){
+            if(!molecule){diagnostic(node,"新建分子节点引用了不存在的分子 "+target);continue;}
+            if(++createCounts[target]>1)diagnostic(node,"旧文件包含重复的新建分子节点；该节点按兼容语义保留");
+            liveTargets.insert(target);if(frame>=timing.startFrame){molecule->visible=true;molecule->retired=false;}
+        }
+        else if((meta.targetKind=="molecule"||meta.targetKind=="arrow")&&target.empty()) {diagnostic(node,"节点缺少目标");continue;}
+        else if(meta.targetKind=="molecule"&&(!molecule||!liveTargets.contains(target))) {diagnostic(node,"目标分子在该节点处尚未创建或已经删除: "+target);continue;}
+        else if(meta.targetKind=="molecule"&&molecule&&p.contains("atom")&&!p.value("atom","").empty()&&!molecule->atom(p.value("atom",""))){diagnostic(node,"节点引用了已经消失的原子 "+p.value("atom",""));continue;}
+        else if(meta.targetKind=="molecule"&&molecule&&p.contains("bond")&&!p.value("bond","").empty()&&node.type!="bond_form"&&node.type!="merge_molecules"&&!molecule->bond(p.value("bond",""))){diagnostic(node,"节点引用了已经消失的键 "+p.value("bond",""));continue;}
+        else if(meta.targetKind=="molecule"&&molecule&&p.contains("adornment")&&!p.value("adornment","").empty()&&!molecule->adornment(p.value("adornment",""))){diagnostic(node,"节点引用了已经消失的标记 "+p.value("adornment",""));continue;}
+        else if(node.type=="molecule_delete"&&molecule){if(frame>=timing.startFrame){molecule->visible=false;molecule->retired=true;}liveTargets.erase(target);}
         else if((node.type=="molecule_set_position"||node.type=="molecule_lerp_position")&&molecule){if(const auto coordinate=molecule->coordinate()){add(target+":anchor:x",coordinate->x,timing.startFrame,duration,p.value("x",coordinate->x),easing);add(target+":anchor:y",coordinate->y,timing.startFrame,duration,p.value("y",coordinate->y),easing);}}
-        else if((node.type=="molecule_set_scale"||node.type=="molecule_lerp_scale")&&molecule)add(target+":scale",molecule->scale,timing.startFrame,duration,p.value("value",1.0),easing);
+        else if((node.type=="molecule_set_x"||node.type=="molecule_lerp_x")&&molecule){if(const auto coordinate=molecule->coordinate())add(target+":anchor:x",coordinate->x,timing.startFrame,duration,p.value("value",coordinate->x),easing);}
+        else if((node.type=="molecule_set_y"||node.type=="molecule_lerp_y")&&molecule){if(const auto coordinate=molecule->coordinate())add(target+":anchor:y",coordinate->y,timing.startFrame,duration,p.value("value",coordinate->y),easing);}
+        else if((node.type=="molecule_set_scale"||node.type=="molecule_lerp_scale")&&molecule){add(target+":scale_x",molecule->scaleX,timing.startFrame,duration,p.value("value",1.0),easing);add(target+":scale_y",molecule->scaleY,timing.startFrame,duration,p.value("value",1.0),easing);}
+        else if((node.type=="molecule_set_scale_x"||node.type=="molecule_lerp_scale_x")&&molecule)add(target+":scale_x",molecule->scaleX,timing.startFrame,duration,p.value("value",1.0),easing);
+        else if((node.type=="molecule_set_scale_y"||node.type=="molecule_lerp_scale_y")&&molecule)add(target+":scale_y",molecule->scaleY,timing.startFrame,duration,p.value("value",1.0),easing);
         else if((node.type=="molecule_set_rotation"||node.type=="molecule_lerp_rotation")&&molecule)add(target+":rotation",molecule->rotation,timing.startFrame,duration,p.value("value",0.0),easing);
         else if((node.type=="molecule_set_alpha"||node.type=="molecule_lerp_alpha")&&molecule)add(target+":alpha",molecule->alpha,timing.startFrame,duration,p.value("value",255.0),easing);
         else if((node.type=="molecule_set_color"||node.type=="molecule_lerp_color")&&molecule)addColor(target+":color",molecule->color,p,timing.startFrame,duration,easing);
+        else if(node.type=="molecule_set_structure"&&molecule&&frame>=timing.startFrame){
+            try{json snapshot=p.value("snapshot",json::object());if(snapshot.is_string())snapshot=json::parse(snapshot.get<std::string>());if(const auto loaded=moleculeSnapshot(snapshot)){
+                molecule->atoms=loaded->atoms;molecule->bonds=loaded->bonds;molecule->adornments=loaded->adornments;
+                molecule->poses=loaded->poses;molecule->referenceBondLength=loaded->referenceBondLength;
+            }else diagnostic(node,"分子结构快照不是有效的 v7 分子快照");}
+            catch(...){diagnostic(node,"分子结构快照不是有效 JSON");}
+        }
+        else if(node.type=="molecule_lerp_structure"&&molecule){
+            try{json atoms=p.value("atoms",std::string("{}"));if(atoms.is_string())atoms=json::parse(atoms.get<std::string>());for(const auto& [id,value]:atoms.items())if(const Atom* atom=molecule->atom(id)){const std::string prefix=target+":atom:"+id;add(prefix+":x",atom->position.x,timing.startFrame,duration,value.value("x",atom->position.x),easing);add(prefix+":y",atom->position.y,timing.startFrame,duration,value.value("y",atom->position.y),easing);}else diagnostic(node,"结构形变引用了已经消失的原子 "+id);}
+            catch(...){diagnostic(node,"结构形变目标不是有效 JSON");}
+        }
+        else if(node.type=="molecule_global_set_alpha")add("global:molecule:alpha",255,timing.startFrame,0,p.value("value",255.0),easing);
+        else if(node.type=="molecule_global_set_color"){add("global:molecule:r",255,timing.startFrame,0,p.value("r",255.0),easing);add("global:molecule:g",255,timing.startFrame,0,p.value("g",255.0),easing);add("global:molecule:b",255,timing.startFrame,0,p.value("b",255.0),easing);}
+        else if(node.type=="molecule_global_set_scale"){add("global:molecule:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);add("global:molecule:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);}
+        else if(node.type=="molecule_global_set_scale_x")add("global:molecule:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);
+        else if(node.type=="molecule_global_set_scale_y")add("global:molecule:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);
+        else if(node.type=="arrow_global_set_alpha")add("global:arrow:alpha",255,timing.startFrame,0,p.value("value",255.0),easing);
+        else if(node.type=="arrow_global_set_color"){add("global:arrow:r",255,timing.startFrame,0,p.value("r",255.0),easing);add("global:arrow:g",255,timing.startFrame,0,p.value("g",255.0),easing);add("global:arrow:b",255,timing.startFrame,0,p.value("b",255.0),easing);}
+        else if(node.type=="arrow_global_set_scale"){add("global:arrow:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);add("global:arrow:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);}
+        else if(node.type=="arrow_global_set_scale_x")add("global:arrow:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);
+        else if(node.type=="arrow_global_set_scale_y")add("global:arrow:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);
+        else if(node.type=="arrow_global_set_width")add("global:arrow:width",1,timing.startFrame,0,p.value("value",1.0),easing);
         else if(node.type=="molecule_set_layer"&&molecule&&frame>=timing.startFrame)molecule->layer=p.value("value",0);
         else if(node.type=="molecule_set_visible"&&molecule&&frame>=timing.startFrame)molecule->visible=p.value("value",true);
         else if((node.type=="atom_set_xy"||node.type=="atom_lerp_xy")&&molecule){if(const Atom* atom=molecule->atom(p.value("atom",""))){const std::string prefix=target+":atom:"+atom->id;add(prefix+":x",atom->position.x,timing.startFrame,duration,p.value("x",atom->position.x),easing);add(prefix+":y",atom->position.y,timing.startFrame,duration,p.value("y",atom->position.y),easing);}}
@@ -206,7 +365,7 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
         else if(node.type=="bond_set_visible"&&molecule&&frame>=timing.startFrame){if(Bond* bond=molecule->bond(p.value("bond","")))bond->visible=p.value("value",true);}
         else if((node.type=="bond_set_alpha"||node.type=="bond_lerp_alpha")&&molecule){if(const Bond* bond=molecule->bond(p.value("bond","")))add(target+":bond:"+bond->id+":alpha",bond->alpha,timing.startFrame,duration,p.value("value",255.0),easing);}
         else if((node.type=="bond_set_color"||node.type=="bond_lerp_color")&&molecule){if(const Bond* bond=molecule->bond(p.value("bond","")))addColor(target+":bond:"+bond->id+":color",bond->color,p,timing.startFrame,duration,easing);}
-        else if(node.type=="selection_fade"&&molecule){for(const std::string& id:idList(p,"atoms"))if(const Atom* value=molecule->atom(id))add(target+":atom:"+id+":alpha",value->alpha,timing.startFrame,duration,p.value("value",0.0),easing);for(const std::string& id:idList(p,"bonds"))if(const Bond* value=molecule->bond(id))add(target+":bond:"+id+":alpha",value->alpha,timing.startFrame,duration,p.value("value",0.0),easing);for(const std::string& id:idList(p,"adornments"))if(const AtomAdornment* value=molecule->adornment(id))add(target+":adornment:"+id+":alpha",value->alpha,timing.startFrame,duration,p.value("value",0.0),easing);}
+        else if((node.type=="selection_fade"||node.type=="selection_show"||node.type=="selection_hide")&&molecule){const double alpha=node.type=="selection_show"?255.0:node.type=="selection_hide"?0.0:p.value("value",0.0);for(const std::string& id:idList(p,"atoms"))if(const Atom* value=molecule->atom(id))add(target+":atom:"+id+":alpha",value->alpha,timing.startFrame,duration,alpha,easing);else diagnostic(node,"选区节点引用了已经消失的原子 "+id);for(const std::string& id:idList(p,"bonds"))if(const Bond* value=molecule->bond(id))add(target+":bond:"+id+":alpha",value->alpha,timing.startFrame,duration,alpha,easing);else diagnostic(node,"选区节点引用了已经消失的键 "+id);for(const std::string& id:idList(p,"adornments"))if(const AtomAdornment* value=molecule->adornment(id))add(target+":adornment:"+id+":alpha",value->alpha,timing.startFrame,duration,alpha,easing);}
         else if(node.type=="adornment_set_text"&&molecule&&frame>=timing.startFrame){if(AtomAdornment* value=molecule->adornment(p.value("adornment","")))value->text=p.value("value","⊕");}
         else if((node.type=="adornment_set_offset"||node.type=="adornment_lerp_offset")&&molecule){if(const AtomAdornment* value=molecule->adornment(p.value("adornment",""))){const std::string prefix=target+":adornment:"+value->id;add(prefix+":x",value->offset.x,timing.startFrame,duration,p.value("x",value->offset.x),easing);add(prefix+":y",value->offset.y,timing.startFrame,duration,p.value("y",value->offset.y),easing);}}
         else if((node.type=="adornment_set_alpha"||node.type=="adornment_lerp_alpha")&&molecule){if(const AtomAdornment* value=molecule->adornment(p.value("adornment","")))add(target+":adornment:"+value->id+":alpha",value->alpha,timing.startFrame,duration,p.value("value",255.0),easing);}
@@ -220,15 +379,22 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
         else if(node.type=="arrow_set_progress"||node.type=="arrow_lerp_progress"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":progress",a.progress,timing.startFrame,duration,p.value("value",0.0),easing);}
         else if(node.type=="arrow_set_alpha"||node.type=="arrow_lerp_alpha"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":alpha",a.alpha,timing.startFrame,duration,p.value("value",255.0),easing);}
         else if(node.type=="arrow_set_color"||node.type=="arrow_lerp_color"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":r",a.red,timing.startFrame,duration,p.value("r",25.0),easing);add("arrow:"+target+":g",a.green,timing.startFrame,duration,p.value("g",25.0),easing);add("arrow:"+target+":b",a.blue,timing.startFrame,duration,p.value("b",25.0),easing);}
-        else if(node.type=="arrow_set_width"&&frame>=timing.startFrame){ArrowState& a=result.arrows[target];a.id=target;a.width=p.value("value",3.0);}
+        else if(node.type=="arrow_set_scale"||node.type=="arrow_lerp_scale"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_x",a.scaleX,timing.startFrame,duration,p.value("value",1.0),easing);add("arrow:"+target+":scale_y",a.scaleY,timing.startFrame,duration,p.value("value",1.0),easing);}
+        else if(node.type=="arrow_set_scale_x"||node.type=="arrow_lerp_scale_x"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_x",a.scaleX,timing.startFrame,duration,p.value("value",1.0),easing);}
+        else if(node.type=="arrow_set_scale_y"||node.type=="arrow_lerp_scale_y"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_y",a.scaleY,timing.startFrame,duration,p.value("value",1.0),easing);}
+        else if(node.type=="arrow_set_width"||node.type=="arrow_lerp_width"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":width",a.width,timing.startFrame,duration,p.value("value",3.0),easing);}
     }
+    const auto trackAt=[&](const char* key,double fallback){const auto found=tracks.find(key);return found==tracks.end()?fallback:found->second.at(frame);};
+    result.globals.moleculeAlpha=trackAt("global:molecule:alpha",255);result.globals.moleculeRed=trackAt("global:molecule:r",255);result.globals.moleculeGreen=trackAt("global:molecule:g",255);result.globals.moleculeBlue=trackAt("global:molecule:b",255);result.globals.moleculeScaleX=trackAt("global:molecule:scale_x",1);result.globals.moleculeScaleY=trackAt("global:molecule:scale_y",1);
+    result.globals.arrowAlpha=trackAt("global:arrow:alpha",255);result.globals.arrowRed=trackAt("global:arrow:r",255);result.globals.arrowGreen=trackAt("global:arrow:g",255);result.globals.arrowBlue=trackAt("global:arrow:b",255);result.globals.arrowScaleX=trackAt("global:arrow:scale_x",1);result.globals.arrowScaleY=trackAt("global:arrow:scale_y",1);result.globals.arrowWidth=trackAt("global:arrow:width",1);
+    const auto byte=[](double value){return static_cast<int>(std::round(std::clamp(value,0.0,255.0)));};
     for(auto& [id,molecule]:result.molecules){
         for(Atom& atom:molecule.atoms){const std::string p=id+":atom:"+atom.id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())atom.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())atom.position.y=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())atom.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())atom.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())atom.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())atom.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
         for(Bond& bond:molecule.bonds){const std::string p=id+":bond:"+bond.id+":";if(auto it=tracks.find(p+"alpha");it!=tracks.end())bond.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())bond.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())bond.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())bond.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
         for(AtomAdornment& value:molecule.adornments){const std::string p=id+":adornment:"+value.id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())value.offset.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())value.offset.y=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())value.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())value.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())value.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())value.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
-        const double scale=tracks.contains(id+":scale")?tracks[id+":scale"].at(frame):molecule.scale;const double rotation=tracks.contains(id+":rotation")?tracks[id+":rotation"].at(frame):molecule.rotation;const auto anchor=molecule.coordinate();if(anchor){const double radians=rotation*3.14159265358979323846/180.0,c=std::cos(radians),s=std::sin(radians);for(Atom& atom:molecule.atoms)if(atom.alive){const double x=(atom.position.x-anchor->x)*scale,y=(atom.position.y-anchor->y)*scale;atom.position={anchor->x+x*c-y*s,anchor->y+x*s+y*c};}const double desiredX=tracks.contains(id+":anchor:x")?tracks[id+":anchor:x"].at(frame):anchor->x;const double desiredY=tracks.contains(id+":anchor:y")?tracks[id+":anchor:y"].at(frame):anchor->y;for(Atom& atom:molecule.atoms)if(atom.alive){atom.position.x+=desiredX-anchor->x;atom.position.y+=desiredY-anchor->y;}}molecule.scale=scale;molecule.rotation=rotation;if(auto it=tracks.find(id+":alpha");it!=tracks.end())molecule.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=static_cast<int>(std::round(it->second.at(frame)));
+        const double localScaleX=tracks.contains(id+":scale_x")?tracks[id+":scale_x"].at(frame):molecule.scaleX;const double localScaleY=tracks.contains(id+":scale_y")?tracks[id+":scale_y"].at(frame):molecule.scaleY;const double scaleX=localScaleX*result.globals.moleculeScaleX,scaleY=localScaleY*result.globals.moleculeScaleY;const double rotation=tracks.contains(id+":rotation")?tracks[id+":rotation"].at(frame):molecule.rotation;const auto anchor=molecule.coordinate();if(anchor){const double radians=rotation*3.14159265358979323846/180.0,c=std::cos(radians),s=std::sin(radians);for(Atom& atom:molecule.atoms)if(atom.alive){const double x=(atom.position.x-anchor->x)*scaleX,y=(atom.position.y-anchor->y)*scaleY;atom.position={anchor->x+x*c-y*s,anchor->y+x*s+y*c};}const double desiredX=tracks.contains(id+":anchor:x")?tracks[id+":anchor:x"].at(frame):anchor->x;const double desiredY=tracks.contains(id+":anchor:y")?tracks[id+":anchor:y"].at(frame):anchor->y;for(Atom& atom:molecule.atoms)if(atom.alive){atom.position.x+=desiredX-anchor->x;atom.position.y+=desiredY-anchor->y;}}molecule.scaleX=scaleX;molecule.scaleY=scaleY;molecule.rotation=rotation;if(auto it=tracks.find(id+":alpha");it!=tracks.end())molecule.alpha=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=byte(it->second.at(frame));molecule.alpha=byte(molecule.alpha*result.globals.moleculeAlpha/255.0);molecule.color.red=byte(molecule.color.red*result.globals.moleculeRed/255.0);molecule.color.green=byte(molecule.color.green*result.globals.moleculeGreen/255.0);molecule.color.blue=byte(molecule.color.blue*result.globals.moleculeBlue/255.0);
     }
-    for(auto& [id,arrow]:result.arrows){const std::string p="arrow:"+id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())arrow.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())arrow.position.y=it->second.at(frame);if(auto it=tracks.find(p+"progress");it!=tracks.end())arrow.progress=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())arrow.alpha=it->second.at(frame);if(auto it=tracks.find(p+"r");it!=tracks.end())arrow.red=it->second.at(frame);if(auto it=tracks.find(p+"g");it!=tracks.end())arrow.green=it->second.at(frame);if(auto it=tracks.find(p+"b");it!=tracks.end())arrow.blue=it->second.at(frame);}
+    for(auto& [id,arrow]:result.arrows){const std::string p="arrow:"+id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())arrow.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())arrow.position.y=it->second.at(frame);if(auto it=tracks.find(p+"progress");it!=tracks.end())arrow.progress=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())arrow.alpha=it->second.at(frame);if(auto it=tracks.find(p+"r");it!=tracks.end())arrow.red=it->second.at(frame);if(auto it=tracks.find(p+"g");it!=tracks.end())arrow.green=it->second.at(frame);if(auto it=tracks.find(p+"b");it!=tracks.end())arrow.blue=it->second.at(frame);if(auto it=tracks.find(p+"width");it!=tracks.end())arrow.width=it->second.at(frame);const double sx=(tracks.contains(p+"scale_x")?tracks[p+"scale_x"].at(frame):arrow.scaleX)*result.globals.arrowScaleX;const double sy=(tracks.contains(p+"scale_y")?tracks[p+"scale_y"].at(frame):arrow.scaleY)*result.globals.arrowScaleY;const Point origin=arrow.start;const auto scaled=[&](Point value){return Point{origin.x+(value.x-origin.x)*sx,origin.y+(value.y-origin.y)*sy};};arrow.control1=scaled(arrow.control1);arrow.control2=scaled(arrow.control2);arrow.end=scaled(arrow.end);arrow.scaleX=sx;arrow.scaleY=sy;arrow.alpha=std::clamp(arrow.alpha*result.globals.arrowAlpha/255.0,0.0,255.0);arrow.red=std::clamp(arrow.red*result.globals.arrowRed/255.0,0.0,255.0);arrow.green=std::clamp(arrow.green*result.globals.arrowGreen/255.0,0.0,255.0);arrow.blue=std::clamp(arrow.blue*result.globals.arrowBlue/255.0,0.0,255.0);arrow.width*=result.globals.arrowWidth;}
     return result;
 }
 

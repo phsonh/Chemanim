@@ -62,7 +62,7 @@ private:
     void drawArrow(int tableIndex);
     [[nodiscard]] double number(int tableIndex, const char* key, double fallback) const;
     [[nodiscard]] std::string string(int tableIndex, const char* key, const char* fallback = "") const;
-    [[nodiscard]] Color objectColor(int tableIndex) const;
+    [[nodiscard]] Color objectColor(int tableIndex, const char* scope) const;
 };
 
 } // namespace chem

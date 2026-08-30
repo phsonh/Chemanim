@@ -55,6 +55,7 @@ private:
     static int lWait(lua_State* state);
     static int lFrame(lua_State* state);
     static int lOnFrame(lua_State* state);
+    static int lSetGlobal(lua_State* state);
 
     static LuaRuntime& boundRuntime(lua_State* state);
     static Object& boundObject(lua_State* state);
@@ -88,7 +89,9 @@ private:
     static int mSetColor(lua_State* state);
     static int mLerpColor(lua_State* state);
     static int mSetWidth(lua_State* state);
+    static int mLerpWidth(lua_State* state);
     static int mSetAtomXY(lua_State* state);
+    static int mSetStructure(lua_State* state);
     static int mLerpAtomXY(lua_State* state);
     static int mLerpAtomsXY(lua_State* state);
     static int mSetAtomElement(lua_State* state);

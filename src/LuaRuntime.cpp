@@ -271,16 +271,18 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     bind("Delete", mDelete);
     bind("LerpPos", mLerpPos); bind("LerpPosX", mLerpPosX); bind("LerpPosY", mLerpPosY);
     bind("LerpAlpha", mLerpAlpha); bind("LerpColor", mLerpColor);
-    if (object.kind == "sprite" || object.kind == "molecule") {
+    if (object.kind == "sprite" || object.kind == "molecule" || object.kind == "arrow") {
         bind("SetScale", mSetScale); bind("SetScaleX", mSetScaleX); bind("SetScaleY", mSetScaleY);
-        bind("SetRotation", mSetRotation); bind("SetRot", mSetRotation);
         bind("LerpScale", mLerpScale); bind("LerpScaleX", mLerpScaleX); bind("LerpScaleY", mLerpScaleY);
+    }
+    if (object.kind == "sprite" || object.kind == "molecule") {
+        bind("SetRotation", mSetRotation); bind("SetRot", mSetRotation);
         bind("LerpRotation", mLerpRotation); bind("LerpRot", mLerpRotation);
     }
     if (object.kind == "sprite") {
         bind("SetImage", mSetImage); bind("ChangeImage", mChangeImage);
     } else if (object.kind == "molecule") {
-        bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
+        bind("SetStructure", mSetStructure);bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
         bind("LerpAtomsXY", mLerpAtomsXY);
         bind("SetAtomElement",mSetAtomElement);bind("SetAtomHidden",mSetAtomHidden);bind("SetAtomAlpha",mSetAtomAlpha);bind("LerpAtomAlpha",mLerpAtomAlpha);bind("SetAtomColor",mSetAtomColor);bind("LerpAtomColor",mLerpAtomColor);
         bind("FormBond",mFormBond);bind("DeleteBond",mDeleteBond);bind("BreakBond",mBreakBond);bind("SetBondOrder",mSetBondOrder);bind("SetBondSecondarySide",mSetBondSecondarySide);
@@ -290,7 +292,7 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     } else if (object.kind == "arrow") {
         bind("SetProgress", mSetProgress); bind("LerpProgress", mLerpProgress);
         bind("SetCurve", mSetCurve);
-        bind("SetWidth", mSetWidth);
+        bind("SetWidth", mSetWidth); bind("LerpWidth", mLerpWidth);
     }
 }
 
@@ -319,6 +321,7 @@ void LuaRuntime::installApi() {
     for (const auto& [name, fn] : std::initializer_list<std::pair<const char*, lua_CFunction>>{
              {"scene", lScene}, {"load_texture", lLoadTexture},
              {"NewMol", lNewMol}, {"NewArrow", lNewArrow},
+             {"SetGlobal", lSetGlobal},
              {"Wait", lWait}, {"SetFrame", lAt}, {"GetFrame", lFrame}, {"Select", lSelect}, {"Current", lCurrent},
              {"set", lSet}, {"to", lTo}, {"texture", lTexture},
              {"select", lSelect}, {"current", lCurrent}, {"remove", lRemove},
@@ -557,10 +560,16 @@ int durationValue(lua_State* state, int index) {
 double alphaValue(lua_State* state, int index) {
     return std::clamp(luaL_checknumber(state, index), 0.0, 255.0) / 255.0;
 }
+
 double byteAlphaValue(lua_State* state, int index) {
     return std::clamp(luaL_checknumber(state, index), 0.0, 255.0);
 }
 } // namespace
+
+int LuaRuntime::lSetGlobal(lua_State* state) {
+    auto& runtime=self(state);const std::string scope=luaL_checkstring(state,1);const std::string property=luaL_checkstring(state,2);
+    runtime.engine_->addGlobalNumericTween(scope,property,runtime.cursor_,0,luaL_checknumber(state,3),Ease::Step);return 0;
+}
 
 int LuaRuntime::mSetPos(lua_State* state) {
     auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
@@ -771,11 +780,33 @@ int LuaRuntime::mSetWidth(lua_State* state) {
     return returnBoundObject(state, object);
 }
 
+int LuaRuntime::mLerpWidth(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
+    runtime.engine_->addNumericTween(object,"thickness",runtime.cursor_,durationValue(state,a+1),luaL_checknumber(state,a),boundEase(state,a+2));
+    return returnBoundObject(state,object);
+}
+
 int LuaRuntime::mSetAtomXY(lua_State* state) {
     auto& runtime = boundRuntime(state); auto& object = boundObject(state); const int a = methodBase(state);
     runtime.engine_->addAtomTween(object, luaL_checkstring(state, a), runtime.cursor_, 0,
                                   luaL_checknumber(state, a + 1), luaL_checknumber(state, a + 2), Ease::Step);
     return returnBoundObject(state, object);
+}
+
+int LuaRuntime::mSetStructure(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int argument=methodBase(state);
+    luaL_checktype(state,argument,LUA_TTABLE);
+    auto original=std::move(object.molecule);
+    try {
+        runtime.readMolecule(object,argument);
+        core::Molecule replacement=std::move(*object.molecule);
+        object.molecule=std::move(original);
+        runtime.engine_->addStructure(object,runtime.cursor_,std::move(replacement));
+    } catch (...) {
+        object.molecule=std::move(original);
+        throw;
+    }
+    return returnBoundObject(state,object);
 }
 
 int LuaRuntime::mLerpAtomXY(lua_State* state) {

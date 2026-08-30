@@ -235,6 +235,62 @@ std::string Project::addBlankMolecule(std::string name) {
     (void)createNodeId;
     return id;
 }
+
+std::string Project::duplicateMolecule(const std::string& sourceId,
+                                       std::optional<std::size_t> nodeIndex) {
+    const Molecule* source = molecule(sourceId);
+    if (!source) throw std::runtime_error("Cannot duplicate unknown molecule: " + sourceId);
+    const Molecule sourceCopy = *source;
+    std::string id;
+    do { id = "molecule" + std::to_string(nextMoleculeId++); } while (molecule(id));
+
+    std::uint64_t nextAtom = 1, nextBond = 1, nextAdornment = 1;
+    for (const Molecule& existing : molecules) {
+        for (const Atom& value : existing.atoms) nextAtom = std::max(nextAtom, numericSuffix(value.id, 'A') + 1);
+        for (const Bond& value : existing.bonds) nextBond = std::max(nextBond, numericSuffix(value.id, 'B') + 1);
+        for (const AtomAdornment& value : existing.adornments) nextAdornment = std::max(nextAdornment, numericSuffix(value.id, 'D') + 1);
+    }
+    Molecule copy = sourceCopy;
+    copy.id = id;
+    copy.name = sourceCopy.name.empty() ? id : sourceCopy.name + " 副本";
+    std::map<std::string, std::string> atomIds, bondIds, adornmentIds;
+    for (Atom& atom : copy.atoms) {
+        const std::string old = atom.id;
+        atom.id = "A" + std::to_string(nextAtom++);
+        atom.creationSerial = allocateCreationSerial();
+        atomIds.emplace(old, atom.id);
+    }
+    for (Bond& bond : copy.bonds) {
+        const std::string old = bond.id;
+        bond.id = "B" + std::to_string(nextBond++);
+        bond.atomA = atomIds.at(bond.atomA);
+        bond.atomB = atomIds.at(bond.atomB);
+        bondIds.emplace(old, bond.id);
+    }
+    for (AtomAdornment& adornment : copy.adornments) {
+        const std::string old = adornment.id;
+        adornment.id = "D" + std::to_string(nextAdornment++);
+        adornment.atomId = atomIds.at(adornment.atomId);
+        adornment.creationSerial = allocateCreationSerial();
+        adornmentIds.emplace(old, adornment.id);
+    }
+    std::map<std::string, Pose> remappedPoses;
+    for (auto& [poseId, pose] : copy.poses) {
+        std::map<std::string, Point> positions;
+        for (const auto& [oldAtom, point] : pose.atomPositions)
+            if (const auto found = atomIds.find(oldAtom); found != atomIds.end()) positions.emplace(found->second, point);
+        pose.atomPositions = std::move(positions);
+        remappedPoses.emplace(poseId, std::move(pose));
+    }
+    copy.poses = std::move(remappedPoses);
+    copy.nextAtomId = nextAtom;
+    copy.nextBondId = nextBond;
+    copy.nextAdornmentId = nextAdornment;
+    molecules.push_back(std::move(copy));
+    const std::string createNodeId=addNode("molecule_create", json({{"target", id}}).dump(), nodeIndex);
+    (void)createNodeId;
+    return id;
+}
 std::uint64_t Project::allocateCreationSerial() { return nextCreationSerial++; }
 std::string Project::addAtomTween(const std::string& moleculeId, const std::string& atomId,
                                   int startFrame, int frames, Point target, Easing easing) {
@@ -256,6 +312,15 @@ std::string Project::addNode(const std::string& type,std::string paramsJson,std:
     if(paramsJson.empty()||paramsJson=="{}") paramsJson=defaultNodeParamsJson(type);
     // Validate at the boundary; invalid JSON must never enter the C++ model.
     const json parsed=json::parse(paramsJson); if(!parsed.is_object()) throw std::runtime_error("Node params must be a JSON object");
+    if(type=="molecule_create") {
+        const std::string target=parsed.value("target","");
+        if(target.empty() || !molecule(target)) throw std::runtime_error("New molecule node requires its own valid molecule");
+        for(const ScriptNode& existing:nodes) if(existing.type=="molecule_create") {
+            const json current=json::parse(existing.paramsJson);
+            if(current.value("target","")==target)
+                throw std::runtime_error("Molecule already has a creation node: "+target);
+        }
+    }
     std::string id; do{id="N"+std::to_string(nextNodeId++);}while(node(id));
     ScriptNode value{id,type,true,std::move(paramsJson)};
     if(index&&*index<nodes.size()) {
@@ -366,7 +431,7 @@ AtomNumberStyle atomNumberStyleFromString(const std::string& value) {
 }
 
 std::string toJson(const Project& project, int indent) {
-    json root{{"format", "chemanim-native-2d"}, {"version", 6}, {"mod", project.mod},
+    json root{{"format", "chemanim-native-2d"}, {"version", 7}, {"mod", project.mod},
         {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId},
         {"next_node_id",project.nextNodeId}, {"next_creation_serial", project.nextCreationSerial}};
     root["scene"] = {{"width", project.scene.width}, {"height", project.scene.height},
@@ -382,7 +447,7 @@ std::string toJson(const Project& project, int indent) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
             {"next_bond_id", molecule.nextBondId}, {"next_adornment_id", molecule.nextAdornmentId},
-            {"rotation", molecule.rotation}, {"scale", molecule.scale}, {"alpha", molecule.alpha},
+            {"rotation", molecule.rotation}, {"scale_x", molecule.scaleX}, {"scale_y", molecule.scaleY}, {"alpha", molecule.alpha},
             {"layer", molecule.layer}, {"visible",molecule.visible}, {"retired", molecule.retired}};
         colorToJson(item["color"], molecule.color);
         item["atoms"] = json::array();
@@ -426,7 +491,7 @@ Project fromJson(const std::string& source) {
     const json root = json::parse(source);
     if (root.value("format", "") != "chemanim-native-2d") throw std::runtime_error("Not a Chemanim native 2D project");
     const int version = root.value("version", 0);
-    if (version < 2 || version > 6) throw std::runtime_error("Unsupported Chemanim native 2D project version");
+    if (version < 2 || version > 7) throw std::runtime_error("Unsupported Chemanim native 2D project version");
     Project project;
     std::map<std::string,std::pair<Point,double>> legacyTransforms;
     project.mod = root.value("mod", project.mod);
@@ -456,7 +521,9 @@ Project fromJson(const std::string& source) {
         const double legacyScale = raw.value("scale", 2.2) * 14.4 / std::max(.01, molecule.referenceBondLength);
         if(version<5)legacyTransforms[molecule.id]={legacyOrigin,legacyScale};
         molecule.rotation = raw.value("rotation", 0.0);
-        molecule.scale = version >= 5 ? raw.value("scale", 1.0) : 1.0;
+        const double persistedScale = version >= 5 ? raw.value("scale", 1.0) : 1.0;
+        molecule.scaleX = version >= 7 ? raw.value("scale_x", persistedScale) : persistedScale;
+        molecule.scaleY = version >= 7 ? raw.value("scale_y", persistedScale) : persistedScale;
         molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0);
         molecule.visible=raw.value("visible",true); molecule.retired=raw.value("retired",false);
         if (const auto color = raw.find("color"); color != raw.end()) molecule.color = colorFromJson(*color, {255,255,255});

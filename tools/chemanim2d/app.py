@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
         self.mode_panel.set_structure_enabled(self.session.can_edit_structure and not self.canvas.final_effect and not self._playing)
         if label:self.edit_mode.setText(label)
         elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
+        elif self.session.edit_target_kind=="structure_snapshot":self.edit_mode.setText("编辑：分子结构节点")
         elif self.session.edit_target_kind=="script_node":self.edit_mode.setText("编辑：动画节点")
         else:self.edit_mode.setText("预览：只读")
 
@@ -114,7 +115,7 @@ class MainWindow(QMainWindow):
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
         self.canvas.show_edit_frame(frame)
-        label="编辑：场景节点" if node["type"]=="scene" else ("编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{node.get("type","")}')
+        label="编辑：场景节点" if node["type"]=="scene" else ("编辑：分子结构节点" if self.session.edit_target_kind=="structure_snapshot" else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{node.get("type","")}')
         self._sync_edit_state(label);return True
 
     def _select_default_authoring_node(self):
@@ -151,11 +152,11 @@ class MainWindow(QMainWindow):
     def _set_tool(self,value):
         mutates=value in self.mode_panel.STRUCTURE_WRITE_TOOLS
         if mutates and not self.session.can_edit_structure:
-            self.statusBar().showMessage("请先在左侧选择有效的“创建/引用分子”节点");return
+            self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
         self.mode_panel.mode="绘制";self.session.set_tool(value);self._sync_edit_state();self.statusBar().showMessage(f"绘制工具：{value}")
     def _set_element(self,value):
         if not self.session.can_edit_structure:
-            self.statusBar().showMessage("请先在左侧选择有效的“创建/引用分子”节点");return
+            self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
         self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
     def _edit_atom_text(self,atom_id,side):
         molecule=next((item for item in self.session.project().get("molecules",[]) if item["id"]==self.session.active_molecule),{})
@@ -178,6 +179,8 @@ class MainWindow(QMainWindow):
     def _add_node(self,node_type,seed=None,open_editor=True):
         project=self.session.project();nodes=project.get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes))
         if node_type=="scene":self._scene_dialog();return ""
+        if node_type=="molecule_create":
+            stable_id=self.session.add_blank_molecule("");self.mark_dirty();self.refresh_all();self._select_default_authoring_node();return next((node["id"] for node in self.session.project().get("nodes",[]) if node["type"]=="molecule_create" and node.get("params",{}).get("target")==stable_id),"")
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
         params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
@@ -209,7 +212,9 @@ class MainWindow(QMainWindow):
             if alive:
                 anchor=min(alive,key=lambda a:a.get("creation_serial",0));seed.update(x=anchor.get("x",0.0),y=anchor.get("y",0.0))
             if "alpha" in node_type:seed["value"]=molecule.get("alpha",255)
-            elif "scale" in node_type:seed["value"]=molecule.get("scale",1.0)
+            elif "scale_x" in node_type:seed["value"]=molecule.get("scale_x",1.0)
+            elif "scale_y" in node_type:seed["value"]=molecule.get("scale_y",1.0)
+            elif "scale" in node_type:seed["value"]=molecule.get("scale_x",1.0)
             elif "rotation" in node_type:seed["value"]=molecule.get("rotation",0.0)
             elif "color" in node_type:seed.update(molecule.get("color",{"r":255,"g":255,"b":255}))
         elif kind=="atom":

@@ -117,7 +117,7 @@ struct Object {
     std::unique_ptr<core::Molecule> molecule;
 };
 
-enum class TopologyEventKind { Detach, Merge };
+enum class TopologyEventKind { Detach, Merge, Replace };
 struct TopologyEvent {
     TopologyEventKind kind = TopologyEventKind::Detach;
     int frame = 0;
@@ -126,6 +126,7 @@ struct TopologyEvent {
     std::vector<std::string> atoms;
     std::vector<std::string> bonds;
     std::optional<core::Bond> newBond;
+    std::optional<core::Molecule> replacement;
     unsigned long long order = 0;
 };
 
@@ -153,6 +154,10 @@ public:
     void scheduleRemove(Object& object, int frame);
     unsigned long long addNumericTween(Object& object, const std::string& property, int start,
                                        int duration, double target, Ease ease);
+    unsigned long long addGlobalNumericTween(const std::string& scope, const std::string& property,
+                                             int start, int duration, double target, Ease ease);
+    [[nodiscard]] double globalValue(const std::string& scope, const std::string& property,
+                                     int frame) const;
     unsigned long long addStringKey(Object& object, const std::string& property, int frame,
                                     std::string value);
     void addImageTransition(Object& object, int start, int duration,
@@ -163,6 +168,7 @@ public:
                       double x, double y, Ease ease);
     void addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds);
     void addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond);
+    void addStructure(Object& object,int frame,core::Molecule replacement);
     [[nodiscard]] std::optional<core::Molecule> moleculeAt(int objectId,int frame) const;
     void applyFrame(int frame);
     void registerTexture(std::string name, std::filesystem::path path,
@@ -184,6 +190,7 @@ private:
     std::map<std::string, TextureAsset> textures_;
     std::vector<int> frameCallbacks_;
     std::vector<TopologyEvent> topologyEvents_;
+    std::unordered_map<std::string, NumericTrack> globalTracks_;
     int nextId_ = 1;
     unsigned long long nextOrder_ = 1;
 

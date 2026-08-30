@@ -59,26 +59,10 @@ public:
     std::string writeMod(const std::string& root) const { return core::writeMod(session_.project(), std::filesystem::path(root)).string(); }
 
     std::string addBlankMolecule(const std::string& name) {
-        const std::string id = session_.project().addBlankMolecule(name);
-        session_.setActiveMolecule(id); return id;
+        return session_.createBlankMolecule(name);
     }
     std::string importSmiles(const std::string& name, const std::string& smiles) {
-        const std::string id = session_.project().addBlankMolecule(name);
-        core::Molecule* destination=session_.project().molecule(id);
-        const std::uint64_t firstAtom=destination->nextAtomId,firstBond=destination->nextBondId,
-                            firstAdornment=destination->nextAdornmentId;
-        core::Molecule imported=core::moleculeFromSmiles(id, name.empty() ? id : name, smiles);
-        std::map<std::string,std::string> atomIds;
-        std::uint64_t atomNumber=firstAtom,bondNumber=firstBond,adornmentNumber=firstAdornment;
-        for(core::Atom& atom:imported.atoms){const std::string old=atom.id;atom.id="A"+std::to_string(atomNumber++);atomIds[old]=atom.id;}
-        for(core::Bond& bond:imported.bonds){bond.id="B"+std::to_string(bondNumber++);bond.atomA=atomIds.at(bond.atomA);bond.atomB=atomIds.at(bond.atomB);}
-        for(core::AtomAdornment& adornment:imported.adornments){adornment.id="D"+std::to_string(adornmentNumber++);adornment.atomId=atomIds.at(adornment.atomId);}
-        imported.nextAtomId=atomNumber;imported.nextBondId=bondNumber;imported.nextAdornmentId=adornmentNumber;
-        *destination=std::move(imported);
-        core::Molecule* molecule=destination;
-        for(core::Atom& atom:molecule->atoms)atom.creationSerial=session_.project().allocateCreationSerial();
-        for(core::AtomAdornment& adornment:molecule->adornments)adornment.creationSerial=session_.project().allocateCreationSerial();
-        session_.setActiveMolecule(id); return id;
+        return session_.importSmiles(name,smiles);
     }
     void setActiveMolecule(const std::string& id) { session_.setActiveMolecule(id); }
     std::string activeMolecule() const { return session_.activeMoleculeId(); }
@@ -114,6 +98,7 @@ public:
     std::string editTargetKind() const {
         switch(session_.editTargetKind()){
             case core::EditTargetKind::BaseStructure:return "base_structure";
+            case core::EditTargetKind::StructureSnapshot:return "structure_snapshot";
             case core::EditTargetKind::TimelinePreview:return "timeline_preview";
             case core::EditTargetKind::AtomTween:return "atom_tween";
             case core::EditTargetKind::Pose:return "pose";
@@ -135,8 +120,9 @@ public:
     bool deleteNode(const std::string& id){return session_.deleteScriptNode(id);}
     bool updateScene(const std::string& value){return session_.updateScene(value);}
     int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
-    py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale"]=molecule.scale;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
-    py::dict evaluatedArrows(int frame)const{py::dict result;for(const auto& [id,arrow]:core::evaluateNodes(session_.project(),frame).arrows){py::dict item;item["exists"]=arrow.exists;item["visible"]=arrow.visible;item["position"]=point(arrow.position);item["start"]=point(arrow.start);item["control1"]=point(arrow.control1);item["control2"]=point(arrow.control2);item["end"]=point(arrow.end);item["progress"]=arrow.progress;item["alpha"]=arrow.alpha;item["width"]=arrow.width;item["r"]=arrow.red;item["g"]=arrow.green;item["b"]=arrow.blue;result[py::str(id)]=item;}return result;}
+    py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
+    py::dict evaluatedArrows(int frame)const{py::dict result;for(const auto& [id,arrow]:core::evaluateNodes(session_.project(),frame).arrows){py::dict item;item["exists"]=arrow.exists;item["visible"]=arrow.visible;item["position"]=point(arrow.position);item["start"]=point(arrow.start);item["control1"]=point(arrow.control1);item["control2"]=point(arrow.control2);item["end"]=point(arrow.end);item["progress"]=arrow.progress;item["alpha"]=arrow.alpha;item["width"]=arrow.width;item["scale_x"]=arrow.scaleX;item["scale_y"]=arrow.scaleY;item["r"]=arrow.red;item["g"]=arrow.green;item["b"]=arrow.blue;result[py::str(id)]=item;}return result;}
+    py::list diagnostics(int frame)const{py::list values;for(const auto& diagnostic:core::evaluateNodes(session_.project(),frame).diagnostics){py::dict item;item["node_id"]=diagnostic.nodeId;item["severity"]=diagnostic.severity;item["message"]=diagnostic.message;values.append(item);}return values;}
     py::object evaluatedProject(int frame)const{core::Project value=session_.project();value.molecules.clear();for(const auto& [_,molecule]:core::evaluateNodes(session_.project(),frame).molecules)value.molecules.push_back(molecule);value.nodes.clear();return jsonObject(core::toJson(value));}
 
     py::dict depict(bool finalEffect) {
@@ -183,20 +169,20 @@ public:
             if(finalEffect){
                 const core::Scene& scene=session_.project().scene;
                 const core::Point anchor=molecule.coordinate().value_or(core::Point{});
-                const double objectScale=molecule.scale;
+                const double objectScaleX=molecule.scaleX,objectScaleY=molecule.scaleY;
                 const double radians=molecule.rotation*3.14159265358979323846/180.0;
                 const double cosine=std::cos(radians),sine=std::sin(radians);
                 const auto localize=[&](core::Molecule value){
                     const core::Point valueAnchor=value.coordinate().value_or(core::Point{});
-                    const double valueScale=std::abs(value.scale)<1e-9?1.0:value.scale;
+                    const double valueScaleX=std::abs(value.scaleX)<1e-9?1.0:value.scaleX;
+                    const double valueScaleY=std::abs(value.scaleY)<1e-9?1.0:value.scaleY;
                     const double valueRadians=value.rotation*3.14159265358979323846/180.0;
                     const double c=std::cos(valueRadians),s=std::sin(valueRadians);
                     for(core::Atom& atom:value.atoms){
-                        const double x=(atom.position.x-valueAnchor.x)/valueScale;
-                        const double y=(atom.position.y-valueAnchor.y)/valueScale;
-                        atom.position={x*c+y*s,-x*s+y*c};
+                        const double dx=atom.position.x-valueAnchor.x,dy=atom.position.y-valueAnchor.y;
+                        atom.position={(dx*c+dy*s)/valueScaleX,(-dx*s+dy*c)/valueScaleY};
                     }
-                    value.scale=1.0;value.rotation=0.0;
+                    value.scaleX=1.0;value.scaleY=1.0;value.rotation=0.0;
                     return value;
                 };
                 depictedMolecule=localize(molecule);
@@ -220,14 +206,14 @@ public:
                 }
                 const double canvasScaleX=scene.logicWidth>0?static_cast<double>(composite.width)/scene.logicWidth:1.0;
                 const double canvasScaleY=scene.logicHeight>0?static_cast<double>(composite.height)/scene.logicHeight:1.0;
-                const double localX=depictionViewport.center.x*objectScale;
-                const double localY=depictionViewport.center.y*objectScale;
+                const double localX=depictionViewport.center.x*objectScaleX;
+                const double localY=depictionViewport.center.y*objectScaleY;
                 const double offsetX=localX*cosine-localY*sine;
                 const double offsetY=localX*sine+localY*cosine;
                 const double centerX=composite.width*.5+(anchor.x+offsetX)*canvasScaleX;
                 const double centerY=composite.height*.5-(anchor.y+offsetY)*canvasScaleY;
                 outerTransform="translate("+std::to_string(centerX)+" "+std::to_string(centerY)+") rotate("+
-                    std::to_string(molecule.rotation)+") scale("+std::to_string(scene.viewZoom*objectScale)+") translate("+
+                    std::to_string(molecule.rotation)+") scale("+std::to_string(scene.viewZoom*objectScaleX)+" "+std::to_string(scene.viewZoom*objectScaleY)+") translate("+
                     std::to_string(-depictionViewport.width*.5)+" "+std::to_string(-depictionViewport.height*.5)+")";
             }
             const core::DepictionResult depiction=depiction_.depict(depictedMolecule,session_.project().style,depictionViewport);
@@ -269,7 +255,7 @@ PYBIND11_MODULE(chemanim_core, module) {
 #else
     module.attr("BUILD_COMMIT")="unknown";
 #endif
-    module.attr("DOCUMENT_VERSION")=6;
+    module.attr("DOCUMENT_VERSION")=7;
     py::class_<CoreSession>(module, "CoreSession")
         .def(py::init<>()).def("new_project", &CoreSession::newProject).def("load", &CoreSession::load)
         .def("save", &CoreSession::save).def("json", &CoreSession::json).def("project", &CoreSession::project)
@@ -299,7 +285,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
         .def("duplicate_node",&CoreSession::duplicateNode).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
-        .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("evaluated_project",&CoreSession::evaluatedProject)
+        .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("diagnostics",&CoreSession::diagnostics).def("evaluated_project",&CoreSession::evaluatedProject)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)
         .def("depict_at", &CoreSession::depictAt, py::arg("frame"), py::arg("final_effect")=false);
 }

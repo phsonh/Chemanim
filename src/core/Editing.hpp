@@ -46,7 +46,7 @@ struct Viewport {
 };
 
 enum class HitKind { None, Atom, Bond, Adornment };
-enum class EditTargetKind { BaseStructure, TimelinePreview, AtomTween, Pose, ScriptNode };
+enum class EditTargetKind { BaseStructure, StructureSnapshot, TimelinePreview, AtomTween, Pose, ScriptNode };
 enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Text, Move, Pan };
 
 struct Hit {
@@ -118,6 +118,8 @@ public:
                       AtomLabelSide side, AtomNumberStyle numberStyle);
     bool addChargeAdornment(const std::string& atomId, int delta);
     bool setAdornmentOffset(const std::string& adornmentId, Point offset);
+    [[nodiscard]] std::string createBlankMolecule(std::string name = {});
+    [[nodiscard]] std::string importSmiles(std::string name,const std::string& smiles);
     [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,
                                             std::optional<std::size_t> index = std::nullopt);
     bool updateScriptNode(const std::string& nodeId, const std::string& paramsJson);

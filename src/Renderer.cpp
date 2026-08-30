@@ -80,11 +80,11 @@ std::string Renderer::string(int tableIndex, const char* key, const char* fallba
     return result;
 }
 
-Color Renderer::objectColor(int tableIndex) const {
+Color Renderer::objectColor(int tableIndex,const char* scope) const {
     const auto channel = [&](const char* key, double fallback) {
-        return static_cast<unsigned char>(std::clamp(number(tableIndex, key, fallback), 0.0, 255.0));
+        return static_cast<unsigned char>(std::clamp(number(tableIndex,key,fallback)*engine_.globalValue(scope,key,currentFrame_)/255.0,0.0,255.0));
     };
-    const double alpha = std::clamp(number(tableIndex, "alpha", 1.0), 0.0, 1.0);
+    const double alpha = std::clamp(number(tableIndex,"alpha",1.0)*engine_.globalValue(scope,"alpha",currentFrame_)/255.0,0.0,1.0);
     return Color{channel("r", 255), channel("g", 255), channel("b", 255),
                  static_cast<unsigned char>(std::round(alpha * 255.0))};
 }
@@ -146,8 +146,8 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const float renderHeight = static_cast<float>(engine_.scene.height * supersample_);
     const float canvasScaleX = renderWidth / engine_.scene.logicWidth;
     const float canvasScaleY = renderHeight / engine_.scene.logicHeight;
-    const float scaleX = static_cast<float>(number(table, "scale_x", 1));
-    const float scaleY = static_cast<float>(number(table, "scale_y", 1));
+    const float scaleX = static_cast<float>(number(table,"scale_x",1)*engine_.globalValue("molecule","scale_x",currentFrame_));
+    const float scaleY = static_cast<float>(number(table,"scale_y",1)*engine_.globalValue("molecule","scale_y",currentFrame_));
     const float rasterScale = static_cast<float>(engine_.scene.viewZoom * supersample_) *
                               std::max(std::abs(scaleX), std::abs(scaleY));
     SvgCacheEntry& cache = moleculeSvgs_[object.id];
@@ -168,7 +168,7 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         cache.hasViewport = true;
     }
     core::Molecule currentMolecule = *evaluatedMolecule;
-    const Color moleculeTint=objectColor(table);currentMolecule.color={moleculeTint.r,moleculeTint.g,moleculeTint.b};
+    const Color moleculeTint=objectColor(table,"molecule");currentMolecule.color={moleculeTint.r,moleculeTint.g,moleculeTint.b};
     for (auto& atom : currentMolecule.atoms) {
         const auto x = object.numericTracks.find("atom:" + atom.id + ":x");
         const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
@@ -238,7 +238,7 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     Rectangle destination{x, y, naturalWidth * expectedX, naturalHeight * expectedY};
     const Vector2 origin{destination.width * 0.5f, destination.height * 0.5f};
     Color tint = WHITE;
-    tint.a = objectColor(table).a;
+    tint.a = objectColor(table,"molecule").a;
     DrawTexturePro(cache.texture, source, destination, origin,
                    static_cast<float>(rotationDegrees), tint);
 }
@@ -258,7 +258,7 @@ void Renderer::drawSprite(int table, const Object& object) {
     const float reveal = static_cast<float>(std::clamp(number(table, "reveal", 1), 0.0, 1.0));
     if (reveal <= 0) return;
     const std::string direction = string(table, "reveal_dir", "ltr");
-    const Color baseColor = objectColor(table);
+    const Color baseColor = objectColor(table,"sprite");
     const auto drawTexture = [&](const std::string& textureName, double blendAlpha,
                                  double logicalX, double logicalY) {
         if (blendAlpha <= 0) return;
@@ -316,16 +316,17 @@ void Renderer::drawSprite(int table, const Object& object) {
 void Renderer::drawArrow(int table) {
     const float ox = static_cast<float>(number(table, "x", 0));
     const float oy = static_cast<float>(number(table, "y", 0));
-    const float sx = static_cast<float>(number(table, "scale_x", 1));
-    const float sy = static_cast<float>(number(table, "scale_y", 1));
+    const float sx = static_cast<float>(number(table,"scale_x",1)*engine_.globalValue("arrow","scale_x",currentFrame_));
+    const float sy = static_cast<float>(number(table,"scale_y",1)*engine_.globalValue("arrow","scale_y",currentFrame_));
     const float renderWidth = static_cast<float>(engine_.scene.width * supersample_);
     const float renderHeight = static_cast<float>(engine_.scene.height * supersample_);
     const float canvasScaleX = renderWidth / engine_.scene.logicWidth;
     const float canvasScaleY = renderHeight / engine_.scene.logicHeight;
     const float strokeScale = std::sqrt(canvasScaleX * canvasScaleY);
+    const double anchorX=number(table,"x1",0),anchorY=number(table,"y1",0);
     const auto screenPoint = [&](const char* xKey, const char* yKey, double fallbackX, double fallbackY) {
-        const float logicalX = ox + static_cast<float>(number(table, xKey, fallbackX)) * sx;
-        const float logicalY = oy + static_cast<float>(number(table, yKey, fallbackY)) * sy;
+        const float logicalX = ox + static_cast<float>(anchorX+(number(table,xKey,fallbackX)-anchorX)*sx);
+        const float logicalY = oy + static_cast<float>(anchorY+(number(table,yKey,fallbackY)-anchorY)*sy);
         return Vector2{renderWidth * 0.5f + logicalX * canvasScaleX,
                        renderHeight * 0.5f - logicalY * canvasScaleY};
     };
@@ -333,7 +334,7 @@ void Renderer::drawArrow(int table) {
     Vector2 p1 = screenPoint("cx1", "cy1", 100, 0);
     Vector2 p2 = screenPoint("cx2", "cy2", 200, 0);
     Vector2 p3 = screenPoint("x2", "y2", 300, 0);
-    const float thickness = static_cast<float>(std::max(0.1, number(table, "thickness", 3))) * strokeScale;
+    const float thickness = static_cast<float>(std::max(0.1,number(table,"thickness",3)*engine_.globalValue("arrow","width",currentFrame_))) * strokeScale;
     const float headLength = thickness * (20.0f / 3.0f);
     const float headWidth = thickness * 5.0f;
     const float progress = static_cast<float>(std::clamp(number(table, "progress", 0), 0.0, 1.0));
@@ -353,7 +354,7 @@ void Renderer::drawArrow(int table) {
         cumulative[i] = cumulative[i - 1] + Vector2Distance(points[i - 1], points[i]);
     }
     const float targetLength = cumulative[samples] * progress;
-    Color color = objectColor(table);
+    Color color = objectColor(table,"arrow");
     const auto pointsThroughLength = [&](float length) {
         std::vector<Vector2> result;
         result.reserve(samples + 2);

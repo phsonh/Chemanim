@@ -173,6 +173,19 @@ unsigned long long Engine::addNumericTween(Object& object, const std::string& pr
     return order;
 }
 
+unsigned long long Engine::addGlobalNumericTween(const std::string& scope,const std::string& property,
+                                                  int start,int duration,double target,Ease ease) {
+    const std::string key=scope+":"+property;auto [it,inserted]=globalTracks_.try_emplace(key);
+    NumericTrack& track=it->second;if(inserted)track.base=(property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
+    const double from=track.valueAt(start);for(auto& segment:track.segments){const int effectiveEnd=std::min(segment.end,segment.cancelledAt);if(segment.start<=start&&start<effectiveEnd){segment.cancelledAt=start;segment.cancelledValue=from;}}
+    const unsigned long long order=nextOrder_++;track.segments.push_back({start,start+std::max(0,duration),from,target,ease,order});return order;
+}
+
+double Engine::globalValue(const std::string& scope,const std::string& property,int frame) const {
+    const auto found=globalTracks_.find(scope+":"+property);if(found!=globalTracks_.end())return found->second.valueAt(frame);
+    return (property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
+}
+
 unsigned long long Engine::addStringKey(Object& object, const std::string& property, int frame,
                                         std::string value) {
     auto [it, inserted] = object.stringTracks.try_emplace(property);
@@ -286,8 +299,9 @@ void Engine::addAtomTween(Object& object, const std::string& atomId, int start, 
     addNumericTween(object, yKey, start, duration, y, ease);
 }
 
-void Engine::addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds){topologyEvents_.push_back({TopologyEventKind::Detach,frame,source.id,destination.id,std::move(atoms),std::move(bonds),std::nullopt,nextOrder_++});}
-void Engine::addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond){topologyEvents_.push_back({TopologyEventKind::Merge,frame,source.id,destination.id,{},{},std::move(newBond),nextOrder_++});}
+void Engine::addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds){TopologyEvent event;event.kind=TopologyEventKind::Detach;event.frame=frame;event.sourceObject=source.id;event.destinationObject=destination.id;event.atoms=std::move(atoms);event.bonds=std::move(bonds);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
+void Engine::addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond){TopologyEvent event;event.kind=TopologyEventKind::Merge;event.frame=frame;event.sourceObject=source.id;event.destinationObject=destination.id;event.newBond=std::move(newBond);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
+void Engine::addStructure(Object& object,int frame,core::Molecule replacement){TopologyEvent event;event.kind=TopologyEventKind::Replace;event.frame=frame;event.sourceObject=object.id;event.destinationObject=object.id;event.replacement=std::move(replacement);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
 
 std::optional<core::Molecule> Engine::moleculeAt(int objectId,int frame) const {
     std::map<int,core::Molecule> values;for(const auto& object:objects_)if(object->molecule)values.emplace(object->id,*object->molecule);
@@ -296,7 +310,9 @@ std::optional<core::Molecule> Engine::moleculeAt(int objectId,int frame) const {
     const auto toWorld=[&](const Object* object,core::Point point,int at){const double sx=valueAt(object,"scale_x",at,1),sy=valueAt(object,"scale_y",at,1),angle=valueAt(object,"rotation",at,0)*3.14159265358979323846/180.0,c=std::cos(angle),s=std::sin(angle);point={point.x*sx,point.y*sy};return core::Point{valueAt(object,"x",at,0)+point.x*c-point.y*s,valueAt(object,"y",at,0)+point.x*s+point.y*c};};
     const auto fromWorld=[&](const Object* object,core::Point point,int at){point.x-=valueAt(object,"x",at,0);point.y-=valueAt(object,"y",at,0);const double angle=-valueAt(object,"rotation",at,0)*3.14159265358979323846/180.0,c=std::cos(angle),s=std::sin(angle),x=point.x*c-point.y*s,y=point.x*s+point.y*c;double sx=valueAt(object,"scale_x",at,1),sy=valueAt(object,"scale_y",at,1);if(std::abs(sx)<1e-9)sx=sx<0?-1e-9:1e-9;if(std::abs(sy)<1e-9)sy=sy<0?-1e-9:1e-9;return core::Point{x/sx,y/sy};};
     std::vector<const TopologyEvent*> ordered;for(const TopologyEvent& event:topologyEvents_)if(event.frame<=frame)ordered.push_back(&event);std::stable_sort(ordered.begin(),ordered.end(),[](const auto* a,const auto* b){return a->frame!=b->frame?a->frame<b->frame:a->order<b->order;});
-    for(const TopologyEvent* event:ordered){auto source=values.find(event->sourceObject),destination=values.find(event->destinationObject);if(source==values.end()||destination==values.end()||source==destination)continue;const Object* sourceObject=objectFor(event->sourceObject);const Object* destinationObject=objectFor(event->destinationObject);
+    for(const TopologyEvent* event:ordered){
+        if(event->kind==TopologyEventKind::Replace){if(event->replacement)if(auto value=values.find(event->sourceObject);value!=values.end())value->second=*event->replacement;continue;}
+        auto source=values.find(event->sourceObject),destination=values.find(event->destinationObject);if(source==values.end()||destination==values.end()||source==destination)continue;const Object* sourceObject=objectFor(event->sourceObject);const Object* destinationObject=objectFor(event->destinationObject);
         std::set<std::string> atoms(event->atoms.begin(),event->atoms.end()),bonds(event->bonds.begin(),event->bonds.end());if(event->kind==TopologyEventKind::Merge)for(const core::Atom& atom:source->second.atoms)atoms.insert(atom.id);
         for(auto it=source->second.atoms.begin();it!=source->second.atoms.end();)if(atoms.contains(it->id)){it->position.x=valueAt(sourceObject,"atom:"+it->id+":x",event->frame,it->position.x);it->position.y=valueAt(sourceObject,"atom:"+it->id+":y",event->frame,it->position.y);it->position=fromWorld(destinationObject,toWorld(sourceObject,it->position,event->frame),event->frame);destination->second.atoms.push_back(std::move(*it));it=source->second.atoms.erase(it);}else ++it;
         for(auto it=source->second.bonds.begin();it!=source->second.bonds.end();)if(event->kind==TopologyEventKind::Merge||bonds.contains(it->id)||(atoms.contains(it->atomA)&&atoms.contains(it->atomB))){destination->second.bonds.push_back(std::move(*it));it=source->second.bonds.erase(it);}else{if(atoms.contains(it->atomA)||atoms.contains(it->atomB))it->alive=false;++it;}

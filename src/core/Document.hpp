@@ -103,7 +103,10 @@ struct Molecule {
     std::vector<AtomAdornment> adornments;
     std::map<std::string, Pose> poses;
     double rotation = 0.0;
-    double scale = 1.0;
+    // v7: X/Y are the only persisted scale components.  A separate uniform
+    // value would be ambiguous because it could be multiplied twice.
+    double scaleX = 1.0;
+    double scaleY = 1.0;
     int alpha = 255;
     Color color{255, 255, 255};
     int layer = 0;
@@ -203,6 +206,8 @@ struct Project {
     [[nodiscard]] Molecule* molecule(const std::string& stableId);
     [[nodiscard]] const Molecule* molecule(const std::string& stableId) const;
     [[nodiscard]] std::string addBlankMolecule(std::string name = {});
+    [[nodiscard]] std::string duplicateMolecule(const std::string& sourceId,
+                                                std::optional<std::size_t> nodeIndex = std::nullopt);
     [[nodiscard]] std::uint64_t allocateCreationSerial();
     [[nodiscard]] std::string addAtomTween(const std::string& moleculeId,
                                            const std::string& atomId,

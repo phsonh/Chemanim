@@ -79,6 +79,8 @@ class NodeInspector(QWidget):
             else:
                 editor = QLineEdit(str(value)); editor.editingFinished.connect(self.apply)
             self.editors[key] = (editor, kind); self.layout.addRow(spec["label"], editor)
+            if key == "target" and definition.get("target_immutable"):
+                editor.setEnabled(False);editor.setToolTip("新建分子的目标由 Core 分配，不可重新指向")
         self._updating = False
 
     def apply(self):

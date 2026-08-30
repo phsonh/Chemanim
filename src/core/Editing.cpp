@@ -1,4 +1,5 @@
 #include "Editing.hpp"
+#include "Depiction.hpp"
 #include "Nodes.hpp"
 #include "SketcherGeometry.hpp"
 #include "Timeline.hpp"
@@ -105,6 +106,7 @@ struct EditorSession::Impl {
     EditTargetKind targetKind = EditTargetKind::TimelinePreview;
     std::string targetId;
     int previewFrame = 0;
+    std::optional<Molecule> structureDraft;
     enum class SnapshotDomain { Structure, Authoring };
     struct Snapshot { Project before; Project after; SnapshotDomain domain; };
     std::vector<Snapshot> undo;
@@ -132,15 +134,36 @@ struct EditorSession::Impl {
 
     Molecule* molecule() { return project.molecule(activeMolecule); }
     const Molecule* molecule() const { return project.molecule(activeMolecule); }
+    Molecule* editableMolecule() { return targetKind==EditTargetKind::StructureSnapshot&&structureDraft?&*structureDraft:molecule(); }
+    const Molecule* editableMolecule() const { return targetKind==EditTargetKind::StructureSnapshot&&structureDraft?&*structureDraft:molecule(); }
+
+    void flushStructureDraft() {
+        if(targetKind!=EditTargetKind::StructureSnapshot||!structureDraft)return;
+        ScriptNode* node=project.node(targetId);if(!node)return;
+        Project temporary;temporary.molecules={*structureDraft};temporary.nodes.clear();
+        const json serialized=json::parse(toJson(temporary));
+        json params=json::parse(node->paramsJson);params["snapshot"]=serialized["molecules"][0];node->paramsJson=params.dump();
+    }
+
+    void loadStructureDraft(const ScriptNode& node) {
+        const json params=json::parse(node.paramsJson);const auto snapshot=params.find("snapshot");
+        if(snapshot!=params.end()&&snapshot->is_object()&&snapshot->contains("id")&&snapshot->contains("atoms")){
+            json wrapper={{"format","chemanim-native-2d"},{"version",7},{"molecules",json::array({*snapshot})},{"nodes",json::array()}};
+            Project loaded=fromJson(wrapper.dump());if(!loaded.molecules.empty()){structureDraft=std::move(loaded.molecules.front());return;}
+        }
+        structureDraft=evaluateMolecule(project,activeMolecule,previewFrame);
+    }
 
     bool validStructureContext() const {
-        if (targetKind != EditTargetKind::BaseStructure || targetId.empty()) return false;
+        if ((targetKind != EditTargetKind::BaseStructure&&targetKind!=EditTargetKind::StructureSnapshot) || targetId.empty()) return false;
         const ScriptNode* node = project.node(targetId);
-        if (!node || !node->enabled || node->type != "molecule_create") return false;
+        if (!node || !node->enabled) return false;
         try {
             const json params = json::parse(node->paramsJson);
             const std::string target = params.value("target", "");
-            return target == activeMolecule && project.molecule(target) != nullptr;
+            const std::string capability=nodeMetadata(node->type).structureEditCapability;
+            const bool kindMatches=(targetKind==EditTargetKind::BaseStructure&&capability=="base")||(targetKind==EditTargetKind::StructureSnapshot&&capability=="snapshot"&&structureDraft.has_value());
+            return kindMatches&&target == activeMolecule && project.molecule(target) != nullptr;
         } catch (...) {
             return false;
         }
@@ -153,6 +176,8 @@ struct EditorSession::Impl {
         if (!node || !node->enabled) return false;
         static const std::set<std::string> supported{
             "molecule_set_position", "molecule_lerp_position",
+            "molecule_set_x", "molecule_lerp_x",
+            "molecule_set_y", "molecule_lerp_y",
             "atom_set_xy", "atom_lerp_xy",
             "adornment_set_offset", "adornment_lerp_offset"
         };
@@ -163,7 +188,7 @@ struct EditorSession::Impl {
         if (!project.molecule(activeMolecule))
             activeMolecule = project.molecules.empty() ? "" : project.molecules.front().id;
         bool valid = targetKind == EditTargetKind::TimelinePreview;
-        if (targetKind == EditTargetKind::BaseStructure) valid = validStructureContext();
+        if (targetKind == EditTargetKind::BaseStructure||targetKind==EditTargetKind::StructureSnapshot) valid = validStructureContext();
         else if (targetKind == EditTargetKind::ScriptNode)
             valid = project.node(targetId) != nullptr;
         else if (targetKind == EditTargetKind::AtomTween)
@@ -172,14 +197,16 @@ struct EditorSession::Impl {
         else if (targetKind == EditTargetKind::Pose)
             valid = molecule() && molecule()->poses.contains(targetId);
         if (!valid) {
-            targetKind=EditTargetKind::TimelinePreview;targetId.clear();tool=Tool::SelectRectangle;
+            if(!project.nodes.empty()){targetKind=EditTargetKind::ScriptNode;targetId=project.nodes.front().id;}
+            else{targetKind=EditTargetKind::TimelinePreview;targetId.clear();}
+            tool=Tool::SelectRectangle;structureDraft.reset();
             gesture.reset();selectedAtoms.clear();selectedBonds.clear();
         }
     }
 
     Molecule displayed() const {
-        Molecule result = validStructureContext() ? *molecule() : evaluateMolecule(project, activeMolecule, previewFrame);
-        if (gesture && targetKind != EditTargetKind::BaseStructure && targetKind != EditTargetKind::TimelinePreview) {
+        Molecule result = validStructureContext() ? *editableMolecule() : evaluateMolecule(project, activeMolecule, previewFrame);
+        if (gesture && targetKind != EditTargetKind::BaseStructure && targetKind != EditTargetKind::StructureSnapshot && targetKind != EditTargetKind::TimelinePreview) {
             for (const auto& [id, position] : gesture->targetPositions) if (Atom* atom = result.atom(id)) atom->position = position;
             for (const auto& [id, offset] : gesture->targetAdornmentOffsets) if (AtomAdornment* value=result.adornment(id)) value->offset=offset;
         }
@@ -468,8 +495,9 @@ struct EditorSession::Impl {
             gesture.reset();
             return;
         }
+        flushStructureDraft();
         undo.push_back({std::move(gesture->before), project,
-                        targetKind == EditTargetKind::BaseStructure
+                        (targetKind == EditTargetKind::BaseStructure||targetKind==EditTargetKind::StructureSnapshot)
                             ? SnapshotDomain::Structure : SnapshotDomain::Authoring});
         redo.clear();
         gesture.reset();
@@ -499,15 +527,15 @@ void EditorSession::setViewport(Viewport viewport) { impl_->viewport = viewport;
 const Viewport& EditorSession::viewport() const { return impl_->viewport; }
 void EditorSession::editBaseStructure(const std::string& nodeId, int previewFrame) {
     const ScriptNode* node=impl_->project.node(nodeId);
-    if(!node||!node->enabled||node->type!="molecule_create")
+    if(!node||!node->enabled||nodeMetadata(node->type).structureEditCapability!="base")
         throw std::runtime_error("Node does not authorize structure editing: "+nodeId);
     const json params=json::parse(node->paramsJson);const std::string moleculeId=params.value("target","");
     if(!impl_->project.molecule(moleculeId))
         throw std::runtime_error("Structure node has no valid molecule target: "+nodeId);
     impl_->activeMolecule=moleculeId;impl_->targetKind=EditTargetKind::BaseStructure;
-    impl_->targetId=nodeId;impl_->previewFrame=previewFrame;impl_->gesture.reset();
+    impl_->targetId=nodeId;impl_->previewFrame=previewFrame;impl_->structureDraft.reset();impl_->gesture.reset();
 }
-void EditorSession::previewTimeline(int frame) { impl_->targetKind=EditTargetKind::TimelinePreview; impl_->targetId.clear(); impl_->previewFrame=frame; impl_->tool=Tool::SelectRectangle; impl_->gesture.reset(); }
+void EditorSession::previewTimeline(int frame) { impl_->targetKind=EditTargetKind::TimelinePreview; impl_->targetId.clear(); impl_->previewFrame=frame; impl_->structureDraft.reset(); impl_->tool=Tool::SelectRectangle; impl_->gesture.reset(); }
 void EditorSession::editAtomTween(const std::string& tweenId) {
     const auto found=std::find_if(impl_->project.atomTweens.begin(),impl_->project.atomTweens.end(),[&](const AtomTween& value){return value.id==tweenId;});
     if(found==impl_->project.atomTweens.end()) throw std::runtime_error("Unknown atom tween: "+tweenId);
@@ -525,8 +553,10 @@ void EditorSession::editScriptNode(const std::string& nodeId) {
     const auto timings=compileNodeTimings(impl_->project);
     const auto found=std::find_if(timings.begin(),timings.end(),[&](const NodeTiming& value){return value.id==nodeId;});
     impl_->previewFrame=found==timings.end()?0:found->endFrame;
-    impl_->targetKind=node->type=="molecule_create"?EditTargetKind::BaseStructure:EditTargetKind::ScriptNode;
+    const std::string capability=nodeMetadata(node->type).structureEditCapability;
+    impl_->targetKind=capability=="base"?EditTargetKind::BaseStructure:capability=="snapshot"?EditTargetKind::StructureSnapshot:EditTargetKind::ScriptNode;
     impl_->targetId=nodeId;
+    if(impl_->targetKind==EditTargetKind::StructureSnapshot)impl_->loadStructureDraft(*node);else impl_->structureDraft.reset();
     impl_->tool=Tool::SelectRectangle; impl_->gesture.reset();
 }
 EditTargetKind EditorSession::editTargetKind() const { return impl_->targetKind; }
@@ -540,7 +570,7 @@ Molecule EditorSession::displayMolecule() const { if(!impl_->molecule()) throw s
 Hit EditorSession::hitTest(Point canvasPoint) const { return impl_->hit(canvasPoint); }
 
 EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, bool shift) {
-    Molecule* molecule = impl_->molecule();
+    Molecule* molecule = impl_->editableMolecule();
     if (!molecule) return impl_->result(canvasPoint);
     if (isStructureWriteTool(impl_->tool) && !impl_->validStructureContext())
         return impl_->result(canvasPoint);
@@ -595,7 +625,7 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     }
     if(impl_->targetKind==EditTargetKind::ScriptNode){
         gesture.original.clear();gesture.originalAdornments.clear();const ScriptNode* node=impl_->project.node(impl_->targetId);const json params=node?json::parse(node->paramsJson):json::object();
-        if(node&&(node->type=="molecule_set_position"||node->type=="molecule_lerp_position")&&gesture.startHit.kind==HitKind::Atom){const Molecule shown=impl_->displayed();for(const Atom& atom:shown.atoms)if(atom.alive)gesture.original[atom.id]=atom.position;}
+        if(node&&(node->type=="molecule_set_position"||node->type=="molecule_lerp_position"||node->type=="molecule_set_x"||node->type=="molecule_lerp_x"||node->type=="molecule_set_y"||node->type=="molecule_lerp_y")&&gesture.startHit.kind==HitKind::Atom){const Molecule shown=impl_->displayed();for(const Atom& atom:shown.atoms)if(atom.alive)gesture.original[atom.id]=atom.position;}
         else if(node&&(node->type=="atom_set_xy"||node->type=="atom_lerp_xy")&&gesture.startHit.kind==HitKind::Atom&&gesture.startHit.id==params.value("atom","")){const Molecule shown=impl_->displayed();if(const Atom* atom=shown.atom(gesture.startHit.id))gesture.original[atom->id]=atom->position;}
         else if(node&&(node->type=="adornment_set_offset"||node->type=="adornment_lerp_offset")&&gesture.startHit.kind==HitKind::Adornment&&gesture.startHit.id==params.value("adornment","")){const Molecule shown=impl_->displayed();if(const AtomAdornment* value=shown.adornment(gesture.startHit.id))gesture.originalAdornments[value->id]=value->offset;}
     }
@@ -619,20 +649,20 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
 EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     if (!impl_->gesture) return impl_->result(canvasPoint);
     impl_->gesture->currentCanvas = canvasPoint;
-    Molecule* molecule = impl_->molecule();
+    Molecule* molecule = impl_->editableMolecule();
     if (!molecule) return impl_->result(canvasPoint);
     if ((impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) && !impl_->gesture->original.empty()) {
         const Point current = impl_->viewport.canvasToModel(canvasPoint);
         const Point delta{current.x - impl_->gesture->pressModel.x, current.y - impl_->gesture->pressModel.y};
         for (const auto& [id, position] : impl_->gesture->original) {
             const Point target{position.x + delta.x, position.y + delta.y};
-            if (impl_->targetKind == EditTargetKind::BaseStructure) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
+            if (impl_->targetKind == EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
             else impl_->gesture->targetPositions[id] = target;
         }
         impl_->gesture->changed = std::hypot(delta.x, delta.y) > 1e-9;
     } else if((impl_->tool==Tool::Move||impl_->tool==Tool::SelectRectangle||impl_->tool==Tool::SelectLasso)&&!impl_->gesture->originalAdornments.empty()){
         const Point current=impl_->viewport.canvasToModel(canvasPoint);const Point delta{current.x-impl_->gesture->pressModel.x,current.y-impl_->gesture->pressModel.y};
-        for(const auto& [id,offset]:impl_->gesture->originalAdornments){const Point target{offset.x+delta.x,offset.y+delta.y};if(impl_->targetKind==EditTargetKind::BaseStructure){if(AtomAdornment* value=molecule->adornment(id))value->offset=target;}else impl_->gesture->targetAdornmentOffsets[id]=target;}
+        for(const auto& [id,offset]:impl_->gesture->originalAdornments){const Point target{offset.x+delta.x,offset.y+delta.y};if(impl_->targetKind==EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot){if(AtomAdornment* value=molecule->adornment(id))value->offset=target;}else impl_->gesture->targetAdornmentOffsets[id]=target;}
         impl_->gesture->changed=std::hypot(delta.x,delta.y)>1e-9;
     } else if (impl_->tool == Tool::SelectLasso) {
         if (impl_->gesture->lasso.empty() || distance(canvasPoint, impl_->gesture->lasso.back()) > 3.0) impl_->gesture->lasso.push_back(canvasPoint);
@@ -663,9 +693,9 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
 EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, bool) {
     if (!impl_->gesture) return impl_->result(canvasPoint);
     impl_->gesture->currentCanvas = canvasPoint;
-    Molecule* molecule = impl_->molecule();
+    Molecule* molecule = impl_->editableMolecule();
     if (!molecule) { impl_->gesture.reset(); return impl_->result(canvasPoint); }
-    if (impl_->targetKind != EditTargetKind::BaseStructure) {
+    if (impl_->targetKind != EditTargetKind::BaseStructure&&impl_->targetKind!=EditTargetKind::StructureSnapshot) {
         if (impl_->gesture->changed && impl_->targetKind == EditTargetKind::AtomTween) {
             auto found=std::find_if(impl_->project.atomTweens.begin(),impl_->project.atomTweens.end(),[&](const AtomTween& value){return value.id==impl_->targetId;});
             if(found!=impl_->project.atomTweens.end()) for(const auto& [atomId,target]:impl_->gesture->targetPositions) {
@@ -688,8 +718,13 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 }
                 const std::string adornmentId=params.value("adornment","");
                 if(const auto found=impl_->gesture->targetAdornmentOffsets.find(adornmentId);found!=impl_->gesture->targetAdornmentOffsets.end()){params["x"]=found->second.x;params["y"]=found->second.y;node->paramsJson=params.dump();}
-                if((node->type=="molecule_set_position"||node->type=="molecule_lerp_position")&&!impl_->gesture->targetPositions.empty()){
-                    const auto moved=impl_->gesture->targetPositions.begin();const auto original=impl_->gesture->original.find(moved->first);if(original!=impl_->gesture->original.end()){const Point delta{moved->second.x-original->second.x,moved->second.y-original->second.y};const Molecule shown=evaluateMolecule(impl_->project,impl_->activeMolecule,impl_->previewFrame);if(const auto coordinate=shown.coordinate()){params["x"]=coordinate->x+delta.x;params["y"]=coordinate->y+delta.y;node->paramsJson=params.dump();}}
+                if((node->type=="molecule_set_position"||node->type=="molecule_lerp_position"||node->type=="molecule_set_x"||node->type=="molecule_lerp_x"||node->type=="molecule_set_y"||node->type=="molecule_lerp_y")&&!impl_->gesture->targetPositions.empty()){
+                    const auto moved=impl_->gesture->targetPositions.begin();const auto original=impl_->gesture->original.find(moved->first);if(original!=impl_->gesture->original.end()){const Point delta{moved->second.x-original->second.x,moved->second.y-original->second.y};const Molecule shown=evaluateMolecule(impl_->project,impl_->activeMolecule,impl_->previewFrame);if(const auto coordinate=shown.coordinate()){
+                        if(node->type=="molecule_set_x"||node->type=="molecule_lerp_x")params["value"]=coordinate->x+delta.x;
+                        else if(node->type=="molecule_set_y"||node->type=="molecule_lerp_y")params["value"]=coordinate->y+delta.y;
+                        else{params["x"]=coordinate->x+delta.x;params["y"]=coordinate->y+delta.y;}
+                        node->paramsJson=params.dump();
+                    }}
                 }
             }
         }
@@ -810,7 +845,7 @@ void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl
 EditResult EditorSession::selectAll() {
     impl_->selectedAtoms.clear();
     impl_->selectedBonds.clear();
-    if (const Molecule* molecule=impl_->molecule()) {
+    if (const Molecule* molecule=impl_->editableMolecule()) {
         for (const Atom& atom:molecule->atoms) if (atom.alive) impl_->selectedAtoms.insert(atom.id);
         for (const Bond& bond:molecule->bonds) if (bond.alive&&bond.visible)
             impl_->selectedBonds.insert(bond.id);
@@ -819,60 +854,82 @@ EditResult EditorSession::selectAll() {
 }
 bool EditorSession::deleteSelection() {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule = impl_->molecule(); if (!molecule) return false;
+    Molecule* molecule = impl_->editableMolecule(); if (!molecule) return false;
     Project before = impl_->project; bool changed = false;
     for (const std::string& id : impl_->selectedBonds) changed |= molecule->removeBond(id);
     for (const std::string& id : impl_->selectedAtoms) changed |= molecule->removeAtom(id);
-    if (changed) { impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
+    if (changed) { impl_->flushStructureDraft();impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
     return changed;
 }
 bool EditorSession::setAtomPosition(const std::string& atomId, Point position) {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
+    Molecule* molecule = impl_->editableMolecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || (atom->position.x == position.x && atom->position.y == position.y)) return false;
-    Project before = impl_->project; atom->position = position; impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
+    Project before = impl_->project; atom->position = position;impl_->flushStructureDraft(); impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
 }
 bool EditorSession::setAtomElement(const std::string& atomId, std::string element) {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
+    Molecule* molecule = impl_->editableMolecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     const std::string label=element=="C" ? "" : element;
     if (!atom || atom->alias == label || element.empty()) return false;
-    Project before = impl_->project; atom->alias = label; impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
+    Project before = impl_->project; atom->alias = label;impl_->flushStructureDraft(); impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
 }
 bool EditorSession::setAtomLabel(const std::string& atomId, std::string label,
                                  AtomLabelSide side, AtomNumberStyle numberStyle) {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
+    Molecule* molecule = impl_->editableMolecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || label.empty() ||
         (atom->alias == label && atom->labelSide == side && atom->numberStyle == numberStyle)) return false;
     Project before = impl_->project; atom->alias = std::move(label); atom->labelSide = side;
-    atom->numberStyle = numberStyle; impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure});
+    atom->numberStyle = numberStyle;impl_->flushStructureDraft(); impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure});
     impl_->redo.clear(); return true;
 }
 bool EditorSession::addChargeAdornment(const std::string& atomId, int delta) {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule = impl_->molecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
+    Molecule* molecule = impl_->editableMolecule(); Atom* atom = molecule ? molecule->atom(atomId) : nullptr;
     if (!atom || delta == 0) return false;
     Project before = impl_->project;
     const std::string text = std::abs(delta) == 1 ? (delta > 0 ? "⊕" : "⊖")
         : std::to_string(std::abs(delta)) + (delta > 0 ? "⊕" : "⊖");
     const std::string id=molecule->addAdornment(atomId,text,{18.0,18.0},impl_->project.allocateCreationSerial());
     if(id.empty())return false;
-    impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
+    impl_->flushStructureDraft();impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); return true;
 }
 bool EditorSession::setAdornmentOffset(const std::string& adornmentId, Point offset) {
     if (!impl_->validStructureContext()) return false;
-    Molecule* molecule=impl_->molecule(); AtomAdornment* value=molecule?molecule->adornment(adornmentId):nullptr;
+    Molecule* molecule=impl_->editableMolecule(); AtomAdornment* value=molecule?molecule->adornment(adornmentId):nullptr;
     if(!value||(value->offset.x==offset.x&&value->offset.y==offset.y))return false;
-    Project before=impl_->project;value->offset=offset;impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Structure});impl_->redo.clear();return true;
+    Project before=impl_->project;value->offset=offset;impl_->flushStructureDraft();impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Structure});impl_->redo.clear();return true;
+}
+std::string EditorSession::createBlankMolecule(std::string name) {
+    Project before=impl_->project;const std::string id=impl_->project.addBlankMolecule(std::move(name));
+    impl_->activeMolecule=id;
+    for(auto found=impl_->project.nodes.rbegin();found!=impl_->project.nodes.rend();++found)if(found->type=="molecule_create"&&json::parse(found->paramsJson).value("target","")==id){impl_->targetId=found->id;break;}
+    impl_->targetKind=EditTargetKind::BaseStructure;impl_->previewFrame=0;
+    impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
+}
+std::string EditorSession::importSmiles(std::string name,const std::string& smiles) {
+    Project before=impl_->project;const std::string id=impl_->project.addBlankMolecule(name);
+    Molecule* destination=impl_->project.molecule(id);const std::uint64_t firstAtom=destination->nextAtomId,firstBond=destination->nextBondId,firstAdornment=destination->nextAdornmentId;
+    Molecule imported=moleculeFromSmiles(id,name.empty()?id:name,smiles);std::map<std::string,std::string> atomIds;
+    std::uint64_t atomNumber=firstAtom,bondNumber=firstBond,adornmentNumber=firstAdornment;
+    for(Atom& atom:imported.atoms){const std::string old=atom.id;atom.id="A"+std::to_string(atomNumber++);atomIds[old]=atom.id;atom.creationSerial=impl_->project.allocateCreationSerial();}
+    for(Bond& bond:imported.bonds){bond.id="B"+std::to_string(bondNumber++);bond.atomA=atomIds.at(bond.atomA);bond.atomB=atomIds.at(bond.atomB);}
+    for(AtomAdornment& value:imported.adornments){value.id="D"+std::to_string(adornmentNumber++);value.atomId=atomIds.at(value.atomId);value.creationSerial=impl_->project.allocateCreationSerial();}
+    imported.nextAtomId=atomNumber;imported.nextBondId=bondNumber;imported.nextAdornmentId=adornmentNumber;*destination=std::move(imported);
+    impl_->activeMolecule=id;for(auto found=impl_->project.nodes.rbegin();found!=impl_->project.nodes.rend();++found)if(found->type=="molecule_create"&&json::parse(found->paramsJson).value("target","")==id){impl_->targetId=found->id;break;}
+    impl_->targetKind=EditTargetKind::BaseStructure;impl_->previewFrame=0;impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
 }
 std::string EditorSession::addScriptNode(const std::string& type,const std::string& paramsJson,std::optional<std::size_t> index) {
+    if(type=="molecule_create")throw std::runtime_error("Use the atomic new-molecule command");
     Project before=impl_->project; const std::string id=impl_->project.addNode(type,paramsJson,index);
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
 }
 bool EditorSession::updateScriptNode(const std::string& nodeId,const std::string& paramsJson) {
     ScriptNode* node=impl_->project.node(nodeId);if(!node)return false;const json value=json::parse(paramsJson);
-    if(!value.is_object())throw std::runtime_error("Node params must be an object");const std::string normalized=value.dump();
+    if(!value.is_object())throw std::runtime_error("Node params must be an object");
+    if(nodeMetadata(node->type).targetImmutable){const json old=json::parse(node->paramsJson);if(value.value("target","")!=old.value("target",""))throw std::runtime_error("The target of a new-molecule node is immutable");}
+    const std::string normalized=value.dump();
     if(node->paramsJson==normalized)return false;Project before=impl_->project;node->paramsJson=normalized;
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
 }
@@ -891,7 +948,13 @@ bool EditorSession::moveScriptNode(const std::string& nodeId,std::size_t index) 
 }
 std::string EditorSession::duplicateScriptNode(const std::string& nodeId) {
     const ScriptNode* node=impl_->project.node(nodeId);if(!node||node->type=="scene")return{};const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
-    const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found))+1;return addScriptNode(node->type,node->paramsJson,index);
+    const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found))+1;
+    if(node->type=="molecule_create"){
+        const json params=json::parse(node->paramsJson);Project before=impl_->project;const std::string moleculeId=impl_->project.duplicateMolecule(params.value("target",""),index);
+        impl_->activeMolecule=moleculeId;std::string createdId;for(const ScriptNode& value:impl_->project.nodes)if(value.type=="molecule_create"&&json::parse(value.paramsJson).value("target","")==moleculeId){createdId=value.id;break;}
+        impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return createdId;
+    }
+    return addScriptNode(node->type,node->paramsJson,index);
 }
 bool EditorSession::deleteScriptNode(const std::string& nodeId) {
     const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
@@ -914,8 +977,8 @@ bool EditorSession::canRedo() const {
     if (impl_->redo.empty() || impl_->targetKind == EditTargetKind::TimelinePreview) return false;
     return impl_->redo.back().domain != Impl::SnapshotDomain::Structure || impl_->validStructureContext();
 }
-bool EditorSession::undo() { if (!canUndo()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->undo.back()); impl_->undo.pop_back(); impl_->project = snapshot.before;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->redo.push_back(std::move(snapshot));impl_->normalizeContext();return true; }
-bool EditorSession::redo() { if (!canRedo()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot));impl_->normalizeContext();return true; }
+bool EditorSession::undo() { if (!canUndo()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->undo.back()); impl_->undo.pop_back(); impl_->project = snapshot.before;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->redo.push_back(std::move(snapshot));impl_->normalizeContext();if(impl_->targetKind==EditTargetKind::StructureSnapshot)if(const ScriptNode* node=impl_->project.node(impl_->targetId))impl_->loadStructureDraft(*node);return true; }
+bool EditorSession::redo() { if (!canRedo()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot));impl_->normalizeContext();if(impl_->targetKind==EditTargetKind::StructureSnapshot)if(const ScriptNode* node=impl_->project.node(impl_->targetId))impl_->loadStructureDraft(*node);return true; }
 
 const char* toString(Tool value) {
     static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","atom_text","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};

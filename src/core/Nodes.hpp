@@ -28,18 +28,57 @@ struct ArrowState {
     double progress = 0.0;
     double alpha = 255.0;
     double width = 3.0;
+    double scaleX = 1.0;
+    double scaleY = 1.0;
     double red = 25.0;
     double green = 25.0;
     double blue = 25.0;
 };
 
+struct GlobalNodeState {
+    double moleculeAlpha = 255.0;
+    double moleculeRed = 255.0;
+    double moleculeGreen = 255.0;
+    double moleculeBlue = 255.0;
+    double moleculeScaleX = 1.0;
+    double moleculeScaleY = 1.0;
+    double arrowAlpha = 255.0;
+    double arrowRed = 255.0;
+    double arrowGreen = 255.0;
+    double arrowBlue = 255.0;
+    double arrowScaleX = 1.0;
+    double arrowScaleY = 1.0;
+    double arrowWidth = 1.0;
+};
+
+struct NodeDiagnostic {
+    std::string nodeId;
+    std::string severity;
+    std::string message;
+};
+
+struct NodeMetadata {
+    std::string category;
+    std::string scope;
+    std::string section;
+    int order = 0;
+    std::string exposure;
+    std::string targetKind;
+    std::string structureEditCapability;
+    bool hasDuration = false;
+    bool targetImmutable = false;
+};
+
 struct EvaluatedScene {
     std::map<std::string, Molecule> molecules;
     std::map<std::string, ArrowState> arrows;
+    GlobalNodeState globals;
+    std::vector<NodeDiagnostic> diagnostics;
 };
 
 [[nodiscard]] std::string nodeRegistryJson();
 [[nodiscard]] std::string defaultNodeParamsJson(const std::string& type);
+[[nodiscard]] const NodeMetadata& nodeMetadata(const std::string& type);
 [[nodiscard]] std::vector<NodeTiming> compileNodeTimings(const Project& project);
 [[nodiscard]] EvaluatedScene evaluateNodes(const Project& project, int frame);
 [[nodiscard]] int nodeSequenceEndFrame(const Project& project);

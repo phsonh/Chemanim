@@ -25,7 +25,8 @@ local molecule1 = chem.NewMol {
     }
 }
 molecule1.SetPos(-222.231745334, 67.088009952)
-molecule1.SetScale(1)
+molecule1.SetScaleX(1)
+molecule1.SetScaleY(1)
 molecule1.SetRotation(0)
 molecule1.SetAlpha(255)
 molecule1.SetLayer(0)
@@ -44,7 +45,8 @@ local molecule2 = chem.NewMol {
     }
 }
 molecule2.SetPos(230, 70)
-molecule2.SetScale(1)
+molecule2.SetScaleX(1)
+molecule2.SetScaleY(1)
 molecule2.SetRotation(0)
 molecule2.SetAlpha(255)
 molecule2.SetLayer(0)
@@ -62,7 +64,8 @@ local molecule3 = chem.NewMol {
     }
 }
 molecule3.SetPos(0, 0)
-molecule3.SetScale(1)
+molecule3.SetScaleX(1)
+molecule3.SetScaleY(1)
 molecule3.SetRotation(0)
 molecule3.SetAlpha(255)
 molecule3.SetLayer(0)
@@ -85,7 +88,8 @@ local molecule4 = chem.NewMol {
     }
 }
 molecule4.SetPos(-47.7128129211, -175.333333333)
-molecule4.SetScale(1)
+molecule4.SetScaleX(1)
+molecule4.SetScaleY(1)
 molecule4.SetRotation(0)
 molecule4.SetAlpha(255)
 molecule4.SetLayer(0)
