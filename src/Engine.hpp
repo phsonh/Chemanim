@@ -117,7 +117,7 @@ struct Object {
     std::unique_ptr<core::Molecule> molecule;
 };
 
-enum class TopologyEventKind { Detach, Merge, Replace };
+enum class TopologyEventKind { Detach, Merge, Replace, Gradient };
 struct TopologyEvent {
     TopologyEventKind kind = TopologyEventKind::Detach;
     int frame = 0;
@@ -127,6 +127,9 @@ struct TopologyEvent {
     std::vector<std::string> bonds;
     std::optional<core::Bond> newBond;
     std::optional<core::Molecule> replacement;
+    std::optional<core::Molecule> startStructure;
+    int duration = 0;
+    Ease ease = Ease::Linear;
     unsigned long long order = 0;
 };
 
@@ -169,6 +172,8 @@ public:
     void addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds);
     void addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond);
     void addStructure(Object& object,int frame,core::Molecule replacement);
+    void addStructureGradient(Object& object,int frame,int duration,core::Molecule start,
+                              core::Molecule end,Ease ease);
     [[nodiscard]] std::optional<core::Molecule> moleculeAt(int objectId,int frame) const;
     void applyFrame(int frame);
     void registerTexture(std::string name, std::filesystem::path path,

@@ -21,6 +21,7 @@ try:
     required_api = (
         "set_atom_label", "edit_target_kind", "edit_target_id",
         "can_edit_structure", "can_direct_manipulate",
+        "gradient_summary", "rebuild_gradient",
     )
     if DOCUMENT_VERSION < 7 or any(not hasattr(CoreSession, name) for name in required_api):
         raise RuntimeError(

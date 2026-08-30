@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 
@@ -99,6 +100,7 @@ const json& registry() {
         definition("molecule_lerp_scale_y", "变换分子纵向缩放", "分子", "缩放", {field("target","分子","molecule",""),field("value","目标纵向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("molecule_set_structure", "设定分子结构", "分子", "结构", {field("target","分子","molecule",""),field("snapshot","结构快照","multiline","{}")}),
         definition("molecule_lerp_structure", "变换分子结构形变", "分子", "结构", {field("target","分子","molecule",""),field("atoms","稳定原子坐标","multiline","{}"),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_gradient_structure", "渐变结构", "分子", "结构", {field("target","目标分子","molecule",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("selection_show", "变换分子选区显现", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("selection_hide", "变换分子选区消失", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("molecule_global_set_alpha", "设定全局分子透明度", "分子", "颜色", {field("value","Alpha","alpha",255)}),
@@ -146,8 +148,8 @@ const std::map<std::string,NodeMetadata>& metadataRegistry() {
         moleculeSet("molecule_set_position","位置",10);moleculeSet("molecule_set_x","位置",11);moleculeSet("molecule_set_y","位置",12);
         moleculeSet("molecule_set_scale","缩放",20);moleculeSet("molecule_set_scale_x","缩放",21);moleculeSet("molecule_set_scale_y","缩放",22);
         moleculeSet("molecule_set_rotation","旋转",30);moleculeSet("molecule_set_alpha","颜色",40);moleculeSet("molecule_set_color","颜色",41);moleculeSet("molecule_set_layer","排列",50);
-        const auto moleculeTransform=[&](const char* type,const char* section,int order,const char* capability="none"){put(type,metadata("分子","transform",section,order,"primary","molecule",capability,true));};
-        moleculeTransform("molecule_lerp_structure","结构",0,"transform");moleculeTransform("bond_form","结构",1,"transform");moleculeTransform("bond_break","结构",2,"transform");moleculeTransform("selection_show","结构",3,"transform");moleculeTransform("selection_hide","结构",4,"transform");
+        const auto moleculeTransform=[&](const char* type,const char* section,int order,const char* capability="none",bool immutable=false){put(type,metadata("分子","transform",section,order,"primary","molecule",capability,true,immutable));};
+        moleculeTransform("molecule_gradient_structure","结构",0,"snapshot",true);
         moleculeTransform("molecule_lerp_position","位置",10);moleculeTransform("molecule_lerp_x","位置",11);moleculeTransform("molecule_lerp_y","位置",12);
         moleculeTransform("molecule_lerp_scale","缩放",20);moleculeTransform("molecule_lerp_scale_x","缩放",21);moleculeTransform("molecule_lerp_scale_y","缩放",22);
         moleculeTransform("molecule_lerp_rotation","旋转",30);moleculeTransform("molecule_lerp_alpha","颜色",40);moleculeTransform("molecule_lerp_color","颜色",41);
@@ -167,7 +169,8 @@ const std::map<std::string,NodeMetadata>& metadataRegistry() {
             if(!m.contains(type)) put(type,metadata("分子","set","兼容",900,"contextual","molecule"));
         for(const char* type:{"atom_lerp_xy","atom_lerp_pose","atom_lerp_alpha","atom_lerp_color","bond_lerp_alpha","bond_lerp_color","adornment_lerp_offset","adornment_lerp_alpha","adornment_lerp_color"})
             m.at(type).hasDuration=true;
-        put("selection_fade",metadata("分子","transform","兼容",900,"legacy","molecule","none",true));
+        for(const char* type:{"molecule_lerp_structure","bond_form","bond_break","selection_show","selection_hide","selection_fade"})
+            put(type,metadata("分子","transform","兼容",900,"legacy","molecule","none",true));
         put("molecule_set_visible",metadata("分子","set","兼容",900,"legacy","molecule"));
         return m;
     }();
@@ -179,7 +182,7 @@ const std::map<std::string,std::string>& toolLabels(){
         {"molecule_create","新建分子"},{"molecule_delete","删除分子"},{"merge_molecules","合并分子"},
         {"molecule_global_set_alpha","透明度"},{"molecule_global_set_color","颜色"},{"molecule_global_set_scale","缩放"},{"molecule_global_set_scale_x","横向缩放"},{"molecule_global_set_scale_y","纵向缩放"},
         {"molecule_set_structure","分子结构"},{"molecule_set_position","坐标"},{"molecule_set_x","横坐标"},{"molecule_set_y","纵坐标"},{"molecule_set_scale","缩放"},{"molecule_set_scale_x","横向缩放"},{"molecule_set_scale_y","纵向缩放"},{"molecule_set_rotation","旋转角度"},{"molecule_set_alpha","透明度"},{"molecule_set_color","颜色"},{"molecule_set_layer","图层"},
-        {"molecule_lerp_structure","结构形变"},{"bond_form","成键"},{"bond_break","断键"},{"selection_show","选区显现"},{"selection_hide","选区消失"},{"molecule_lerp_position","坐标"},{"molecule_lerp_x","横坐标"},{"molecule_lerp_y","纵坐标"},{"molecule_lerp_scale","缩放"},{"molecule_lerp_scale_x","横向缩放"},{"molecule_lerp_scale_y","纵向缩放"},{"molecule_lerp_rotation","旋转角度"},{"molecule_lerp_alpha","透明度"},{"molecule_lerp_color","颜色"},
+        {"molecule_gradient_structure","渐变结构"},{"molecule_lerp_position","坐标"},{"molecule_lerp_x","横坐标"},{"molecule_lerp_y","纵坐标"},{"molecule_lerp_scale","缩放"},{"molecule_lerp_scale_x","横向缩放"},{"molecule_lerp_scale_y","纵向缩放"},{"molecule_lerp_rotation","旋转角度"},{"molecule_lerp_alpha","透明度"},{"molecule_lerp_color","颜色"},
         {"arrow_new","新建箭头"},{"arrow_delete","删除箭头"},{"arrow_global_set_alpha","透明度"},{"arrow_global_set_color","颜色"},{"arrow_global_set_scale","缩放"},{"arrow_global_set_scale_x","横向缩放"},{"arrow_global_set_scale_y","纵向缩放"},{"arrow_global_set_width","线宽倍率"},
         {"arrow_set_curve","箭头曲线"},{"arrow_set_progress","绘制进度"},{"arrow_set_scale","缩放"},{"arrow_set_scale_x","横向缩放"},{"arrow_set_scale_y","纵向缩放"},{"arrow_set_alpha","透明度"},{"arrow_set_color","颜色"},{"arrow_set_width","线宽"},
         {"arrow_lerp_progress","绘制进度"},{"arrow_lerp_scale","缩放"},{"arrow_lerp_scale_x","横向缩放"},{"arrow_lerp_scale_y","纵向缩放"},{"arrow_lerp_alpha","透明度"},{"arrow_lerp_color","颜色"},{"arrow_lerp_width","线宽"}
@@ -243,6 +246,52 @@ std::optional<Molecule> moleculeSnapshot(const json& snapshot) {
 
 }  // namespace
 
+Molecule blendMoleculeStructures(const Molecule& start,const Molecule& end,double progress) {
+    const double t=std::clamp(progress,0.0,1.0);
+    if(t<=0.0)return start;
+    if(t>=1.0)return end;
+    const auto byte=[&](double first,double second){return static_cast<int>(std::round(std::clamp(first+(second-first)*t,0.0,255.0)));};
+    const auto point=[&](Point first,Point second){return Point{first.x+(second.x-first.x)*t,first.y+(second.y-first.y)*t};};
+    const auto atomVisual=[](const Atom& a,const Atom& b){return a.element==b.element&&a.alias==b.alias&&a.labelSide==b.labelSide&&a.numberStyle==b.numberStyle&&a.isotope==b.isotope&&a.radicalElectrons==b.radicalElectrons&&a.implicitHydrogens==b.implicitHydrogens&&a.hidden==b.hidden;};
+    const auto bondVisual=[](const Bond& a,const Bond& b){return a.atomA==b.atomA&&a.atomB==b.atomB&&a.type==b.type&&a.secondaryLineSide==b.secondaryLineSide&&a.stereo==b.stereo&&a.visible==b.visible;};
+    const auto adornmentVisual=[](const AtomAdornment& a,const AtomAdornment& b){return a.atomId==b.atomId&&a.text==b.text;};
+    Molecule result=end;result.atoms.clear();result.bonds.clear();result.adornments.clear();
+    std::map<std::string,const Atom*> startAtoms,endAtoms;
+    for(const Atom& value:start.atoms)if(value.alive)startAtoms[value.id]=&value;
+    for(const Atom& value:end.atoms)if(value.alive)endAtoms[value.id]=&value;
+    std::set<std::string> atomIds;for(const auto& [id,_]:startAtoms)atomIds.insert(id);for(const auto& [id,_]:endAtoms)atomIds.insert(id);
+    for(const std::string& id:atomIds){
+        const Atom* first=startAtoms.contains(id)?startAtoms.at(id):nullptr;const Atom* second=endAtoms.contains(id)?endAtoms.at(id):nullptr;
+        if(first&&second){
+            Atom current=*second;current.position=point(first->position,second->position);current.alpha=byte(first->alpha,second->alpha);current.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};
+            if(atomVisual(*first,*second))result.atoms.push_back(std::move(current));
+            else {current.alpha=static_cast<int>(std::round(second->alpha*t));result.atoms.push_back(std::move(current));Atom ghost=*first;ghost.id="__gradient_old_atom__"+id;ghost.position=point(first->position,second->position);ghost.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.atoms.push_back(std::move(ghost));}
+        } else if(second){Atom current=*second;current.alpha=static_cast<int>(std::round(second->alpha*t));result.atoms.push_back(std::move(current));}
+        else if(first){Atom current=*first;current.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.atoms.push_back(std::move(current));}
+    }
+    std::map<std::string,const Bond*> startBonds,endBonds;
+    for(const Bond& value:start.bonds)if(value.alive)startBonds[value.id]=&value;
+    for(const Bond& value:end.bonds)if(value.alive)endBonds[value.id]=&value;
+    std::set<std::string> bondIds;for(const auto& [id,_]:startBonds)bondIds.insert(id);for(const auto& [id,_]:endBonds)bondIds.insert(id);
+    for(const std::string& id:bondIds){
+        const Bond* first=startBonds.contains(id)?startBonds.at(id):nullptr;const Bond* second=endBonds.contains(id)?endBonds.at(id):nullptr;
+        if(first&&second){Bond current=*second;current.alpha=byte(first->alpha,second->alpha);current.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};if(bondVisual(*first,*second))result.bonds.push_back(std::move(current));else{current.alpha=static_cast<int>(std::round(second->alpha*t));result.bonds.push_back(std::move(current));Bond ghost=*first;ghost.id="__gradient_old_bond__"+id;ghost.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.bonds.push_back(std::move(ghost));}}
+        else if(second){Bond current=*second;current.alpha=static_cast<int>(std::round(second->alpha*t));result.bonds.push_back(std::move(current));}
+        else if(first){Bond current=*first;current.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.bonds.push_back(std::move(current));}
+    }
+    std::map<std::string,const AtomAdornment*> startAdornments,endAdornments;
+    for(const AtomAdornment& value:start.adornments)if(value.alive)startAdornments[value.id]=&value;
+    for(const AtomAdornment& value:end.adornments)if(value.alive)endAdornments[value.id]=&value;
+    std::set<std::string> adornmentIds;for(const auto& [id,_]:startAdornments)adornmentIds.insert(id);for(const auto& [id,_]:endAdornments)adornmentIds.insert(id);
+    for(const std::string& id:adornmentIds){
+        const AtomAdornment* first=startAdornments.contains(id)?startAdornments.at(id):nullptr;const AtomAdornment* second=endAdornments.contains(id)?endAdornments.at(id):nullptr;
+        if(first&&second){AtomAdornment current=*second;current.offset=point(first->offset,second->offset);current.alpha=byte(first->alpha,second->alpha);current.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};if(adornmentVisual(*first,*second))result.adornments.push_back(std::move(current));else{current.alpha=static_cast<int>(std::round(second->alpha*t));result.adornments.push_back(std::move(current));AtomAdornment ghost=*first;ghost.id="__gradient_old_adornment__"+id;ghost.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.adornments.push_back(std::move(ghost));}}
+        else if(second){AtomAdornment current=*second;current.alpha=static_cast<int>(std::round(second->alpha*t));result.adornments.push_back(std::move(current));}
+        else if(first){AtomAdornment current=*first;current.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.adornments.push_back(std::move(current));}
+    }
+    return result;
+}
+
 const NodeMetadata& nodeMetadata(const std::string& type) {
     static const NodeMetadata legacy=metadata("","object","兼容",999,"legacy","none");
     const auto found=metadataRegistry().find(type);
@@ -256,6 +305,7 @@ std::string nodeRegistryJson() {
         item["category"]=meta.category.empty()?item.value("category",""):meta.category;
         item["scope"]=meta.scope;item["section"]=meta.section;item["order"]=meta.order;
         item["exposure"]=meta.exposure;item["target_kind"]=meta.targetKind;
+        item["exposed"]=meta.exposure=="primary";
         item["structure_edit_capability"]=meta.structureEditCapability;
         item["has_duration"]=meta.hasDuration;item["target_immutable"]=meta.targetImmutable;
         if(const auto label=toolLabels().find(item.value("type",""));label!=toolLabels().end())item["tool_label"]=label->second;
@@ -332,6 +382,20 @@ EvaluatedScene evaluateNodes(const Project& project, int frame) {
                 molecule->poses=loaded->poses;molecule->referenceBondLength=loaded->referenceBondLength;
             }else diagnostic(node,"分子结构快照不是有效的 v7 分子快照");}
             catch(...){diagnostic(node,"分子结构快照不是有效 JSON");}
+        }
+        else if(node.type=="molecule_gradient_structure"&&molecule&&frame>=timing.startFrame){
+            try{
+                json startJson=p.value("start_snapshot",json::object()),endJson=p.value("end_snapshot",json::object());
+                if(startJson.is_string())startJson=json::parse(startJson.get<std::string>());if(endJson.is_string())endJson=json::parse(endJson.get<std::string>());
+                const auto start=moleculeSnapshot(startJson),end=moleculeSnapshot(endJson);
+                if(!start||!end){diagnostic(node,"渐变结构缺少有效的起点或终点结构");continue;}
+                if(p.value("needs_review",false))result.diagnostics.push_back({node.id,"warning","起点结构已变化，需要检查"});
+                const double raw=duration<=0?1.0:static_cast<double>(frame-timing.startFrame)/duration;
+                const Molecule blended=blendMoleculeStructures(*start,*end,easingValue(easing,raw));
+                molecule->atoms=blended.atoms;molecule->bonds=blended.bonds;molecule->adornments=blended.adornments;
+                molecule->poses=blended.poses;molecule->referenceBondLength=blended.referenceBondLength;
+                molecule->nextAtomId=std::max(molecule->nextAtomId,end->nextAtomId);molecule->nextBondId=std::max(molecule->nextBondId,end->nextBondId);molecule->nextAdornmentId=std::max(molecule->nextAdornmentId,end->nextAdornmentId);
+            }catch(...){diagnostic(node,"渐变结构快照不是有效 JSON");}
         }
         else if(node.type=="molecule_lerp_structure"&&molecule){
             try{json atoms=p.value("atoms",std::string("{}"));if(atoms.is_string())atoms=json::parse(atoms.get<std::string>());for(const auto& [id,value]:atoms.items())if(const Atom* atom=molecule->atom(id)){const std::string prefix=target+":atom:"+id;add(prefix+":x",atom->position.x,timing.startFrame,duration,value.value("x",atom->position.x),easing);add(prefix+":y",atom->position.y,timing.startFrame,duration,value.value("y",atom->position.y),easing);}else diagnostic(node,"结构形变引用了已经消失的原子 "+id);}

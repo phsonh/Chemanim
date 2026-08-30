@@ -123,7 +123,8 @@ class StructureCanvas(QWidget):
     def _refresh_now(self):
         self._sync_core_viewport()
         try:
-            data = self.session.depict(self.final_effect) if self.session.edit_target_kind=="base_structure" else self.session.depict_at(self.preview_frame,self.final_effect)
+            editable=self.session.edit_target_kind in ("base_structure","structure_snapshot")
+            data = self.session.depict(self.final_effect) if editable else self.session.depict_at(self.preview_frame,self.final_effect)
         except RuntimeError:
             self._depiction = self._svg = self._raster = None
             self.update()

@@ -1,4 +1,5 @@
 #include "Engine.hpp"
+#include "core/Nodes.hpp"
 
 extern "C" {
 #include <lauxlib.h>
@@ -302,6 +303,7 @@ void Engine::addAtomTween(Object& object, const std::string& atomId, int start, 
 void Engine::addDetach(Object& source,Object& destination,int frame,std::vector<std::string> atoms,std::vector<std::string> bonds){TopologyEvent event;event.kind=TopologyEventKind::Detach;event.frame=frame;event.sourceObject=source.id;event.destinationObject=destination.id;event.atoms=std::move(atoms);event.bonds=std::move(bonds);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
 void Engine::addMerge(Object& source,Object& destination,int frame,std::optional<core::Bond> newBond){TopologyEvent event;event.kind=TopologyEventKind::Merge;event.frame=frame;event.sourceObject=source.id;event.destinationObject=destination.id;event.newBond=std::move(newBond);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
 void Engine::addStructure(Object& object,int frame,core::Molecule replacement){TopologyEvent event;event.kind=TopologyEventKind::Replace;event.frame=frame;event.sourceObject=object.id;event.destinationObject=object.id;event.replacement=std::move(replacement);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
+void Engine::addStructureGradient(Object& object,int frame,int duration,core::Molecule start,core::Molecule end,Ease ease){TopologyEvent event;event.kind=TopologyEventKind::Gradient;event.frame=frame;event.duration=std::max(0,duration);event.ease=ease;event.sourceObject=object.id;event.destinationObject=object.id;event.startStructure=std::move(start);event.replacement=std::move(end);event.order=nextOrder_++;topologyEvents_.push_back(std::move(event));}
 
 std::optional<core::Molecule> Engine::moleculeAt(int objectId,int frame) const {
     std::map<int,core::Molecule> values;for(const auto& object:objects_)if(object->molecule)values.emplace(object->id,*object->molecule);
@@ -312,6 +314,7 @@ std::optional<core::Molecule> Engine::moleculeAt(int objectId,int frame) const {
     std::vector<const TopologyEvent*> ordered;for(const TopologyEvent& event:topologyEvents_)if(event.frame<=frame)ordered.push_back(&event);std::stable_sort(ordered.begin(),ordered.end(),[](const auto* a,const auto* b){return a->frame!=b->frame?a->frame<b->frame:a->order<b->order;});
     for(const TopologyEvent* event:ordered){
         if(event->kind==TopologyEventKind::Replace){if(event->replacement)if(auto value=values.find(event->sourceObject);value!=values.end())value->second=*event->replacement;continue;}
+        if(event->kind==TopologyEventKind::Gradient){if(event->startStructure&&event->replacement)if(auto value=values.find(event->sourceObject);value!=values.end()){const double raw=event->duration<=0?1.0:static_cast<double>(frame-event->frame)/event->duration;value->second=core::blendMoleculeStructures(*event->startStructure,*event->replacement,applyEase(event->ease,raw));}continue;}
         auto source=values.find(event->sourceObject),destination=values.find(event->destinationObject);if(source==values.end()||destination==values.end()||source==destination)continue;const Object* sourceObject=objectFor(event->sourceObject);const Object* destinationObject=objectFor(event->destinationObject);
         std::set<std::string> atoms(event->atoms.begin(),event->atoms.end()),bonds(event->bonds.begin(),event->bonds.end());if(event->kind==TopologyEventKind::Merge)for(const core::Atom& atom:source->second.atoms)atoms.insert(atom.id);
         for(auto it=source->second.atoms.begin();it!=source->second.atoms.end();)if(atoms.contains(it->id)){it->position.x=valueAt(sourceObject,"atom:"+it->id+":x",event->frame,it->position.x);it->position.y=valueAt(sourceObject,"atom:"+it->id+":y",event->frame,it->position.y);it->position=fromWorld(destinationObject,toWorld(sourceObject,it->position,event->frame),event->frame);destination->second.atoms.push_back(std::move(*it));it=source->second.atoms.erase(it);}else ++it;
@@ -402,6 +405,7 @@ int Engine::maxScheduledFrame() const {
             for (const auto& event : track.events) maximum = std::max(maximum, event.frame);
         }
     }
+    for(const TopologyEvent& event:topologyEvents_)maximum=std::max(maximum,event.frame+(event.kind==TopologyEventKind::Gradient?event.duration:0));
     return maximum;
 }
 

@@ -782,13 +782,15 @@ def test_primary_node_hierarchy_matches_the_four_scope_authoring_contract():
     assert types("分子","object")==["molecule_create","molecule_delete","merge_molecules"]
     assert types("分子","global")==["molecule_global_set_alpha","molecule_global_set_color","molecule_global_set_scale","molecule_global_set_scale_x","molecule_global_set_scale_y"]
     assert types("分子","set")==["molecule_set_structure","molecule_set_position","molecule_set_x","molecule_set_y","molecule_set_scale","molecule_set_scale_x","molecule_set_scale_y","molecule_set_rotation","molecule_set_alpha","molecule_set_color","molecule_set_layer"]
-    assert types("分子","transform")==["molecule_lerp_structure","bond_form","bond_break","selection_show","selection_hide","molecule_lerp_position","molecule_lerp_x","molecule_lerp_y","molecule_lerp_scale","molecule_lerp_scale_x","molecule_lerp_scale_y","molecule_lerp_rotation","molecule_lerp_alpha","molecule_lerp_color"]
+    assert types("分子","transform")==["molecule_gradient_structure","molecule_lerp_position","molecule_lerp_x","molecule_lerp_y","molecule_lerp_scale","molecule_lerp_scale_x","molecule_lerp_scale_y","molecule_lerp_rotation","molecule_lerp_alpha","molecule_lerp_color"]
     assert types("箭头","object")==["arrow_new","arrow_delete"]
     assert types("箭头","global")==["arrow_global_set_alpha","arrow_global_set_color","arrow_global_set_scale","arrow_global_set_scale_x","arrow_global_set_scale_y","arrow_global_set_width"]
     assert types("箭头","set")==["arrow_set_curve","arrow_set_progress","arrow_set_scale","arrow_set_scale_x","arrow_set_scale_y","arrow_set_alpha","arrow_set_color","arrow_set_width"]
     assert types("箭头","transform")==["arrow_lerp_progress","arrow_lerp_scale","arrow_lerp_scale_x","arrow_lerp_scale_y","arrow_lerp_alpha","arrow_lerp_color","arrow_lerp_width"]
     primary={item["type"]:item for item in registry if item["exposure"]=="primary"}
-    assert primary["molecule_lerp_structure"]["tool_label"]=="结构形变"
+    assert primary["molecule_gradient_structure"]["tool_label"]=="渐变结构"
+    for legacy in ("molecule_lerp_structure","bond_form","bond_break","selection_show","selection_hide","selection_fade"):
+        assert registry[next(index for index,item in enumerate(registry) if item["type"]==legacy)]["exposure"]=="legacy"
     assert primary["arrow_set_curve"]["tool_label"]=="箭头曲线"
     assert "arrow_set_position" not in {item for scope in ("object","global","set","transform") for item in types("箭头",scope)}
 
@@ -967,3 +969,64 @@ def test_direct_molecule_axis_drag_updates_only_the_active_node_target():
         assert abs(params["value"]-model_delta)<1e-9
         assert "x" not in params and "y" not in params
         assert core.project()["molecules"]==base["molecules"]
+
+
+def test_gradient_structure_adds_explicit_h_without_exposing_member_ids_and_roundtrips(tmp_path: Path):
+    core=CoreSession();target=core.import_smiles("苯","c1ccccc1");core.set_viewport(960,540,1,0,0)
+    base=json.loads(core.json())["molecules"][0]
+    node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
+    assert core.edit_target_kind=="structure_snapshot" and core.can_edit_structure
+    point=core.depict(False)["atoms"][0]["center"]
+    core.set_tool("single_bond");core.pointer_down(point["x"],point["y"]);core.pointer_move(point["x"]+50,point["y"])
+    assert core.pointer_up(point["x"]+50,point["y"])["changed"]
+    end=next(value for value in core.project()["nodes"] if value["id"]==node)["params"]["end_snapshot"]
+    new_atom=next(atom for atom in end["atoms"] if atom["id"] not in {value["id"] for value in base["atoms"]})
+    endpoint=next(value["center"] for value in core.depict(False)["atoms"] if value["id"]==new_atom["id"])
+    core.set_element("H");core.set_tool("atom_label");core.pointer_down(endpoint["x"],endpoint["y"]);assert core.pointer_up(endpoint["x"],endpoint["y"])["changed"]
+    assert core.project()["molecules"][0]==base
+    start=next(value for value in core.evaluated_project(0)["molecules"] if value["id"]==target)
+    middle=next(value for value in core.evaluated_project(15)["molecules"] if value["id"]==target)
+    finish=next(value for value in core.evaluated_project(30)["molecules"] if value["id"]==target)
+    assert len(start["atoms"])==6 and len(start["bonds"])==6
+    assert next(value for value in middle["atoms"] if value["id"]==new_atom["id"])["alpha"] in (127,128)
+    assert next(value for value in finish["atoms"] if value["id"]==new_atom["id"])["label"]=="H"
+    assert core.gradient_summary(node)["added_atoms"]==1 and core.gradient_summary(node)["added_bonds"]==1
+    assert "LerpStructure" in core.generate_lua()
+    path=tmp_path/"gradient.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
+    assert restored.evaluated_project(15)==core.evaluated_project(15)
+
+
+def test_gradient_structure_deletion_motion_and_visual_change_crossfade():
+    core=CoreSession();target=core.import_smiles("苯","c1ccccc1");core.set_viewport(960,540,1,0,0)
+    node=core.add_node("molecule_gradient_structure",json.dumps({"frames":20,"easing":"linear"}))
+    end=next(value for value in core.project()["nodes"] if value["id"]==node)["params"]["end_snapshot"]
+    moved_id=end["atoms"][0]["id"];deleted_id=end["atoms"][1]["id"]
+    changed_bond=next(bond["id"] for bond in end["bonds"] if deleted_id not in (bond["a"],bond["b"]))
+    changed_atom=end["atoms"][2]["id"]
+    end["atoms"][0]["x"]+=20;end["atoms"][1]["alive"]=False;end["atoms"][2]["label"]="N"
+    for bond in end["bonds"]:
+        if deleted_id in (bond["a"],bond["b"]):bond["alive"]=False
+        if bond["id"]==changed_bond:bond["type"]="triple"
+    params=next(value for value in core.project()["nodes"] if value["id"]==node)["params"];params["end_snapshot"]=end
+    assert core.update_node(node,json.dumps(params))
+    middle=next(value for value in core.evaluated_project(10)["molecules"] if value["id"]==target)
+    finish=next(value for value in core.evaluated_project(20)["molecules"] if value["id"]==target)
+    assert next(value for value in middle["atoms"] if value["id"]==moved_id)["x"]==end["atoms"][0]["x"]-10
+    assert next(value for value in middle["atoms"] if value["id"]==deleted_id)["alpha"] in (127,128)
+    assert any(value["id"]=="__gradient_old_atom__"+changed_atom for value in middle["atoms"])
+    assert any(value["id"].startswith("__gradient_old_bond__") for value in middle["bonds"])
+    assert not any(value["id"]==deleted_id and value["alive"] for value in finish["atoms"])
+    assert next(value for value in finish["bonds"] if value["id"]==changed_bond)["type"]=="triple"
+
+
+def test_gradient_structure_undo_duplicate_move_and_upstream_review():
+    core=CoreSession();core.import_smiles("苯","c1ccccc1")
+    node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
+    assert core.undo() and not any(value["id"]==node for value in core.project()["nodes"])
+    assert core.redo();copy=core.duplicate_node(node);assert copy
+    original=next(value for value in core.project()["nodes"] if value["id"]==node)["params"]
+    duplicated=next(value for value in core.project()["nodes"] if value["id"]==copy)["params"]
+    assert duplicated["end_snapshot"]==original["end_snapshot"] and duplicated["needs_review"]
+    assert core.move_node(node,len(core.project()["nodes"])-1)
+    assert core.gradient_summary(node)["needs_review"]
+    assert core.rebuild_gradient(node) and not core.gradient_summary(node)["needs_review"]

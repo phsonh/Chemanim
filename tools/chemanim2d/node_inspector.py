@@ -4,11 +4,26 @@ import json
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
-                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QWidget)
+                             QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+                             QSpinBox, QWidget)
+
+
+LEGACY_STRUCTURE_TYPES = {"molecule_lerp_structure", "bond_form", "bond_break",
+                          "selection_show", "selection_hide", "selection_fade"}
+
+
+def molecule_name(project, stable_id):
+    molecule = next((item for item in project.get("molecules", []) if item["id"] == stable_id), None)
+    name = (molecule or {}).get("name", "")
+    if name and name != stable_id: return name
+    suffix = stable_id.removeprefix("molecule")
+    return f"分子 {suffix}" if suffix.isdigit() else (name or "分子")
 
 
 class NodeInspector(QWidget):
     nodeEdited = pyqtSignal(str)
+    editStructureRequested = pyqtSignal(str)
+    rebuildRequested = pyqtSignal(str)
 
     def __init__(self, session, parent=None):
         super().__init__(parent); self.session = session; self.node_id = ""; self._updating = False; self.editors = {}
@@ -56,10 +71,19 @@ class NodeInspector(QWidget):
         self._clear(); project = self.session.project(); node = next((item for item in project.get("nodes", []) if item["id"] == self.node_id), None)
         if not node: self.title.setText("未选择节点"); return
         definition = next((item for item in self.session.node_registry() if item["type"] == node["type"]), None)
-        self.title.setText(f'{definition.get("label", node["type"])} · {node["id"]}')
         params = node.get("params", {}); self._updating = True
+        if node["type"] in LEGACY_STRUCTURE_TYPES:
+            self.title.setText("旧版结构节点")
+            note=QLabel("旧版结构节点，仅用于兼容。目标对象会在画布中高亮；内部引用不可手工编辑。")
+            note.setWordWrap(True);self.layout.addRow(note);self._updating=False;return
+        if node["type"]=="molecule_gradient_structure":
+            self.title.setText(f'渐变结构 · {molecule_name(project,params.get("target",""))}')
+        else:self.title.setText(definition.get("label", "节点"))
         for spec in definition.get("fields", []):
             key, kind = spec["key"], spec["kind"]; value = params.get(key, spec.get("default")); editor = None
+            if node["type"]=="molecule_gradient_structure" and key=="target":
+                editor=QLineEdit(molecule_name(project,value));editor.setReadOnly(True)
+                self.editors[key]=(editor,"readonly_target");self.layout.addRow("目标分子",editor);continue
             choices = self._choices(kind, params)
             if choices:
                 editor = QComboBox()
@@ -81,12 +105,24 @@ class NodeInspector(QWidget):
             self.editors[key] = (editor, kind); self.layout.addRow(spec["label"], editor)
             if key == "target" and definition.get("target_immutable"):
                 editor.setEnabled(False);editor.setToolTip("新建分子的目标由 Core 分配，不可重新指向")
+        if node["type"]=="molecule_gradient_structure":
+            summary=self.session.gradient_summary(self.node_id)
+            if summary.get("needs_review"):
+                warning=QLabel("起点结构已变化，需要检查");warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
+                rebuild=QPushButton("以新起点重建终态");rebuild.clicked.connect(lambda:self.rebuildRequested.emit(self.node_id));self.layout.addRow(rebuild)
+            values=[]
+            for key,label in (("added_atoms","新增原子"),("added_bonds","新增键"),("moved_atoms","移动原子"),("deleted_objects","删除对象"),("changed_objects","改变样式")):
+                values.append(f'{label} {summary.get(key,0)} 个')
+            text=QLabel("\n".join(values));self.layout.addRow("变化摘要",text)
+            edit=QPushButton("编辑终态结构");edit.clicked.connect(lambda:self.editStructureRequested.emit(self.node_id));self.layout.addRow(edit)
         self._updating = False
 
     def apply(self):
         if self._updating or not self.node_id: return
-        params = {}
+        current=next((item for item in self.session.project().get("nodes",[]) if item["id"]==self.node_id),{})
+        params = dict(current.get("params",{}))
         for key, (editor, kind) in self.editors.items():
+            if kind=="readonly_target":continue
             if isinstance(editor, QComboBox): params[key] = editor.currentData()
             elif isinstance(editor, QSpinBox): params[key] = editor.value()
             elif isinstance(editor, QDoubleSpinBox): params[key] = round(editor.value(), 2)

@@ -92,6 +92,7 @@ private:
     static int mLerpWidth(lua_State* state);
     static int mSetAtomXY(lua_State* state);
     static int mSetStructure(lua_State* state);
+    static int mLerpStructure(lua_State* state);
     static int mLerpAtomXY(lua_State* state);
     static int mLerpAtomsXY(lua_State* state);
     static int mSetAtomElement(lua_State* state);

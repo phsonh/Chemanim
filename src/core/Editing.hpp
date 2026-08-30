@@ -127,6 +127,8 @@ public:
     bool moveScriptNode(const std::string& nodeId, std::size_t index);
     [[nodiscard]] std::string duplicateScriptNode(const std::string& nodeId);
     bool deleteScriptNode(const std::string& nodeId);
+    [[nodiscard]] std::string gradientStructureSummary(const std::string& nodeId) const;
+    bool rebuildGradientStructure(const std::string& nodeId);
     bool updateScene(const std::string& sceneJson);
 
     [[nodiscard]] bool canUndo() const;

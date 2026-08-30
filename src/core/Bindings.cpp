@@ -118,6 +118,8 @@ public:
     bool moveNode(const std::string& id,int index){return index>=0&&session_.moveScriptNode(id,static_cast<std::size_t>(index));}
     std::string duplicateNode(const std::string& id){return session_.duplicateScriptNode(id);}
     bool deleteNode(const std::string& id){return session_.deleteScriptNode(id);}
+    py::object gradientSummary(const std::string& id)const{return jsonObject(session_.gradientStructureSummary(id));}
+    bool rebuildGradient(const std::string& id){return session_.rebuildGradientStructure(id);}
     bool updateScene(const std::string& value){return session_.updateScene(value);}
     int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
     py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
@@ -285,6 +287,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
         .def("duplicate_node",&CoreSession::duplicateNode).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
+        .def("gradient_summary",&CoreSession::gradientSummary).def("rebuild_gradient",&CoreSession::rebuildGradient)
         .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("diagnostics",&CoreSession::diagnostics).def("evaluated_project",&CoreSession::evaluatedProject)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)
         .def("depict_at", &CoreSession::depictAt, py::arg("frame"), py::arg("final_effect")=false);

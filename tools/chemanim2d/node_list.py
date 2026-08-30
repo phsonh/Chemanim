@@ -5,6 +5,8 @@ from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (QHeaderView, QHBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QVBoxLayout, QWidget)
 
+from .node_inspector import LEGACY_STRUCTURE_TYPES, molecule_name
+
 
 class NodeList(QWidget):
     nodeSelected = pyqtSignal(str)
@@ -57,7 +59,10 @@ class NodeList(QWidget):
             target=timing.get("target", "")
             if definition.get("target_kind")=="global_molecule":target="所有分子"
             elif definition.get("target_kind")=="global_arrow":target="所有箭头"
-            item = QTreeWidgetItem([definition.get("label", node["type"]), target,
+            elif definition.get("target_kind")=="molecule":target=molecule_name(project,target)
+            label="旧版结构节点" if node["type"] in LEGACY_STRUCTURE_TYPES else definition.get("label", "节点")
+            if node["type"]=="molecule_gradient_structure":label=f"渐变结构 · {target}"
+            item = QTreeWidgetItem([label, target,
                                     f"{duration} 帧" if duration else "—",
                                     f'{timing.get("start", 0)} → {timing.get("end", 0)}'])
             item.setFlags(item.flags()&~Qt.ItemFlag.ItemIsUserCheckable)

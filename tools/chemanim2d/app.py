@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialo
 from .canvas import StructureCanvas
 from .core import BUILD_COMMIT, DOCUMENT_VERSION, CoreSession
 from .mode_toolbar import ModeToolPanel
-from .node_inspector import NodeInspector
+from .node_inspector import LEGACY_STRUCTURE_TYPES, NodeInspector, molecule_name
 from .node_list import NodeList
 from .periodic_table import PeriodicTableDialog
 from .scene_inspector import SceneInspector
@@ -49,6 +49,10 @@ class MainWindow(QMainWindow):
           QTabBar#scriptScopeTabs::tab{min-width:62px;padding:5px 15px;background:transparent;color:#8f99a5;border:0;border-bottom:2px solid transparent;margin-right:6px}
           QTabBar#scriptScopeTabs::tab:hover{color:#dce2e8;background:#242a31}
           QTabBar#scriptScopeTabs::tab:selected{color:#f4f7fa;border-bottom-color:#4598e5;font-weight:600}
+          QWidget#scriptSectionRow{background:#181c20;border-bottom:1px solid #30363e}
+          QTabBar#scriptSectionTabs::tab{min-width:62px;padding:5px 15px;background:transparent;color:#8f99a5;border:0;border-bottom:2px solid transparent;margin-right:6px}
+          QTabBar#scriptSectionTabs::tab:hover{color:#dce2e8;background:#242a31}
+          QTabBar#scriptSectionTabs::tab:selected{color:#f4f7fa;border-bottom-color:#4598e5;font-weight:600}
           QWidget#tertiaryTools{background:#15181b;border-top:0}
           QPushButton{background:#2a2e33;color:#e5e8ec;border:1px solid #41474f;padding:5px 12px} QPushButton:hover{background:#343a41}
           QToolButton{background:transparent;color:#e5e8ec;border:1px solid transparent;padding:4px 7px} QToolButton:hover{background:#2b3036;border-color:#414852} QToolButton:checked{background:#285b91;border-color:#54a4ee}
@@ -83,8 +87,13 @@ class MainWindow(QMainWindow):
     def _build_transport(self):
         self.transport=QWidget();layout=QHBoxLayout(self.transport);layout.setContentsMargins(8,4,8,4)
         self.play_button=QPushButton("▶ 播放");self.play_button.clicked.connect(self._toggle_play);self.edit_mode=QLabel("预览：只读")
+        self.gradient_controls=QWidget();gradient_layout=QHBoxLayout(self.gradient_controls);gradient_layout.setContentsMargins(0,0,0,0);gradient_layout.setSpacing(4)
+        self.gradient_buttons={}
+        for key,label in (("start","起点"),("current","当前"),("end","终点")):
+            button=QPushButton(label);button.setCheckable(True);button.clicked.connect(lambda _checked=False,value=key:self._show_gradient_phase(value));gradient_layout.addWidget(button);self.gradient_buttons[key]=button
+        self.gradient_controls.hide()
         self.frame_slider=QSlider(Qt.Orientation.Horizontal);self.frame_spin=QSpinBox();self.frame_spin.setRange(0,100000);self.frame_slider.setRange(0,0);self.frame_slider.valueChanged.connect(self.frame_spin.setValue);self.frame_spin.valueChanged.connect(self.frame_slider.setValue);self.frame_spin.valueChanged.connect(self._preview_frame)
-        layout.addWidget(self.play_button);layout.addWidget(self.edit_mode);layout.addWidget(QLabel("当前帧"));layout.addWidget(self.frame_slider,1);layout.addWidget(self.frame_spin)
+        layout.addWidget(self.play_button);layout.addWidget(self.edit_mode);layout.addWidget(self.gradient_controls);layout.addWidget(QLabel("当前帧"));layout.addWidget(self.frame_slider,1);layout.addWidget(self.frame_spin)
 
     def _toggle_play(self):
         if self._playing:
@@ -104,7 +113,7 @@ class MainWindow(QMainWindow):
         self.mode_panel.set_structure_enabled(self.session.can_edit_structure and not self.canvas.final_effect and not self._playing)
         if label:self.edit_mode.setText(label)
         elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
-        elif self.session.edit_target_kind=="structure_snapshot":self.edit_mode.setText("编辑：分子结构节点")
+        elif self.session.edit_target_kind=="structure_snapshot":self.edit_mode.setText("正在编辑：渐变结构终态")
         elif self.session.edit_target_kind=="script_node":self.edit_mode.setText("编辑：动画节点")
         else:self.edit_mode.setText("预览：只读")
 
@@ -115,8 +124,27 @@ class MainWindow(QMainWindow):
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
         self.canvas.show_edit_frame(frame)
-        label="编辑：场景节点" if node["type"]=="scene" else ("编辑：分子结构节点" if self.session.edit_target_kind=="structure_snapshot" else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{node.get("type","")}')
+        is_gradient=node["type"]=="molecule_gradient_structure";self.gradient_controls.setVisible(is_gradient)
+        for key,button in self.gradient_buttons.items():button.setChecked(is_gradient and key=="end")
+        definition=next((item for item in self.session.node_registry() if item["type"]==node["type"]),{})
+        target=node.get("params",{}).get("target","");human_target=molecule_name(self.session.project(),target) if target else ""
+        if node["type"] in LEGACY_STRUCTURE_TYPES:human="旧版结构节点，仅用于兼容"
+        elif is_gradient:human=f"渐变结构 · {human_target}"
+        else:human=definition.get("label","节点")
+        label="编辑：场景节点" if node["type"]=="scene" else ("正在编辑：渐变结构终态" if is_gradient else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{human}')
+        self.statusBar().showMessage(human)
         self._sync_edit_state(label);return True
+
+    def _show_gradient_phase(self,phase):
+        node_id=self.node_list.current_id();node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
+        if not node or node["type"]!="molecule_gradient_structure":return
+        timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"start":0,"end":0})
+        for key,button in self.gradient_buttons.items():button.setChecked(key==phase)
+        if phase=="end":
+            self.session.edit_node(node_id);frame=int(timing["end"]);self.canvas.show_edit_frame(frame);self._sync_edit_state("正在编辑：渐变结构终态")
+        else:
+            frame=int(timing["start"] if phase=="start" else self.frame_spin.value());self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state("渐变结构起点：只读" if phase=="start" else "渐变结构当前帧：只读")
+        self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False);self.canvas.request_refresh()
 
     def _select_default_authoring_node(self):
         project=self.session.project();target=self.session.active_molecule
@@ -190,6 +218,7 @@ class MainWindow(QMainWindow):
             used=[int(m.group(1)) for item in project["nodes"] if item["type"]=="arrow_new" for m in [re.fullmatch(r"arrow(\d+)",item.get("params",{}).get("target",""))] if m];params["target"]=f"arrow{max(used,default=0)+1}"
         elif node_type.startswith("arrow_") and not params.get("target"):params["target"]=self._latest_arrow(index)
         node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index);self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
+        if node_type=="molecule_gradient_structure":open_editor=False
         if open_editor:self._edit_node_dialog(node_id)
         return node_id
 
@@ -200,9 +229,16 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return
         if node["type"]=="scene":self._scene_dialog();return
-        dialog=QDialog(self);dialog.setWindowTitle("节点参数");inspector=NodeInspector(self.session,dialog);inspector.set_node(node_id);inspector.nodeEdited.connect(lambda _id:self._node_parameters_changed(node_id))
+        dialog=QDialog(self);dialog.setWindowTitle("节点参数");inspector=NodeInspector(self.session,dialog);inspector.set_node(node_id);inspector.nodeEdited.connect(lambda _id:self._node_parameters_changed(node_id));inspector.editStructureRequested.connect(lambda _id:(dialog.accept(),self._activate_node(node_id)));inspector.rebuildRequested.connect(lambda _id:self._rebuild_gradient(node_id,inspector))
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);buttons.rejected.connect(dialog.reject)
         layout=QVBoxLayout(dialog);layout.addWidget(inspector);layout.addWidget(buttons);dialog.resize(430,max(240,min(720,inspector.sizeHint().height()+100)));dialog.exec()
+
+    def _rebuild_gradient(self,node_id,inspector=None):
+        answer=QMessageBox.question(self,"重建渐变结构终态","这会丢弃当前终态编辑，并以新的起点结构重新建立终态。是否继续？")
+        if answer!=QMessageBox.StandardButton.Yes:return
+        if self.session.rebuild_gradient(node_id):
+            self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id)
+            if inspector:inspector.refresh()
 
     def _context_seed(self,kind,stable_id,node_type):
         project=self.session.evaluated_project(self.frame_spin.value());molecule=next((m for m in project.get("molecules",[]) if m["id"]==self.session.active_molecule),{})
@@ -264,6 +300,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id)
     def _set_frame(self,frame):self.frame_spin.setValue(frame)
     def _preview_frame(self,frame):
+        for button in getattr(self,"gradient_buttons",{}).values():button.setChecked(False)
         self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state("播放：只读预览" if self._playing else "预览：只读")
     def _toggle_final_effect(self,checked):
         self._stop_playback(False);self.canvas.set_final_effect(bool(checked))

@@ -282,7 +282,7 @@ void LuaRuntime::bindObjectMethods(int tableIndex, Object& object) {
     if (object.kind == "sprite") {
         bind("SetImage", mSetImage); bind("ChangeImage", mChangeImage);
     } else if (object.kind == "molecule") {
-        bind("SetStructure", mSetStructure);bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
+        bind("SetStructure", mSetStructure);bind("LerpStructure",mLerpStructure);bind("SetAtomXY", mSetAtomXY); bind("LerpAtomXY", mLerpAtomXY);
         bind("LerpAtomsXY", mLerpAtomsXY);
         bind("SetAtomElement",mSetAtomElement);bind("SetAtomHidden",mSetAtomHidden);bind("SetAtomAlpha",mSetAtomAlpha);bind("LerpAtomAlpha",mLerpAtomAlpha);bind("SetAtomColor",mSetAtomColor);bind("LerpAtomColor",mLerpAtomColor);
         bind("FormBond",mFormBond);bind("DeleteBond",mDeleteBond);bind("BreakBond",mBreakBond);bind("SetBondOrder",mSetBondOrder);bind("SetBondSecondarySide",mSetBondSecondarySide);
@@ -806,6 +806,19 @@ int LuaRuntime::mSetStructure(lua_State* state) {
         object.molecule=std::move(original);
         throw;
     }
+    return returnBoundObject(state,object);
+}
+
+int LuaRuntime::mLerpStructure(lua_State* state) {
+    auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int argument=methodBase(state);
+    luaL_checktype(state,argument,LUA_TTABLE);luaL_checktype(state,argument+1,LUA_TTABLE);
+    auto original=std::move(object.molecule);
+    try{
+        runtime.readMolecule(object,argument);core::Molecule start=std::move(*object.molecule);
+        runtime.readMolecule(object,argument+1);core::Molecule end=std::move(*object.molecule);
+        object.molecule=std::move(original);const int duration=durationValue(state,argument+2);const Ease ease=boundEase(state,argument+3);
+        runtime.engine_->addStructureGradient(object,runtime.cursor_,duration,std::move(start),std::move(end),ease);
+    }catch(...){object.molecule=std::move(original);throw;}
     return returnBoundObject(state,object);
 }
 

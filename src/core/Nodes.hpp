@@ -82,5 +82,10 @@ struct EvaluatedScene {
 [[nodiscard]] std::vector<NodeTiming> compileNodeTimings(const Project& project);
 [[nodiscard]] EvaluatedScene evaluateNodes(const Project& project, int frame);
 [[nodiscard]] int nodeSequenceEndFrame(const Project& project);
+// Stable IDs define correspondence. Transient ghost records produced here
+// exist only for depiction and are never persisted into the project.
+[[nodiscard]] Molecule blendMoleculeStructures(const Molecule& start,
+                                                const Molecule& end,
+                                                double progress);
 
 }  // namespace chem::core

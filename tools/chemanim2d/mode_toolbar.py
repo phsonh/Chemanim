@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import cos, pi, sin
 from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QMenu, QScrollArea,
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QScrollArea,
                              QTabBar, QToolButton, QVBoxLayout, QWidget)
 
 
@@ -51,7 +51,7 @@ class ModeToolPanel(QWidget):
         "hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"}
 
     def __init__(self,session,parent=None):
-        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self._active_draw_tool="select_rectangle";self._structure_enabled=False
+        super().__init__(parent);self.session=session;self.mode="脚本";self.category="通用";self.script_scope="对象";self.script_section="";self._active_draw_tool="select_rectangle";self._structure_enabled=False
         self.recent_elements=["C","N","O","H","S","P","F","Cl","Br","I"]
         self.text_number_style="subscript"
         self.setObjectName("modeToolPanel");layout=QVBoxLayout(self);layout.setContentsMargins(0,4,0,0);layout.setSpacing(0)
@@ -63,16 +63,19 @@ class ModeToolPanel(QWidget):
         self.secondary_row=QWidget();self.secondary_row.setObjectName("secondaryRow");self.secondary_layout=QHBoxLayout(self.secondary_row);self.secondary_layout.setContentsMargins(22,0,8,0);self.secondary_layout.setSpacing(0);self.secondary_layout.addWidget(self.secondary);self.secondary_layout.addStretch()
         self.scope_tabs=QTabBar();self.scope_tabs.setObjectName("scriptScopeTabs");self.scope_tabs.setShape(QTabBar.Shape.RoundedNorth);self.scope_tabs.setExpanding(False);self.scope_tabs.setDrawBase(False);self.scope_tabs.currentChanged.connect(lambda index:self.set_script_scope(self.scope_tabs.tabText(index)) if index>=0 else None)
         self.scope_row=QWidget();self.scope_row.setObjectName("scriptScopeRow");scope_layout=QHBoxLayout(self.scope_row);scope_layout.setContentsMargins(38,0,8,0);scope_layout.setSpacing(0);scope_layout.addWidget(self.scope_tabs);scope_layout.addStretch()
+        self.section_tabs=QTabBar();self.section_tabs.setObjectName("scriptSectionTabs");self.section_tabs.setShape(QTabBar.Shape.RoundedNorth);self.section_tabs.setExpanding(False);self.section_tabs.setDrawBase(False);self.section_tabs.currentChanged.connect(lambda index:self.set_script_section(self.section_tabs.tabText(index)) if index>=0 else None)
+        self.section_row=QWidget();self.section_row.setObjectName("scriptSectionRow");section_layout=QHBoxLayout(self.section_row);section_layout.setContentsMargins(54,0,8,0);section_layout.setSpacing(0);section_layout.addWidget(self.section_tabs);section_layout.addStretch()
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded);self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff);self.scroll.setFrameShape(QFrame.Shape.NoFrame);self.scroll.setMinimumHeight(58);self.scroll.setMaximumHeight(68)
         self.tertiary=QWidget();self.tertiary.setObjectName("tertiaryTools");self.tertiary_layout=QHBoxLayout(self.tertiary);self.tertiary_layout.setContentsMargins(10,6,10,6);self.tertiary_layout.setSpacing(6);self.scroll.setWidget(self.tertiary)
-        layout.addWidget(primary_row);layout.addWidget(self.secondary_row);layout.addWidget(self.scope_row);layout.addWidget(self.scroll)
+        layout.addWidget(primary_row);layout.addWidget(self.secondary_row);layout.addWidget(self.scope_row);layout.addWidget(self.section_row);layout.addWidget(self.scroll)
         self._build_secondary()
 
     @staticmethod
     def _clear(layout):
         while layout.count():
             item=layout.takeAt(0)
-            if item.widget():item.widget().hide();item.widget().deleteLater()
+            widget=item.widget()
+            if widget:widget.hide();widget.setParent(None);widget.deleteLater()
 
     def set_mode(self,mode):
         if mode not in ("脚本","绘制"):return
@@ -83,8 +86,16 @@ class ModeToolPanel(QWidget):
         categories=self.SCRIPT_CATEGORIES if self.mode=="脚本" else self.DRAW_CATEGORIES
         if self.mode=="绘制" and category in ("工具","结构","元素"):category="绘制"
         if category not in categories:return
-        self.category=category;self.script_scope="对象";index=categories.index(category)
+        self.category=category;self.script_scope="对象";self.script_section="";index=categories.index(category)
         if self.secondary.currentIndex()!=index:self.secondary.blockSignals(True);self.secondary.setCurrentIndex(index);self.secondary.blockSignals(False)
+        self._build_tertiary()
+
+    def set_script_section(self,section):
+        names=[self.section_tabs.tabText(index) for index in range(self.section_tabs.count())]
+        if section not in names:return
+        self.script_section=section
+        if self.section_tabs.currentIndex()!=names.index(section):
+            self.section_tabs.blockSignals(True);self.section_tabs.setCurrentIndex(names.index(section));self.section_tabs.blockSignals(False)
         self._build_tertiary()
 
     SCOPE_NAMES=(("对象","object"),("全局","global"),("设定","set"),("变换","transform"))
@@ -92,6 +103,7 @@ class ModeToolPanel(QWidget):
     def set_script_scope(self,scope):
         names=[name for name,_ in self.SCOPE_NAMES]
         if scope not in names:return
+        if self.script_scope!=scope:self.script_section=""
         self.script_scope=scope
         if self.scope_tabs.currentIndex()!=names.index(scope):
             self.scope_tabs.blockSignals(True);self.scope_tabs.setCurrentIndex(names.index(scope));self.scope_tabs.blockSignals(False)
@@ -157,9 +169,9 @@ class ModeToolPanel(QWidget):
 
     def _build_tertiary(self):
         self._clear(self.tertiary_layout)
-        scoped=self.mode=="脚本" and self.category in ("分子","箭头")
-        self.scope_row.setVisible(scoped)
-        if scoped:
+        scripted=self.mode=="脚本"
+        self.scope_row.setVisible(scripted);self.section_row.setVisible(scripted)
+        if scripted:
             self.scope_tabs.blockSignals(True)
             while self.scope_tabs.count():self.scope_tabs.removeTab(0)
             names=[name for name,_ in self.SCOPE_NAMES]
@@ -167,24 +179,22 @@ class ModeToolPanel(QWidget):
             self.scope_tabs.setCurrentIndex(names.index(self.script_scope));self.scope_tabs.blockSignals(False)
         if self.mode=="脚本":
             definitions=[item for item in self.session.node_registry() if item["category"]==self.category and item.get("exposure")=="primary"]
-            if scoped:
-                scope_key=dict(self.SCOPE_NAMES)[self.script_scope]
-                definitions=[item for item in definitions if item.get("scope")==scope_key]
+            scope_key=dict(self.SCOPE_NAMES)[self.script_scope]
+            definitions=[item for item in definitions if item.get("scope")==scope_key]
             definitions.sort(key=lambda item:(item.get("order",0),item.get("label","")))
-            if not scoped or self.script_scope=="对象":
-                for item in definitions:self._tool(item["type"],item.get("tool_label",item["label"]),self.nodeRequested,show_icon=False)
-            else:
-                sections=[]
-                for item in definitions:
-                    section=item.get("section") or "其他"
-                    if section not in sections:sections.append(section)
-                for section in sections:
-                    button=QToolButton();button.setText(section);button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-                    button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);button.setMinimumHeight(40)
-                    menu=QMenu(button)
-                    for item in [value for value in definitions if (value.get("section") or "其他")==section]:
-                        action=menu.addAction(item.get("tool_label",item["label"]));action.setData(item["type"]);action.triggered.connect(lambda _checked=False,t=item["type"]:self.nodeRequested.emit(t))
-                    button.setMenu(menu);self.tertiary_layout.addWidget(button)
+            sections=[]
+            for item in definitions:
+                section=item.get("section") or "通用"
+                if section not in sections:sections.append(section)
+            if self.script_section not in sections:self.script_section=sections[0] if sections else ""
+            self.section_tabs.blockSignals(True)
+            while self.section_tabs.count():self.section_tabs.removeTab(0)
+            for section in sections:self.section_tabs.addTab(section)
+            if self.script_section:self.section_tabs.setCurrentIndex(sections.index(self.script_section))
+            self.section_tabs.blockSignals(False)
+            for item in definitions:
+                if (item.get("section") or "通用")==self.script_section:
+                    self._tool(item["type"],item.get("tool_label",item["label"]),self.nodeRequested,show_icon=False)
         else:
             for key,label,shortcut in (("select_rectangle","框选","V"),("select_lasso","套索","L"),("eraser","橡皮擦","E")):self._tool(key,label,self.drawToolRequested,True,f"{label} · {shortcut}",icon_only=True)
             self._separator()

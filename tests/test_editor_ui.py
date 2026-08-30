@@ -13,6 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
 
 from chemanim2d.app import MainWindow
+from chemanim2d.node_inspector import NodeInspector
 from chemanim2d.periodic_table import PeriodicTableDialog
 
 
@@ -80,7 +81,7 @@ def test_minimum_zoom_recenters_artboard():
 def test_editor_layout_has_node_list_canvas_and_compact_transport_only():
     value=window();assert not hasattr(value,"tree") and not hasattr(value,"atom_inspector")
     assert value.node_list.width()<value.canvas.width() and value.transport.height()<70
-    assert value.mode_panel.height()<190
+    assert value.mode_panel.height()<220
     value.close()
 
 
@@ -155,18 +156,51 @@ def test_primary_node_toolbar_is_registry_driven_and_has_exact_object_commands()
     value.close()
 
 
-def test_primary_node_toolbar_uses_exact_section_menus_and_short_action_names():
+def test_primary_node_toolbar_uses_four_visible_rows_and_direct_action_buttons():
     value=window();panel=value.mode_panel;panel.set_mode("脚本");panel.set_category("分子")
-    def visible_menus(scope):
+    def visible_sections(scope):
         panel.set_script_scope(scope);QApplication.processEvents()
-        return {button.text():[action.text() for action in button.menu().actions()]
-                for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.menu()}
-    assert visible_menus("全局")=={"颜色":["透明度","颜色"],"缩放":["缩放","横向缩放","纵向缩放"]}
-    assert visible_menus("设定")=={"结构":["分子结构"],"位置":["坐标","横坐标","纵坐标"],"缩放":["缩放","横向缩放","纵向缩放"],"旋转":["旋转角度"],"颜色":["透明度","颜色"],"排列":["图层"]}
-    assert visible_menus("变换")["结构"]==["结构形变","成键","断键","选区显现","选区消失"]
+        return [panel.section_tabs.tabText(index) for index in range(panel.section_tabs.count())]
+    def actions(section):
+        panel.set_script_section(section);QApplication.processEvents()
+        buttons=[button for button in panel.tertiary.findChildren(QToolButton) if button.isVisible()]
+        assert all(button.menu() is None for button in buttons)
+        return [button.text() for button in buttons]
+    assert visible_sections("全局")==["颜色","缩放"] and actions("颜色")==["透明度","颜色"]
+    assert visible_sections("设定")==["结构","位置","缩放","旋转","颜色","排列"] and actions("位置")==["坐标","横坐标","纵坐标"]
+    assert visible_sections("变换")==["结构","位置","缩放","旋转","颜色"] and actions("结构")==["渐变结构"]
+    assert panel.secondary_row.isVisible() and panel.scope_row.isVisible() and panel.section_row.isVisible() and panel.scroll.isVisible()
     panel.set_category("箭头")
-    assert visible_menus("设定")=={"曲线":["箭头曲线"],"绘制":["绘制进度"],"缩放":["缩放","横向缩放","纵向缩放"],"颜色":["透明度","颜色"],"线条":["线宽"]}
-    assert "位置" not in visible_menus("设定") and "位置" not in visible_menus("变换")
+    assert visible_sections("设定")==["曲线","绘制","缩放","颜色","线条"]
+    assert "位置" not in visible_sections("设定") and "位置" not in visible_sections("变换")
+    value.close()
+
+
+def test_gradient_inspector_and_tree_hide_internal_ids_and_legacy_fields():
+    value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    node=value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()
+    item=value.node_list.tree.currentItem();assert item.text(0)=="渐变结构 · 苯" and "N" not in item.text(0)
+    inspector=NodeInspector(value.session);inspector.set_node(node)
+    visible=" ".join(label.text() for label in inspector.findChildren(__import__('PyQt6.QtWidgets',fromlist=['QLabel']).QLabel))
+    assert "目标分子" not in visible or "苯" in visible
+    assert not any(text in visible for text in ("原子 ID","键 ID","标记 ID",node))
+    snapshots=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]
+    inspector.editors["frames"][0].setValue(42);inspector.apply()
+    changed=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]
+    assert changed["frames"]==42 and changed["start_snapshot"]==snapshots["start_snapshot"] and changed["end_snapshot"]==snapshots["end_snapshot"]
+    legacy=value.session.add_node("selection_show",json.dumps({"target":value.session.active_molecule,"atoms":"A1","bonds":"B1","frames":10}))
+    inspector.set_node(legacy);visible=" ".join(label.text() for label in inspector.findChildren(__import__('PyQt6.QtWidgets',fromlist=['QLabel']).QLabel))
+    assert "旧版结构节点，仅用于兼容" in visible and "A1" not in visible and "B1" not in visible and legacy not in visible
+    value.close()
+
+
+def test_gradient_start_current_end_modes_gate_endpoint_editing():
+    value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    node=value._add_node("molecule_gradient_structure",open_editor=False)
+    assert value.edit_mode.text()=="正在编辑：渐变结构终态" and value.session.can_edit_structure
+    value._show_gradient_phase("start");assert value.edit_mode.text()=="渐变结构起点：只读" and not value.session.can_edit_structure
+    value.frame_spin.setValue(15);QApplication.processEvents();assert value.edit_mode.text()=="预览：只读" and not value.session.can_edit_structure
+    value._show_gradient_phase("end");assert value.edit_mode.text()=="正在编辑：渐变结构终态" and value.session.can_edit_structure
     value.close()
 
 
