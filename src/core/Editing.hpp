@@ -45,9 +45,9 @@ struct Viewport {
     [[nodiscard]] Point canvasToModel(Point value) const;
 };
 
-enum class HitKind { None, Atom, Bond, Adornment };
+enum class HitKind { None, Atom, Bond, Adornment, Molecule, Control };
 enum class EditTargetKind { BaseStructure, StructureSnapshot, TimelinePreview, AtomTween, Pose, ScriptNode };
-enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Text, Move, Pan };
+enum class GesturePreviewKind { None, Rectangle, Lasso, Bond, Ring, Adornment, Text, Move, Pan, ArrowCurve };
 
 struct Hit {
     HitKind kind = HitKind::None;
@@ -72,6 +72,12 @@ struct EditResult {
     GesturePreview preview;
     std::vector<std::string> selectedAtoms;
     std::vector<std::string> selectedBonds;
+};
+
+struct DirectControl {
+    std::string id;
+    std::string role;
+    Point position;
 };
 
 class EditorSession {
@@ -102,14 +108,17 @@ public:
     [[nodiscard]] EditTargetKind editTargetKind() const;
     [[nodiscard]] std::string editTargetId() const;
     [[nodiscard]] int previewFrame() const;
+    [[nodiscard]] std::optional<int> comparisonFrame() const;
     [[nodiscard]] bool canEditStructure() const;
     [[nodiscard]] bool canDirectManipulate() const;
     [[nodiscard]] Molecule displayMolecule() const;
+    [[nodiscard]] std::vector<DirectControl> directControls() const;
 
     [[nodiscard]] Hit hitTest(Point canvasPoint) const;
     [[nodiscard]] EditResult pointerDown(Point canvasPoint, bool alt, bool control, bool shift);
     [[nodiscard]] EditResult pointerMove(Point canvasPoint, bool alt, bool control, bool shift);
     [[nodiscard]] EditResult pointerUp(Point canvasPoint, bool alt, bool control, bool shift);
+    bool adjustArrowCurveBend(int direction);
     void cancelGesture();
     [[nodiscard]] EditResult selectAll();
     bool deleteSelection();
@@ -119,8 +128,12 @@ public:
                       AtomLabelSide side, AtomNumberStyle numberStyle);
     bool addChargeAdornment(const std::string& atomId, int delta);
     bool setAdornmentOffset(const std::string& adornmentId, Point offset);
-    [[nodiscard]] std::string createBlankMolecule(std::string name = {});
-    [[nodiscard]] std::string importSmiles(std::string name,const std::string& smiles);
+    [[nodiscard]] std::string createBlankMolecule(
+        std::string name = {},
+        std::optional<std::size_t> insertionIndex = std::nullopt);
+    [[nodiscard]] std::string importSmiles(
+        std::string name,const std::string& smiles,
+        std::optional<std::size_t> insertionIndex = std::nullopt);
     [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,
                                             std::optional<std::size_t> index = std::nullopt);
     bool updateScriptNode(const std::string& nodeId, const std::string& paramsJson);

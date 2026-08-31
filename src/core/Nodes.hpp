@@ -67,6 +67,8 @@ struct NodeMetadata {
     std::string structureEditCapability;
     bool hasDuration = false;
     bool targetImmutable = false;
+    bool showSection = true;
+    std::string directManipulationCapability;
 };
 
 struct EvaluatedScene {

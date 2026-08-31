@@ -94,6 +94,10 @@ struct Molecule {
     std::string id;
     std::string name;
     std::string sourceSmiles;
+    // v8: stable object-space origin.  Structure atoms are persisted in
+    // molecule-local coordinates and never act as the object's transform
+    // anchor.
+    Point origin;
     double referenceBondLength = 32.0;
     std::uint64_t nextAtomId = 1;
     std::uint64_t nextBondId = 1;
@@ -205,7 +209,9 @@ struct Project {
 
     [[nodiscard]] Molecule* molecule(const std::string& stableId);
     [[nodiscard]] const Molecule* molecule(const std::string& stableId) const;
-    [[nodiscard]] std::string addBlankMolecule(std::string name = {});
+    [[nodiscard]] std::string addBlankMolecule(
+        std::string name = {},
+        std::optional<std::size_t> insertionIndex = std::nullopt);
     [[nodiscard]] std::string duplicateMolecule(const std::string& sourceId,
                                                 std::optional<std::size_t> nodeIndex = std::nullopt);
     [[nodiscard]] std::uint64_t allocateCreationSerial();

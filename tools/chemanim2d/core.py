@@ -21,9 +21,10 @@ try:
     required_api = (
         "set_atom_label", "edit_target_kind", "edit_target_id",
         "can_edit_structure", "can_direct_manipulate",
-        "gradient_summary", "rebuild_gradient",
+        "gradient_summary", "rebuild_gradient", "direct_controls",
+        "comparison_frame", "adjust_arrow_curve_bend",
     )
-    if DOCUMENT_VERSION < 7 or any(not hasattr(CoreSession, name) for name in required_api):
+    if DOCUMENT_VERSION < 8 or any(not hasattr(CoreSession, name) for name in required_api):
         raise RuntimeError(
             "chemanim_core.pyd 缺少当前编辑器需要的编辑上下文 API。"
             "请先关闭旧编辑器窗口，再运行 .\\build.ps1 -Configuration Release。"

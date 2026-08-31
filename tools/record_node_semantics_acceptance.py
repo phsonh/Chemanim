@@ -51,9 +51,14 @@ def main() -> None:
 
     project = window.session.project()
     target = project["molecules"][0]["id"]
-    create_index = next(index for index, node in enumerate(project["nodes"])
-                        if node["type"] == "molecule_create" and node["params"]["target"] == target)
-    insert = create_index + 1
+    # v8 keeps object identity and structure state separate.  Insert the
+    # acceptance nodes after the molecule's first explicit structure state so
+    # the direct-edit check starts from a visible molecule, never from the
+    # intentionally empty molecule_create node.
+    structure_index = next(index for index, node in enumerate(project["nodes"])
+                           if node["type"] == "molecule_set_structure"
+                           and node["params"]["target"] == target)
+    insert = structure_index + 1
     for node_type, params in (
         ("molecule_global_set_color", {"r": 210, "g": 235, "b": 255}),
         ("molecule_global_set_scale_x", {"value": 1.15}),
@@ -64,7 +69,7 @@ def main() -> None:
         window.session.add_node(node_type, json.dumps(params, ensure_ascii=False), insert)
         insert += 1
     structure_node = window.session.add_node(
-        "molecule_set_structure", json.dumps({"target": target, "snapshot": {}}), insert)
+        "molecule_set_structure", json.dumps({"target": target}), insert)
     window.session.edit_node(structure_node)
     window.session.set_tool("single_bond")
     anchor = window.session.depict(False)["atoms"][0]["center"]

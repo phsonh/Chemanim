@@ -115,8 +115,7 @@ const Atom* Molecule::anchorAtom() const {
     return result;
 }
 std::optional<Point> Molecule::coordinate() const {
-    if (const Atom* anchor = anchorAtom()) return anchor->position;
-    return std::nullopt;
+    return origin;
 }
 
 std::string Molecule::allocateAtomId() {
@@ -211,7 +210,8 @@ const Molecule* Project::molecule(const std::string& stableId) const {
     const auto found = std::find_if(molecules.begin(), molecules.end(), [&](const Molecule& value) { return value.id == stableId; });
     return found == molecules.end() ? nullptr : &*found;
 }
-std::string Project::addBlankMolecule(std::string name) {
+std::string Project::addBlankMolecule(std::string name,
+                                      std::optional<std::size_t> insertionIndex) {
     std::string id;
     do { id = "molecule" + std::to_string(nextMoleculeId++); } while (molecule(id));
     if (name.empty()) name = id;
@@ -223,6 +223,9 @@ std::string Project::addBlankMolecule(std::string name) {
     // high-water mark so DetachSubgraph/MergeMolecules can move records without
     // renaming them.
     for (const Molecule& existing : molecules) {
+        value.nextAtomId = std::max(value.nextAtomId, existing.nextAtomId);
+        value.nextBondId = std::max(value.nextBondId, existing.nextBondId);
+        value.nextAdornmentId = std::max(value.nextAdornmentId, existing.nextAdornmentId);
         for (const Atom& atomValue : existing.atoms)
             value.nextAtomId = std::max(value.nextAtomId, numericSuffix(atomValue.id, 'A') + 1);
         for (const Bond& bondValue : existing.bonds)
@@ -231,7 +234,7 @@ std::string Project::addBlankMolecule(std::string name) {
             value.nextAdornmentId = std::max(value.nextAdornmentId, numericSuffix(adornmentValue.id, 'D') + 1);
     }
     molecules.push_back(std::move(value));
-    const std::string createNodeId=addNode("molecule_create", json({{"target", id}}).dump());
+    const std::string createNodeId=addNode("molecule_create", json({{"target", id}}).dump(), insertionIndex);
     (void)createNodeId;
     return id;
 }
@@ -431,7 +434,7 @@ AtomNumberStyle atomNumberStyleFromString(const std::string& value) {
 }
 
 std::string toJson(const Project& project, int indent) {
-    json root{{"format", "chemanim-native-2d"}, {"version", 7}, {"mod", project.mod},
+    json root{{"format", "chemanim-native-2d"}, {"version", 8}, {"mod", project.mod},
         {"next_molecule_id", project.nextMoleculeId}, {"next_timeline_id", project.nextTimelineId},
         {"next_node_id",project.nextNodeId}, {"next_creation_serial", project.nextCreationSerial}};
     root["scene"] = {{"width", project.scene.width}, {"height", project.scene.height},
@@ -445,6 +448,7 @@ std::string toJson(const Project& project, int indent) {
     root["molecules"] = json::array();
     for (const Molecule& molecule : project.molecules) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
+            {"anchor", {{"x", molecule.origin.x}, {"y", molecule.origin.y}}},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
             {"next_bond_id", molecule.nextBondId}, {"next_adornment_id", molecule.nextAdornmentId},
             {"rotation", molecule.rotation}, {"scale_x", molecule.scaleX}, {"scale_y", molecule.scaleY}, {"alpha", molecule.alpha},
@@ -491,7 +495,7 @@ Project fromJson(const std::string& source) {
     const json root = json::parse(source);
     if (root.value("format", "") != "chemanim-native-2d") throw std::runtime_error("Not a Chemanim native 2D project");
     const int version = root.value("version", 0);
-    if (version < 2 || version > 7) throw std::runtime_error("Unsupported Chemanim native 2D project version");
+    if (version < 2 || version > 8) throw std::runtime_error("Unsupported Chemanim native 2D project version");
     Project project;
     std::map<std::string,std::pair<Point,double>> legacyTransforms;
     project.mod = root.value("mod", project.mod);
@@ -514,6 +518,7 @@ Project fromJson(const std::string& source) {
     for (const json& raw : root.value("molecules", json::array())) {
         Molecule molecule;
         molecule.id = raw.value("id", ""); molecule.name = raw.value("name", molecule.id); molecule.sourceSmiles = raw.value("source_smiles", "");
+        if (version >= 8) molecule.origin = pointFromJson(raw.value("anchor", json::object()));
         molecule.referenceBondLength = raw.value("reference_bond_length", molecule.referenceBondLength);
         molecule.nextAtomId = raw.value("next_atom_id", std::uint64_t{1}); molecule.nextBondId = raw.value("next_bond_id", std::uint64_t{1});
         molecule.nextAdornmentId = raw.value("next_adornment_id", std::uint64_t{1});
@@ -620,7 +625,107 @@ Project fromJson(const std::string& source) {
         project.atomTweens.clear();project.poseTweens.clear();
     }
     project.ensureDefaultNodes();
+    // Resolve legacy project-wide member-ID collisions while the authoritative
+    // v7 structures are still present on their owning molecules.  The v8
+    // migration below moves those records into snapshots and clears the
+    // identity objects, after which a structure-only scan would be too late.
     migrateProjectWideStableIds(project);
+    if (version < 8) {
+        // v7 and earlier stored a molecule's authoritative structure directly
+        // on the object and used its earliest living atom as the transform
+        // anchor.  v8 separates identity, local structure state and object
+        // transform.  Convert once, preserving every stable member ID.
+        for (Molecule& molecule : project.molecules) {
+            Point anchor{};
+            if (const Atom* atom = molecule.anchorAtom()) anchor = atom->position;
+            molecule.origin = anchor;
+
+            Molecule local = molecule;
+            local.origin = {};
+            local.rotation = 0.0;
+            local.scaleX = local.scaleY = 1.0;
+            local.alpha = 255;
+            local.color = {255, 255, 255};
+            local.layer = 0;
+            local.visible = true;
+            local.retired = false;
+            for (Atom& atom : local.atoms) {
+                atom.position.x -= anchor.x;
+                atom.position.y -= anchor.y;
+            }
+            for (auto& [_, pose] : local.poses) for (auto& [__, point] : pose.atomPositions) {
+                point.x -= anchor.x;
+                point.y -= anchor.y;
+            }
+
+            const bool hasStructure = !local.atoms.empty() || !local.bonds.empty() ||
+                                      !local.adornments.empty();
+            if (hasStructure) {
+                Project temporary;
+                temporary.molecules = {local};
+                temporary.nodes.clear();
+                json snapshot = json::parse(toJson(temporary, 0))["molecules"][0];
+                for (const char* key : {"source_smiles", "anchor", "rotation", "scale_x",
+                                        "scale_y", "alpha", "color", "layer", "visible",
+                                        "retired", "poses"}) snapshot.erase(key);
+                const auto create = std::find_if(project.nodes.begin(), project.nodes.end(),
+                    [&](const ScriptNode& node) {
+                        if (node.type != "molecule_create") return false;
+                        return json::parse(node.paramsJson).value("target", "") == molecule.id;
+                    });
+                const std::size_t index = create == project.nodes.end()
+                    ? project.nodes.size()
+                    : static_cast<std::size_t>(std::distance(project.nodes.begin(), create)) + 1;
+                const std::string migrated = project.addNode(
+                    "molecule_set_structure",
+                    json({{"target", molecule.id}, {"coordinate_space", "molecule_local_v2"},
+                          {"snapshot", std::move(snapshot)}, {"migrated_from_base", true}}).dump(),
+                    index);
+                (void)migrated;
+            }
+
+            // Existing structure-writing and member-coordinate nodes were
+            // authored in the former world/anchor space.  Normalize their
+            // stored coordinates to the same v8 local space.
+            const auto localizeSnapshot = [&](json& snapshot) {
+                if (!snapshot.is_object()) return;
+                for (json& atom : snapshot.value("atoms", json::array())) {
+                    atom["x"] = atom.value("x", 0.0) - anchor.x;
+                    atom["y"] = atom.value("y", 0.0) - anchor.y;
+                }
+                snapshot.erase("anchor");
+            };
+            for (ScriptNode& node : project.nodes) {
+                json params = json::parse(node.paramsJson);
+                if (params.value("target", "") != molecule.id) continue;
+                if (node.type == "molecule_set_structure") {
+                    if (!params.value("migrated_from_base", false))
+                        localizeSnapshot(params["snapshot"]);
+                    params["coordinate_space"] = "molecule_local_v2";
+                } else if (node.type == "molecule_gradient_structure") {
+                    localizeSnapshot(params["start_snapshot"]);
+                    localizeSnapshot(params["end_snapshot"]);
+                    params["coordinate_space"] = "molecule_local_v2";
+                } else if (node.type == "molecule_lerp_structure") {
+                    if (auto atoms = params.find("atoms"); atoms != params.end() && atoms->is_object())
+                        for (auto& [_, point] : atoms->items()) {
+                            point["x"] = point.value("x", 0.0) - anchor.x;
+                            point["y"] = point.value("y", 0.0) - anchor.y;
+                        }
+                } else if (node.type == "atom_set_xy" || node.type == "atom_lerp_xy") {
+                    params["x"] = params.value("x", 0.0) - anchor.x;
+                    params["y"] = params.value("y", 0.0) - anchor.y;
+                }
+                node.paramsJson = params.dump();
+            }
+
+            molecule.atoms.clear();
+            molecule.bonds.clear();
+            molecule.adornments.clear();
+            molecule.poses.clear();
+            molecule.sourceSmiles.clear();
+        }
+    }
     project.validateIds();
     return project;
 }

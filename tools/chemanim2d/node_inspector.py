@@ -132,5 +132,6 @@ class NodeInspector(QWidget):
             elif isinstance(editor, QCheckBox): params[key] = editor.isChecked()
             elif isinstance(editor, QPlainTextEdit): params[key] = editor.toPlainText()
             else: params[key] = editor.text()
+        if current.get("type")=="arrow_set_curve": params["initialized"] = True
         if self.session.update_node(self.node_id, json.dumps(params)):
             self.nodeEdited.emit(self.node_id)

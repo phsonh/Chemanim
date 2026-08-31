@@ -8,7 +8,26 @@ chem.scene {
 }
 
 local molecule1 = chem.NewMol {
-    source_smiles = "CCCC",
+    source_smiles = "",
+    reference_bond_length = 32,
+    atoms = {
+    },
+    bonds = {
+    },
+    adornments = {
+    }
+}
+molecule1.SetPos(-222.231745334, 67.088009952)
+molecule1.SetScaleX(1)
+molecule1.SetScaleY(1)
+molecule1.SetRotation(0)
+molecule1.SetAlpha(255)
+molecule1.SetLayer(0)
+molecule1.SetColor(255, 255, 255)
+molecule1.SetVisible(true)
+
+molecule1:SetStructure({
+    source_smiles = "",
     reference_bond_length = 32,
     atoms = {
         { id="A1", creation_serial=1, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
@@ -23,21 +42,12 @@ local molecule1 = chem.NewMol {
     },
     adornments = {
     }
-}
-molecule1.SetPos(-222.231745334, 67.088009952)
-molecule1.SetScaleX(1)
-molecule1.SetScaleY(1)
-molecule1.SetRotation(0)
-molecule1.SetAlpha(255)
-molecule1.SetLayer(0)
-molecule1.SetColor(255, 255, 255)
-molecule1.SetVisible(true)
+})
 
 local molecule2 = chem.NewMol {
-    source_smiles = "O",
+    source_smiles = "",
     reference_bond_length = 32,
     atoms = {
-        { id="A5", creation_serial=5, element="O", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
     },
     bonds = {
     },
@@ -52,6 +62,18 @@ molecule2.SetAlpha(255)
 molecule2.SetLayer(0)
 molecule2.SetColor(255, 255, 255)
 molecule2.SetVisible(true)
+
+molecule2:SetStructure({
+    source_smiles = "",
+    reference_bond_length = 32,
+    atoms = {
+        { id="A5", creation_serial=5, element="O", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
+    },
+    bonds = {
+    },
+    adornments = {
+    }
+})
 
 local molecule3 = chem.NewMol {
     source_smiles = "",
@@ -73,16 +95,11 @@ molecule3.SetColor(255, 255, 255)
 molecule3.SetVisible(true)
 
 local molecule4 = chem.NewMol {
-    source_smiles = "CCC",
+    source_smiles = "",
     reference_bond_length = 32,
     atoms = {
-        { id="A6", creation_serial=6, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
-        { id="A7", creation_serial=7, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=27.7128129211, y=16 },
-        { id="A8", creation_serial=8, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.4256258422, y=-2.84217094304e-14 },
     },
     bonds = {
-        { id="B4", a="A6", b="A7", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
-        { id="B5", a="A7", b="A8", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
     },
     adornments = {
     }
@@ -95,6 +112,22 @@ molecule4.SetAlpha(255)
 molecule4.SetLayer(0)
 molecule4.SetColor(255, 255, 255)
 molecule4.SetVisible(true)
+
+molecule4:SetStructure({
+    source_smiles = "",
+    reference_bond_length = 32,
+    atoms = {
+        { id="A6", creation_serial=6, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=0, y=0 },
+        { id="A7", creation_serial=7, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=2, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=27.7128129211, y=16 },
+        { id="A8", creation_serial=8, element="C", label="", label_side="right", number_style="subscript", isotope=0, radical_electrons=0, implicit_hydrogens=3, hidden=false, alive=true, alpha=255, color_r=0, color_g=0, color_b=0, x=55.4256258422, y=-2.84217094304e-14 },
+    },
+    bonds = {
+        { id="B4", a="A6", b="A7", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
+        { id="B5", a="A7", b="A8", order=1, secondary_line_side="center", stereo="none", visible=true, alive=true, alpha=255, color_r=0, color_g=0, color_b=0 },
+    },
+    adornments = {
+    }
+})
 
 chem.Wait(30)
 

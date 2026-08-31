@@ -20,6 +20,7 @@ class StructureCanvas(QWidget):
     undoRequested = pyqtSignal()
     redoRequested = pyqtSignal()
     atomTextRequested = pyqtSignal(str, str)
+    manipulationChanged = pyqtSignal()
 
     def __init__(self, session: CoreSession, parent=None):
         super().__init__(parent)
@@ -31,7 +32,7 @@ class StructureCanvas(QWidget):
         self.pan = QPointF()
         self.final_effect = False
         self.preview_frame = 0
-        self._depiction = self._svg = self._raster = None
+        self._depiction = self._svg = self._raster = self._onion_raster = None
         self._selected_atoms, self._selected_bonds = [], []
         self._hover = {"kind": "none", "id": ""}
         self._preview = {"active": False, "kind": "none"}
@@ -130,6 +131,12 @@ class StructureCanvas(QWidget):
             self.update()
             return
         self._depiction = data
+        self._onion_raster=None
+        comparison=self.session.comparison_frame
+        if not self.final_effect and comparison>=0:
+            try:
+                onion=self.session.depict_at(comparison,False);renderer=QSvgRenderer(QByteArray(onion["svg"].encode("utf-8")));image=QImage(max(1,self.width()),max(1,self.height()),QImage.Format.Format_ARGB32_Premultiplied);image.fill(Qt.GlobalColor.transparent);overlay=QPainter(image);renderer.render(overlay,QRectF(image.rect()));overlay.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn);overlay.fillRect(image.rect(),QColor(55,145,225,92));overlay.end();self._onion_raster=image
+            except RuntimeError:pass
         if self.final_effect:
             image = QImage(data["rgba"], data["width"], data["height"], QImage.Format.Format_RGBA8888)
             self._raster, self._svg = image.copy(), None
@@ -202,8 +209,8 @@ class StructureCanvas(QWidget):
             y += spacing
         painter.restore()
 
-    def _draw_arrows(self, painter):
-        for arrow in self.session.evaluated_arrows(self.preview_frame).values():
+    def _draw_arrows(self, painter,frame=None,onion=False):
+        for arrow in self.session.evaluated_arrows(self.preview_frame if frame is None else frame).values():
             if not arrow["exists"] or not arrow["visible"] or arrow["alpha"] <= 0 or arrow["progress"] <= 0:
                 continue
             pos = arrow["position"]
@@ -212,11 +219,46 @@ class StructureCanvas(QWidget):
                 return self.world_to_screen(QPointF(value["x"]+pos["x"], value["y"]+pos["y"]))
             path = QPainterPath(point("start"))
             path.cubicTo(point("control1"), point("control2"), point("end"))
-            color = QColor(*(max(0,min(255,round(arrow[key]))) for key in ("r","g","b","alpha")))
+            color = QColor(55,145,225,92) if onion else QColor(*(max(0,min(255,round(arrow[key]))) for key in ("r","g","b","alpha")))
             painter.setPen(QPen(color, max(.7, arrow["width"]*self.view_scale), Qt.PenStyle.SolidLine,
                                 Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(path)
+
+    def _draw_direct_controls(self,painter):
+        controls={item["id"]:self.world_to_screen(QPointF(item["position"]["x"],item["position"]["y"])) for item in self.session.direct_controls()}
+        if not controls:return
+        painter.save();painter.setBrush(Qt.BrushStyle.NoBrush);painter.setPen(QPen(QColor(76,158,231,145),1.4,Qt.PenStyle.DashLine))
+        if "anchor" in controls and self._depiction:
+            painter.setPen(QPen(QColor(44,145,235,125),2.2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            for bond in self._depiction.get("bonds",[]):
+                for first,second in self._bond_highlight_segments(bond):painter.drawLine(first,second)
+        if "p0" in controls and "c1" in controls:painter.drawLine(controls["p0"],controls["c1"])
+        if "c2" in controls and "p3" in controls:painter.drawLine(controls["c2"],controls["p3"])
+        for key,point in controls.items():
+            endpoint=key in ("p0","p3");painter.setPen(QPen(QColor(44,145,235),2));painter.setBrush(QColor(242,248,255) if endpoint else QColor(44,145,235));radius=6 if endpoint else 5;painter.drawEllipse(point,radius,radius)
+        painter.restore()
+
+    def _draw_transform_target_outline(self,painter):
+        """Keep a transform target editable even when its visual alpha/progress is zero."""
+        if self.session.comparison_frame < 0:return
+        project=self.session.project();node=next((item for item in project.get("nodes",[]) if item["id"]==self.session.edit_target_id),None)
+        definition=next((item for item in self.session.node_registry() if node and item["type"]==node["type"]),{})
+        target_kind=definition.get("target_kind","");target=(node or {}).get("params",{}).get("target","")
+        painter.save();painter.setBrush(Qt.BrushStyle.NoBrush);painter.setPen(QPen(QColor(38,157,235,175),1.35,Qt.PenStyle.DashLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
+        if target_kind=="molecule" and self._depiction:
+            for bond in self._depiction.get("bonds",[]):
+                for first,second in self._bond_highlight_segments(bond):painter.drawLine(first,second)
+            for atom in self._depiction.get("atoms",[]):
+                center=QPointF(atom["center"]["x"],atom["center"]["y"]);painter.drawEllipse(center,4.5,4.5)
+        elif target_kind=="arrow":
+            arrow=self.session.evaluated_arrows(self.preview_frame).get(target)
+            if arrow and arrow.get("exists"):
+                position=arrow["position"]
+                def point(key):
+                    value=arrow[key];return self.world_to_screen(QPointF(value["x"]+position["x"],value["y"]+position["y"]))
+                path=QPainterPath(point("start"));path.cubicTo(point("control1"),point("control2"),point("end"));painter.drawPath(path)
+        painter.restore()
 
     @staticmethod
     def _bond_highlight_segments(bond):
@@ -282,14 +324,19 @@ class StructureCanvas(QWidget):
         painter.save()
         if self.final_effect:
             painter.setClipRect(artboard)
+        if self._onion_raster is not None:painter.drawImage(QRectF(self.rect()),self._onion_raster)
         if self._raster:
             painter.drawImage(QRectF(self.rect()),self._raster)
         elif self._svg:
             self._svg.render(painter,QRectF(self.rect()))
+        comparison=self.session.comparison_frame
+        if not self.final_effect and comparison>=0:self._draw_arrows(painter,comparison,True)
         self._draw_arrows(painter)
         painter.restore()
         if self.final_effect:
             return
+        self._draw_transform_target_outline(painter)
+        self._draw_direct_controls(painter)
         if self._depiction:
             points = {item["id"]:item["center"] for item in self._depiction.get("atoms",[])}
             bonds={item["id"]:item for item in self._depiction.get("bonds",[])}
@@ -332,6 +379,11 @@ class StructureCanvas(QWidget):
                         painter.drawPath(path)
             elif kind=="bond" and start and current:
                 painter.drawLine(QPointF(start["x"],start["y"]),QPointF(current["x"],current["y"]))
+            elif kind=="arrow_curve":
+                points=[QPointF(item["x"],item["y"]) for item in self._preview.get("polygon",[])]
+                if len(points)==4:
+                    path=QPainterPath(points[0]);path.cubicTo(points[1],points[2],points[3]);painter.drawPath(path)
+                    painter.setPen(QPen(QColor(230,145,45,185),1.2,Qt.PenStyle.DashLine));painter.drawLine(points[0],points[1]);painter.drawLine(points[3],points[2])
             elif kind=="adornment" and current:
                 center=QPointF(current["x"],current["y"]);radius=8.0
                 painter.setBrush(QColor(45,145,235,24));painter.drawEllipse(center,radius,radius)
@@ -389,7 +441,11 @@ class StructureCanvas(QWidget):
             self.request_refresh();event.accept();return
         self._sync_core_viewport()
         alt,control,shift=self._mods(event)
-        self._consume(self.session.pointer_move(event.position().x(),event.position().y(),alt,control,shift))
+        result=self.session.pointer_move(event.position().x(),event.position().y(),alt,control,shift);self._consume(result)
+        if not self._gesture_active and self.session.can_direct_manipulate and result["hover"]["kind"] in ("atom","bond","molecule"):self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif not self._gesture_active and result["hover"]["kind"]=="control":self.setCursor(Qt.CursorShape.CrossCursor)
+        elif not self._panning:self.unsetCursor()
+        if self._gesture_active:self.manipulationChanged.emit()
         self.request_refresh()
 
     def mouseReleaseEvent(self,event:QMouseEvent):
@@ -407,6 +463,11 @@ class StructureCanvas(QWidget):
             self.transactionCommitted.emit()
 
     def wheelEvent(self,event:QWheelEvent):
+        direction=1 if event.angleDelta().y()>0 else -1
+        if event.angleDelta().y() and self.session.adjust_arrow_curve_bend(direction):
+            if not self._gesture_active:self.transactionCommitted.emit()
+            else:self.manipulationChanged.emit()
+            self.request_refresh();event.accept();return
         before=self.screen_to_world(event.position())
         factor=1.12 if event.angleDelta().y()>0 else 1/1.12
         low,high=self._scale_limits()

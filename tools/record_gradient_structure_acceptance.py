@@ -95,7 +95,7 @@ def main() -> None:
     if window.session.edit_target_kind != "structure_snapshot":
         raise RuntimeError("创建后没有进入终态编辑")
     params = node["params"]
-    if params.get("coordinate_space") != "molecule_local_v1":
+    if params.get("coordinate_space") != "molecule_local_v2":
         raise RuntimeError("渐变结构没有写入局部坐标空间标记")
     original_atoms = [atom["id"] for atom in params["start_snapshot"]["atoms"] if atom.get("alive", True)]
     original_bonds = {bond["id"] for bond in params["start_snapshot"]["bonds"] if bond.get("alive", True)}

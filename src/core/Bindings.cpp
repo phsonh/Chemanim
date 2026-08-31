@@ -30,14 +30,14 @@ py::dict point(const core::Point& value) {
 
 py::dict hit(const core::Hit& value) {
     py::dict result;
-    result["kind"] = value.kind == core::HitKind::Atom ? "atom" : value.kind == core::HitKind::Bond ? "bond" : value.kind == core::HitKind::Adornment ? "adornment" : "none";
+    result["kind"] = value.kind == core::HitKind::Atom ? "atom" : value.kind == core::HitKind::Bond ? "bond" : value.kind == core::HitKind::Adornment ? "adornment" : value.kind == core::HitKind::Molecule ? "molecule" : value.kind == core::HitKind::Control ? "control" : "none";
     result["id"] = value.id; result["distance"] = value.distance; return result;
 }
 
 py::dict editResult(const core::EditResult& value) {
     py::dict result; result["changed"] = value.changed; result["message"] = value.message;
     result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds;
-    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","text","move","pan"};
+    static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","text","move","pan","arrow_curve"};
     py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
     preview["text"] = value.preview.text;
@@ -58,11 +58,11 @@ public:
     std::string generateLua() const { return core::compileLua(session_.project()); }
     std::string writeMod(const std::string& root) const { return core::writeMod(session_.project(), std::filesystem::path(root)).string(); }
 
-    std::string addBlankMolecule(const std::string& name) {
-        return session_.createBlankMolecule(name);
+    std::string addBlankMolecule(const std::string& name, int insertionIndex) {
+        return session_.createBlankMolecule(name,insertionIndex<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(insertionIndex)));
     }
-    std::string importSmiles(const std::string& name, const std::string& smiles) {
-        return session_.importSmiles(name,smiles);
+    std::string importSmiles(const std::string& name, const std::string& smiles, int insertionIndex) {
+        return session_.importSmiles(name,smiles,insertionIndex<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(insertionIndex)));
     }
     void setActiveMolecule(const std::string& id) { session_.setActiveMolecule(id); }
     std::string activeMolecule() const { return session_.activeMoleculeId(); }
@@ -77,6 +77,7 @@ public:
     py::dict pointerDown(double x, double y, bool alt, bool control, bool shift) { return editResult(session_.pointerDown({x,y},alt,control,shift)); }
     py::dict pointerMove(double x, double y, bool alt, bool control, bool shift) { return editResult(session_.pointerMove({x,y},alt,control,shift)); }
     py::dict pointerUp(double x, double y, bool alt, bool control, bool shift) { return editResult(session_.pointerUp({x,y},alt,control,shift)); }
+    bool adjustArrowCurveBend(int direction) { return session_.adjustArrowCurveBend(direction); }
     void cancelGesture() { session_.cancelGesture(); }
     py::dict selectAll() { return editResult(session_.selectAll()); }
     bool deleteSelection() { return session_.deleteSelection(); }
@@ -109,8 +110,10 @@ public:
     }
     std::string editTargetId() const{return session_.editTargetId();}
     int previewFrame() const{return session_.previewFrame();}
+    int comparisonFrame() const{const auto value=session_.comparisonFrame();return value?*value:-1;}
     bool canEditStructure() const{return session_.canEditStructure();}
     bool canDirectManipulate() const{return session_.canDirectManipulate();}
+    py::list directControls() const{py::list result;for(const core::DirectControl& value:session_.directControls()){py::dict item;item["id"]=value.id;item["role"]=value.role;item["position"]=point(value.position);result.append(item);}return result;}
     py::object nodeRegistry() const{return jsonObject(core::nodeRegistryJson());}
     py::list nodeTimings() const{py::list result;for(const auto& timing:core::compileNodeTimings(session_.project())){py::dict item;item["id"]=timing.id;item["type"]=timing.type;item["target"]=timing.target;item["start"]=timing.startFrame;item["end"]=timing.endFrame;item["enabled"]=timing.enabled;result.append(item);}return result;}
     std::string addNode(const std::string& type,const std::string& params,int index){return session_.addScriptNode(type,params,index<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(index)));}
@@ -258,19 +261,20 @@ PYBIND11_MODULE(chemanim_core, module) {
 #else
     module.attr("BUILD_COMMIT")="unknown";
 #endif
-    module.attr("DOCUMENT_VERSION")=7;
+    module.attr("DOCUMENT_VERSION")=8;
     py::class_<CoreSession>(module, "CoreSession")
         .def(py::init<>()).def("new_project", &CoreSession::newProject).def("load", &CoreSession::load)
         .def("save", &CoreSession::save).def("json", &CoreSession::json).def("project", &CoreSession::project)
         .def("replace_json", &CoreSession::replaceJson).def("generate_lua", &CoreSession::generateLua).def("write_mod", &CoreSession::writeMod)
-        .def("add_blank_molecule", &CoreSession::addBlankMolecule, py::arg("name")="")
-        .def("import_smiles", &CoreSession::importSmiles).def("set_active_molecule", &CoreSession::setActiveMolecule)
+        .def("add_blank_molecule", &CoreSession::addBlankMolecule, py::arg("name")="",py::arg("insertion_index")=-1)
+        .def("import_smiles", &CoreSession::importSmiles,py::arg("name"),py::arg("smiles"),py::arg("insertion_index")=-1).def("set_active_molecule", &CoreSession::setActiveMolecule)
         .def_property_readonly("active_molecule", &CoreSession::activeMolecule).def("set_tool", &CoreSession::setTool)
         .def_property_readonly("tool", &CoreSession::tool).def_property_readonly("element", &CoreSession::element).def("set_element", &CoreSession::setElement)
         .def("set_viewport", &CoreSession::setViewport).def("hit_test", &CoreSession::hitTest)
         .def("pointer_down", &CoreSession::pointerDown, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_move", &CoreSession::pointerMove, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_up", &CoreSession::pointerUp, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
+        .def("adjust_arrow_curve_bend", &CoreSession::adjustArrowCurveBend)
         .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll).def("delete_selection", &CoreSession::deleteSelection)
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
         .def("set_atom_label", &CoreSession::setAtomLabel)
@@ -282,8 +286,10 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def_property_readonly("edit_target_kind",&CoreSession::editTargetKind)
         .def_property_readonly("edit_target_id",&CoreSession::editTargetId)
         .def_property_readonly("preview_frame",&CoreSession::previewFrame)
+        .def_property_readonly("comparison_frame",&CoreSession::comparisonFrame)
         .def_property_readonly("can_edit_structure",&CoreSession::canEditStructure)
         .def_property_readonly("can_direct_manipulate",&CoreSession::canDirectManipulate)
+        .def("direct_controls",&CoreSession::directControls)
         .def("node_registry",&CoreSession::nodeRegistry).def("node_timings",&CoreSession::nodeTimings)
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)

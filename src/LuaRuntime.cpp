@@ -861,8 +861,13 @@ int LuaRuntime::mLerpAtomColor(lua_State* state){auto& r=boundRuntime(state);aut
 int LuaRuntime::mFormBond(lua_State* state) {
     auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);
     if(!object.molecule)return luaL_error(state,"FormBond requires a molecule");const std::string id=luaL_checkstring(state,a),first=luaL_checkstring(state,a+1),second=luaL_checkstring(state,a+2);
-    if(!object.molecule->atom(first)||!object.molecule->atom(second))return luaL_error(state,"Unknown bond atom ID");
-    if(!object.molecule->bond(id)){object.molecule->bonds.push_back(core::Bond{.id=id,.atomA=first,.atomB=second,.visible=false});}
+    // A v8 molecule can receive its first structure from a SetStructure event,
+    // so the immutable identity object's base molecule may still be empty.
+    // Resolve the structure at the command cursor and insert the new bond as a
+    // topology step instead of mutating the identity/base structure.
+    auto current=runtime.engine_->moleculeAt(object.id,runtime.cursor_);
+    if(!current||!current->atom(first)||!current->atom(second))return luaL_error(state,"Unknown bond atom ID");
+    if(!current->bond(id)){current->bonds.push_back(core::Bond{.id=id,.atomA=first,.atomB=second,.visible=false});runtime.engine_->addStructure(object,runtime.cursor_,std::move(*current));}
     runtime.engine_->addStringKey(object,"bond:"+id+":type",runtime.cursor_,luaL_checkstring(state,a+3));runtime.engine_->addStringKey(object,"bond:"+id+":stereo",runtime.cursor_,luaL_checkstring(state,a+4));runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,1,Ease::Step);return returnBoundObject(state,object);
 }
 int LuaRuntime::mDeleteBond(lua_State* state) {auto& runtime=boundRuntime(state);auto& object=boundObject(state);const int a=methodBase(state);const std::string id=luaL_checkstring(state,a);runtime.engine_->addNumericTween(object,"bond:"+id+":visible",runtime.cursor_,0,0,Ease::Step);return returnBoundObject(state,object);}

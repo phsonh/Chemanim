@@ -63,8 +63,13 @@ class MainWindow(QMainWindow):
         self._build_actions();self._build_menu()
         self.mode_panel=ModeToolPanel(self.session);self.mode_panel.nodeRequested.connect(self._add_node);self.mode_panel.drawToolRequested.connect(self._set_tool);self.mode_panel.elementRequested.connect(self._set_element);self.mode_panel.periodicTableRequested.connect(self.choose_element)
         self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(420);self.node_list.setMaximumWidth(600);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited);self.node_list.undoRequested.connect(self.undo);self.node_list.redoRequested.connect(self.redo)
-        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo);self.canvas.atomTextRequested.connect(self._edit_atom_text)
-        split=QSplitter();split.addWidget(self.node_list);split.addWidget(self.canvas);split.setSizes([440,1160])
+        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.manipulationChanged.connect(lambda:self.inspector.refresh() if self.inspector_panel.isVisible() else None);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo);self.canvas.atomTextRequested.connect(self._edit_atom_text)
+        self.inspector_panel=QWidget();self.inspector_panel.setMinimumWidth(300);self.inspector_panel.setMaximumWidth(460)
+        inspector_layout=QVBoxLayout(self.inspector_panel);inspector_layout.setContentsMargins(8,8,8,8)
+        inspector_head=QHBoxLayout();inspector_head.addWidget(QLabel("节点参数"));inspector_head.addStretch();inspector_close=QPushButton("关闭");inspector_close.clicked.connect(self.inspector_panel.hide);inspector_head.addWidget(inspector_close)
+        self.inspector=NodeInspector(self.session,self.inspector_panel);self.inspector.nodeEdited.connect(self._node_parameters_changed);self.inspector.editStructureRequested.connect(lambda node_id:self._activate_node(node_id));self.inspector.rebuildRequested.connect(lambda node_id:self._rebuild_gradient(node_id,self.inspector))
+        inspector_layout.addLayout(inspector_head);inspector_layout.addWidget(self.inspector,1);self.inspector_panel.hide()
+        split=QSplitter();self.main_splitter=split;split.addWidget(self.node_list);split.addWidget(self.canvas);split.addWidget(self.inspector_panel);split.setSizes([440,1160,0])
         self._build_transport()
         center=QWidget();layout=QVBoxLayout(center);layout.setContentsMargins(0,0,0,0);layout.setSpacing(0);layout.addWidget(self.mode_panel);layout.addWidget(split,1);layout.addWidget(self.transport);self.setCentralWidget(center)
         self.play_timer=QTimer(self);self.play_timer.timeout.connect(self._play_tick)
@@ -114,7 +119,9 @@ class MainWindow(QMainWindow):
         self.mode_panel.set_structure_enabled(self.session.can_edit_structure and not self.canvas.final_effect and not self._playing)
         if label:self.edit_mode.setText(label)
         elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
-        elif self.session.edit_target_kind=="structure_snapshot":self.edit_mode.setText("正在编辑：渐变结构终态")
+        elif self.session.edit_target_kind=="structure_snapshot":
+            node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==self.session.edit_target_id),{})
+            self.edit_mode.setText("正在编辑：渐变结构终态" if node.get("type")=="molecule_gradient_structure" else "正在编辑：分子结构")
         elif self.session.edit_target_kind=="script_node":self.edit_mode.setText("编辑：动画节点")
         else:self.edit_mode.setText("预览：只读")
 
@@ -122,6 +129,7 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return False
         self.session.edit_node(node_id)
+        if self.inspector_panel.isVisible():self.inspector.set_node(node_id)
         self.mode_panel.sync_draw_tool()
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
@@ -134,7 +142,7 @@ class MainWindow(QMainWindow):
         if node["type"] in LEGACY_STRUCTURE_TYPES:human="旧版结构节点，仅用于兼容"
         elif is_gradient:human=f"渐变结构 · {human_target}"
         else:human=definition.get("label","节点")
-        label="编辑：场景节点" if node["type"]=="scene" else ("旧渐变结构使用了显示坐标，需要重建终态" if legacy_gradient else "正在编辑：渐变结构终态" if is_gradient else "编辑：基础结构节点" if self.session.can_edit_structure else f'编辑节点：{human}')
+        label="编辑：场景节点" if node["type"]=="scene" else ("旧渐变结构使用了显示坐标，需要重建终态" if legacy_gradient else "正在编辑：渐变结构终态" if is_gradient else "正在编辑：分子结构" if node["type"]=="molecule_set_structure" and self.session.can_edit_structure else f'编辑节点：{human}')
         self.statusBar().showMessage(label if legacy_gradient else human)
         self._sync_edit_state(label);return True
 
@@ -151,7 +159,9 @@ class MainWindow(QMainWindow):
 
     def _select_default_authoring_node(self):
         project=self.session.project();target=self.session.active_molecule
-        node=next((item for item in project.get("nodes",[]) if item["type"]=="molecule_create" and item.get("params",{}).get("target")==target),None)
+        node=next((item for item in project.get("nodes",[]) if item["id"]==self.session.edit_target_id),None)
+        if not node:node=next((item for item in reversed(project.get("nodes",[])) if item["type"]=="molecule_set_structure" and item.get("params",{}).get("target")==target),None)
+        if not node:node=next((item for item in project.get("nodes",[]) if item["type"]=="molecule_create" and item.get("params",{}).get("target")==target),None)
         if not node:node=next((item for item in project.get("nodes",[]) if item["type"]!="scene"),None)
         if node:self.node_list.refresh(node["id"]);self._activate_node(node["id"])
         else:self.session.preview_timeline(self.frame_spin.value());self.canvas.show_edit_frame(self.frame_spin.value());self._sync_edit_state()
@@ -186,11 +196,11 @@ class MainWindow(QMainWindow):
     def _set_tool(self,value):
         mutates=value in self.mode_panel.STRUCTURE_WRITE_TOOLS
         if mutates and not self.session.can_edit_structure:
-            self.mode_panel.sync_draw_tool();self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
+            self.mode_panel.sync_draw_tool();self.statusBar().showMessage("请先创建并选择“设定分子结构”或“渐变结构”节点");return
         self.mode_panel.mode="绘制";self.session.set_tool(value);self.mode_panel.sync_draw_tool();self._sync_edit_state();self.statusBar().showMessage(f"绘制工具：{value}")
     def _set_element(self,value):
         if not self.session.can_edit_structure:
-            self.statusBar().showMessage("请先在左侧选择有效的“新建分子”或结构节点");return
+            self.statusBar().showMessage("请先创建并选择“设定分子结构”或“渐变结构”节点");return
         self.session.set_element(value);self.mode_panel.record_element(value);self._set_tool("atom_label")
     def _edit_atom_text(self,atom_id,side):
         molecule=next((item for item in self.session.project().get("molecules",[]) if item["id"]==self.session.active_molecule),{})
@@ -214,7 +224,7 @@ class MainWindow(QMainWindow):
         project=self.session.project();nodes=project.get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes))
         if node_type=="scene":self._scene_dialog();return ""
         if node_type=="molecule_create":
-            stable_id=self.session.add_blank_molecule("");self.mark_dirty();self.refresh_all();self._select_default_authoring_node();return next((node["id"] for node in self.session.project().get("nodes",[]) if node["type"]=="molecule_create" and node.get("params",{}).get("target")==stable_id),"")
+            stable_id=self.session.add_blank_molecule("",index);node_id=next((node["id"] for node in self.session.project().get("nodes",[]) if node["type"]=="molecule_create" and node.get("params",{}).get("target")==stable_id),"");self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);return node_id
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
         params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
@@ -223,6 +233,7 @@ class MainWindow(QMainWindow):
         if node_type=="arrow_new":
             used=[int(m.group(1)) for item in project["nodes"] if item["type"]=="arrow_new" for m in [re.fullmatch(r"arrow(\d+)",item.get("params",{}).get("target",""))] if m];params["target"]=f"arrow{max(used,default=0)+1}"
         elif node_type.startswith("arrow_") and not params.get("target"):params["target"]=self._latest_arrow(index)
+        if node_type=="arrow_set_curve":params["initialized"]=False
         node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index);self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
         if node_type=="molecule_gradient_structure":open_editor=False
         if open_editor:self._edit_node_dialog(node_id)
@@ -235,9 +246,9 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return
         if node["type"]=="scene":self._scene_dialog();return
-        dialog=QDialog(self);dialog.setWindowTitle("节点参数");inspector=NodeInspector(self.session,dialog);inspector.set_node(node_id);inspector.nodeEdited.connect(lambda _id:self._node_parameters_changed(node_id));inspector.editStructureRequested.connect(lambda _id:(dialog.accept(),self._activate_node(node_id)));inspector.rebuildRequested.connect(lambda _id:self._rebuild_gradient(node_id,inspector))
-        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);buttons.rejected.connect(dialog.reject)
-        layout=QVBoxLayout(dialog);layout.addWidget(inspector);layout.addWidget(buttons);dialog.resize(430,max(240,min(720,inspector.sizeHint().height()+100)));dialog.exec()
+        self.inspector.set_node(node_id);self.inspector_panel.show()
+        sizes=self.main_splitter.sizes();total=max(sum(sizes),900);side=max(320,min(420,total//4));self.main_splitter.setSizes([max(260,sizes[0] if sizes else 340),max(420,total-side-340),side])
+        self.inspector_panel.setFocus();self._activate_node(node_id)
 
     def _rebuild_gradient(self,node_id,inspector=None):
         answer=QMessageBox.question(self,"重建渐变结构终态","这会丢弃当前终态编辑，并以新的起点结构重新建立终态。是否继续？")
@@ -250,9 +261,7 @@ class MainWindow(QMainWindow):
         project=self.session.evaluated_project(self.frame_spin.value());molecule=next((m for m in project.get("molecules",[]) if m["id"]==self.session.active_molecule),{})
         seed={"target":self.session.active_molecule}
         if node_type.startswith("molecule_"):
-            alive=[a for a in molecule.get("atoms",[]) if a.get("alive",True)]
-            if alive:
-                anchor=min(alive,key=lambda a:a.get("creation_serial",0));seed.update(x=anchor.get("x",0.0),y=anchor.get("y",0.0))
+            anchor=molecule.get("anchor",{"x":0.0,"y":0.0});seed.update(x=anchor.get("x",0.0),y=anchor.get("y",0.0))
             if "alpha" in node_type:seed["value"]=molecule.get("alpha",255)
             elif "scale_x" in node_type:seed["value"]=molecule.get("scale_x",1.0)
             elif "scale_y" in node_type:seed["value"]=molecule.get("scale_y",1.0)
@@ -317,11 +326,12 @@ class MainWindow(QMainWindow):
     def new_project(self):
         self._stop_playback(False);self.session.new_project();self.session.add_blank_molecule("molecule1");self.path=None;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
     def add_blank(self):
-        stable_id=self.session.add_blank_molecule("");self.mark_dirty();self.refresh_all();self._select_default_authoring_node();self.statusBar().showMessage(f"已新建 {stable_id}")
+        nodes=self.session.project().get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes));stable_id=self.session.add_blank_molecule("",index);node_id=next((n["id"] for n in self.session.project().get("nodes",[]) if n["type"]=="molecule_create" and n.get("params",{}).get("target")==stable_id),"");self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);self.statusBar().showMessage(f"已新建 {stable_id}")
     def add_smiles(self):
         dialog=SmilesDialog(self)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
-        try:stable_id=self.session.import_smiles(dialog.name.text().strip(),dialog.smiles.text().strip())
+        try:
+            nodes=self.session.project().get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes));stable_id=self.session.import_smiles(dialog.name.text().strip(),dialog.smiles.text().strip(),index)
         except Exception as error:QMessageBox.warning(self,"无法导入",str(error));return
         self.mark_dirty();self.refresh_all();self._select_default_authoring_node();self.canvas.fit_all();self.statusBar().showMessage(f"已导入 {stable_id}")
     def open_project(self):

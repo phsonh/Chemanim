@@ -193,18 +193,21 @@ class ModeToolPanel(QWidget):
             scope_key=dict(self.SCOPE_NAMES)[self.script_scope]
             definitions=[item for item in definitions if item.get("scope")==scope_key]
             definitions.sort(key=lambda item:(item.get("order",0),item.get("label","")))
+            show_sections=any(item.get("show_section",True) for item in definitions)
             sections=[]
             for item in definitions:
+                if not item.get("show_section",True):continue
                 section=item.get("section") or "通用"
                 if section not in sections:sections.append(section)
             if self.script_section not in sections:self.script_section=sections[0] if sections else ""
+            self.section_row.setVisible(show_sections and bool(sections))
             self.section_tabs.blockSignals(True)
             while self.section_tabs.count():self.section_tabs.removeTab(0)
             for section in sections:self.section_tabs.addTab(section)
             if self.script_section:self.section_tabs.setCurrentIndex(sections.index(self.script_section))
             self.section_tabs.blockSignals(False)
             for item in definitions:
-                if (item.get("section") or "通用")==self.script_section:
+                if (not show_sections) or (item.get("section") or "通用")==self.script_section:
                     self._tool(item["type"],item.get("tool_label",item["label"]),self.nodeRequested,show_icon=False)
         else:
             for key,label,shortcut in (("select_rectangle","框选","V"),("select_lasso","套索","L"),("eraser","橡皮擦","E")):self._tool(key,label,self.drawToolRequested,True,f"{label} · {shortcut}",icon_only=True)

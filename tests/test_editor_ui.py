@@ -7,7 +7,7 @@ import sys
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QToolBar, QToolButton
+from PyQt6.QtWidgets import QApplication, QDoubleSpinBox, QToolBar, QToolButton
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
@@ -27,6 +27,18 @@ def application():
 
 def window():
     application(); result=MainWindow(ROOT); result.show(); QApplication.processEvents(); result.canvas.fit_artboard(); QApplication.processEvents(); return result
+
+
+def enable_structure(value):
+    node=value._add_node("molecule_set_structure",{"target":value.session.active_molecule},False)
+    value._node_selected(node);QApplication.processEvents();return node
+
+
+def active_structure(value):
+    current=value.session.edit_target_id
+    node=next(item for item in value.session.project()["nodes"] if item["id"]==current)
+    key="end_snapshot" if node["type"]=="molecule_gradient_structure" else "snapshot"
+    return node["params"][key]
 
 
 def test_scene_is_single_core_state_and_artboard_updates():
@@ -86,27 +98,27 @@ def test_editor_layout_has_node_list_canvas_and_compact_transport_only():
 
 
 def test_script_molecule_position_drag_changes_node_target_not_base():
-    value=window();canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("atom_label")
+    value=window();enable_structure(value);canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("atom_label")
     center=(canvas.width()*.5,canvas.height()*.5);value.session.pointer_down(*center);value.session.pointer_up(*center)
-    base=value.session.project()["molecules"][0]["atoms"][0].copy();node=value._add_node("molecule_lerp_position",{"x":base["x"],"y":base["y"],"frames":30},False)
+    base=active_structure(value)["atoms"][0].copy();structure_before=json.loads(json.dumps(active_structure(value)));node=value._add_node("molecule_lerp_position",{"x":base["x"],"y":base["y"],"frames":30},False)
     value._node_selected(node);drawing=value.session.depict_at(30,False);point=next(item["center"] for item in drawing["atoms"] if item["id"]==base["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_move(point["x"]+40,point["y"]-20);assert value.session.pointer_up(point["x"]+40,point["y"]-20)["changed"]
-    unchanged=value.session.project()["molecules"][0]["atoms"][0];assert (unchanged["x"],unchanged["y"])==(base["x"],base["y"])
+    structure_node=next(item for item in value.session.project()["nodes"] if item["type"]=="molecule_set_structure");assert structure_node["params"]["snapshot"]==structure_before
     params=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"];assert (params["x"],params["y"])!=(base["x"],base["y"])
     value.close()
 
 
 def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
-    value=window();value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
+    value=window();enable_structure(value);value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
     buttons={button.text():button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     buttons["O"].click();value.canvas._sync_core_viewport()
     center=(value.canvas.width()*.5,value.canvas.height()*.5)
     value.session.pointer_down(*center);value.session.pointer_up(*center)
-    atom=value.session.project()["molecules"][0]["atoms"][0];assert atom["element"]=="C" and atom["label"]=="O"
+    atom=active_structure(value)["atoms"][0];assert atom["element"]=="C" and atom["label"]=="O"
     buttons={button.text():button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     buttons["N"].click();point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"])
-    atoms=value.session.project()["molecules"][0]["atoms"]
+    atoms=active_structure(value)["atoms"]
     assert len(atoms)==1 and atoms[0]["alive"] and atoms[0]["element"]=="C" and atoms[0]["label"]=="N"
     assert value.session.depict(False)["svg"]
     value.close()
@@ -127,7 +139,7 @@ def test_periodic_table_uses_complete_32_column_long_form_layout():
 
 
 def test_element_toolbar_tracks_only_ten_most_recent_elements():
-    value=window();value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
+    value=window();enable_structure(value);value.mode_panel.set_mode("绘制");value.mode_panel.set_category("元素")
     value._set_element("Xe")
     assert value.mode_panel.recent_elements==["Xe","C","N","O","H","S","P","F","Cl","Br"]
     QApplication.processEvents()
@@ -281,7 +293,7 @@ def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
 
 
 def test_text_tool_number_style_controls_are_only_enabled_for_text():
-    value=window();value.mode_panel.set_mode("绘制")
+    value=window();enable_structure(value);value.mode_panel.set_mode("绘制")
     buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
     styles={button.property("textNumberStyle"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("textNumberStyle")}
     assert set(styles)=={"normal","subscript","superscript"} and not any(button.isEnabled() for button in styles.values())
@@ -305,29 +317,29 @@ def test_node_keyboard_delete_undo_redo_and_duplicate_are_focus_aware():
 
 
 def test_canvas_keyboard_undo_redo_and_delete_operate_on_structure():
-    value=window();canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("atom_label")
+    value=window();enable_structure(value);canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("atom_label")
     center=(canvas.width()*.5,canvas.height()*.5);value.session.pointer_down(*center);value.session.pointer_up(*center);value.refresh_all()
-    assert len(value.session.project()["molecules"][0]["atoms"])==1
-    QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert not value.session.project()["molecules"][0]["atoms"]
-    QTest.keyClick(canvas,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier);assert len(value.session.project()["molecules"][0]["atoms"])==1
-    atom=value.session.project()["molecules"][0]["atoms"][0];value._set_tool("select_rectangle");point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
+    assert len(active_structure(value)["atoms"])==1
+    QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);assert not active_structure(value)["atoms"]
+    QTest.keyClick(canvas,Qt.Key.Key_Y,Qt.KeyboardModifier.ControlModifier);assert len(active_structure(value)["atoms"])==1
+    atom=active_structure(value)["atoms"][0];value._set_tool("select_rectangle");point=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
     value.session.pointer_down(point["x"],point["y"]);value.session.pointer_up(point["x"],point["y"]);canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Delete)
-    assert not value.session.project()["molecules"][0]["atoms"][0]["alive"]
+    assert not next(item for item in active_structure(value)["atoms"] if item["id"]==atom["id"])["alive"]
     value.close()
 
 
 def test_canvas_control_a_selects_all_alive_structure():
-    value=window();canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("ring5")
+    value=window();enable_structure(value);canvas=value.canvas;canvas.setFocus();canvas._sync_core_viewport();value._set_tool("ring5")
     center=(canvas.width()*.5,canvas.height()*.5);value.session.pointer_down(*center);value.session.pointer_up(*center);value.refresh_all()
     QTest.keyClick(canvas,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier)
-    molecule=value.session.project()["molecules"][0]
+    molecule=active_structure(value)
     assert set(canvas.selected_atoms)=={atom["id"] for atom in molecule["atoms"] if atom["alive"]}
     assert set(canvas.selected_bonds)=={bond["id"] for bond in molecule["bonds"] if bond["alive"]}
     value.close()
 
 
 def test_canvas_control_drag_rect_selects_without_leaving_current_draw_tool():
-    value=window();canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("ring5")
+    value=window();enable_structure(value);canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("ring5")
     center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
     points=[item["center"] for item in value.session.depict(False)["atoms"]]
     start=QPoint(round(min(point["x"] for point in points)-20),round(min(point["y"] for point in points)-20))
@@ -359,13 +371,15 @@ def test_bond_hover_outline_uses_every_visible_double_and_triple_stroke():
     value.close()
 
 
-def test_structure_toolbar_requires_selected_creation_node_and_keeps_selection():
+def test_structure_toolbar_requires_explicit_structure_node_and_keeps_selection():
     value=window();create=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
-    assert value.node_list.current_id()==create["id"] and value.session.can_edit_structure
+    assert value.node_list.current_id()==create["id"] and not value.session.can_edit_structure
     value.mode_panel.set_mode("绘制");QApplication.processEvents()
     buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
-    assert buttons["single_bond"].isEnabled()
-    value._set_tool("single_bond");assert value.node_list.current_id()==create["id"]
+    assert not buttons["single_bond"].isEnabled()
+    structure_node=enable_structure(value);value.mode_panel.set_mode("绘制");QApplication.processEvents()
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    assert buttons["single_bond"].isEnabled();assert value.edit_mode.text()=="正在编辑：分子结构";value._set_tool("single_bond");assert value.node_list.current_id()==structure_node
 
     wait=value._add_node("wait",open_editor=False);assert value.node_list.current_id()==wait
     assert value.session.edit_target_kind=="script_node" and not value.session.can_edit_structure
@@ -374,27 +388,99 @@ def test_structure_toolbar_requires_selected_creation_node_and_keeps_selection()
     assert not buttons["single_bond"].isEnabled() and buttons["select_rectangle"].isEnabled()
     old_tool=value.session.tool;value._set_tool("single_bond")
     assert value.session.tool==old_tool and value.node_list.current_id()==wait
+
+
+def test_blank_molecule_real_ui_inserts_after_selection_and_before_wait():
+    value=window()
+    first=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
+    value.add_blank();second=value.node_list.current_id();wait=value._add_node("wait",{"frames":120},False)
+    value.node_list.refresh(second);value._node_selected(second);value.add_blank();third=value.node_list.current_id()
+    nodes=value.session.project()["nodes"]
+    assert [node["id"] for node in nodes]==[nodes[0]["id"],first["id"],second,third,wait]
+    timings={item["id"]:item for item in value.session.node_timings()}
+    assert timings[third]["start"]==0 and timings[wait]["start"]==0
+    assert value.session.active_molecule==next(node for node in nodes if node["id"]==third)["params"]["target"]
+    value.close()
+
+
+def test_double_click_parameter_panel_is_nonmodal_and_coordinate_drag_uses_real_mouse():
+    value=window();target=value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    node=value._add_node("molecule_lerp_position",{"target":target,"x":0.0,"y":0.0,"frames":30,"easing":"linear"},False)
+    item=value.node_list.tree.currentItem();value.node_list.tree.scrollToItem(item);QApplication.processEvents();rect=value.node_list.tree.visualItemRect(item)
+    QTest.mouseClick(value.node_list.tree.viewport(),Qt.MouseButton.LeftButton,pos=rect.center());QTest.qWait(80)
+    QTest.mouseDClick(value.node_list.tree.viewport(),Qt.MouseButton.LeftButton,pos=rect.center(),delay=80);QApplication.processEvents()
+    assert value.inspector_panel.isVisible() and value.inspector.node_id==node
+    assert {"x","y","frames","easing"}<=set(value.inspector.editors)
+    canvas=value.canvas;canvas._sync_core_viewport();point=value.session.depict(False)["atoms"][0]["center"]
+    start=QPoint(round(point["x"]),round(point["y"]));end=start+QPoint(36,-24)
+    before_world=canvas.screen_to_world(QPointF(start));after_world=canvas.screen_to_world(QPointF(end))
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,80);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    params=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]
+    assert abs(params["x"]-(after_world.x()-before_world.x()))<1.0 and abs(params["y"]-(after_world.y()-before_world.y()))<1.0
+    assert abs(value.inspector.editors["x"][0].value()-params["x"])<.01
+    value.close()
+
+
+def test_arrow_curve_real_ui_free_drag_then_all_four_handles_remain_editable():
+    value=window();arrow=value._add_node("arrow_new",{"target":"arrow1"},False)
+    curve=value._add_node("arrow_set_curve",{"target":"arrow1"},False);canvas=value.canvas;canvas._sync_core_viewport()
+    params=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
+    assert params["initialized"] is False and value.session.direct_controls()==[]
+    start=QPoint(canvas.width()//2-130,canvas.height()//2+55);end=QPoint(canvas.width()//2+150,canvas.height()//2-75)
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,100);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    params=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
+    assert params["initialized"] is True
+    controls={item["id"]:item["position"] for item in value.session.direct_controls()};assert set(controls)=={"p0","c1","c2","p3"}
+    assert abs(params["x1"]-canvas.screen_to_world(QPointF(start)).x())<1.0
+    assert abs(params["y1"]-canvas.screen_to_world(QPointF(start)).y())<1.0
+    wheel=QWheelEvent(QPointF(end),QPointF(canvas.mapToGlobal(end)),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False)
+    canvas.wheelEvent(wheel);QApplication.processEvents();bent=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
+    assert (bent["cx1"],bent["cy1"],bent["cx2"],bent["cy2"])!=(params["cx1"],params["cy1"],params["cx2"],params["cy2"])
+    original=dict(bent)
+    for key,delta in (("p0",QPoint(12,8)),("c1",QPoint(-10,14)),("c2",QPoint(15,-11)),("p3",QPoint(-8,-13))):
+        controls={item["id"]:item["position"] for item in value.session.direct_controls()};world=controls[key]
+        screen=canvas.world_to_screen(QPointF(world["x"],world["y"]));a=QPoint(round(screen.x()),round(screen.y()));b=a+delta
+        QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=a);QTest.mouseMove(canvas,b,60);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=b);QApplication.processEvents()
+    changed=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
+    assert any(abs(changed[key]-original[key])>1 for key in ("x1","y1","cx1","cy1","cx2","cy2","x2","y2"))
+    value._edit_node_dialog(curve);QApplication.processEvents()
+    assert value.inspector_panel.isVisible() and all(key in value.inspector.editors for key in ("x1","y1","cx1","cy1","cx2","cy2","x2","y2"))
+    value.close()
+
+
+def test_real_click_default_bond_is_thirty_degrees_and_ring_is_point_up():
+    value=window();enable_structure(value);panel=value.mode_panel;panel.set_mode("绘制");QApplication.processEvents();canvas=value.canvas
+    buttons={button.property("drawKind"):button for button in panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    center=QPoint(canvas.width()//2,canvas.height()//2)
+    buttons["single_bond"].click();QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
+    snapshot=active_structure(value);a,b=(snapshot["atoms"][0],snapshot["atoms"][1]);import math
+    assert abs(math.degrees(math.atan2(b["y"]-a["y"],b["x"]-a["x"]))-30)<1e-6
+    value.undo();buttons["ring6"].click();QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
+    atoms=[atom for atom in active_structure(value)["atoms"] if atom.get("alive",True)];xs=[atom["x"] for atom in atoms];ys=[atom["y"] for atom in atoms]
+    top=[atom for atom in atoms if abs(atom["y"]-max(ys))<1e-6];bottom=[atom for atom in atoms if abs(atom["y"]-min(ys))<1e-6]
+    assert len(top)==len(bottom)==1 and abs(top[0]["x"]-bottom[0]["x"])<1e-6
+    value.close()
     value.close()
 
 
 def test_scrub_play_stop_and_node_return_keep_ui_and_core_state_in_sync():
     value=window();create=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
     wait=value._add_node("wait",{"frames":8},open_editor=False)
-    assert value.session.edit_target_id==wait and value.edit_mode.text().startswith("编辑节点")
+    assert value.session.edit_target_id==wait and value.edit_mode.text()=="编辑节点：等待"
 
     value.frame_spin.setValue(3);QApplication.processEvents()
     assert value.session.edit_target_kind=="timeline_preview" and value.session.preview_frame==3
     assert value.edit_mode.text()=="预览：只读" and not value.mode_panel._structure_enabled
 
     value.node_list.refresh(create["id"]);value._node_selected(create["id"])
-    assert value.session.edit_target_kind=="base_structure" and value.edit_mode.text()=="编辑：基础结构节点"
+    assert value.session.edit_target_kind=="script_node" and value.edit_mode.text()=="编辑节点：新建分子" and not value.session.can_edit_structure
     value._toggle_play();assert value._playing and value.session.edit_target_kind=="timeline_preview" and value.edit_mode.text()=="播放：只读预览"
-    value._toggle_play();assert not value._playing and value.session.edit_target_kind=="base_structure" and value.node_list.current_id()==create["id"]
+    value._toggle_play();assert not value._playing and value.session.edit_target_kind=="script_node" and value.node_list.current_id()==create["id"]
 
     value.actions["final"].setChecked(True);value._toggle_final_effect(True)
     assert value.canvas.final_effect and value.session.edit_target_kind=="timeline_preview" and value.edit_mode.text()=="最终效果：只读预览"
     value.actions["final"].setChecked(False);value._toggle_final_effect(False)
-    assert not value.canvas.final_effect and value.session.edit_target_kind=="base_structure"
+    assert not value.canvas.final_effect and value.session.edit_target_kind=="script_node"
     value.close()
 
 
@@ -403,6 +489,6 @@ def test_adding_one_node_is_one_undo_step_and_returns_to_valid_context():
     created=value._add_node("wait",{"frames":17},open_editor=False)
     assert created and len(value.session.project()["nodes"])==len(before)+1
     value.undo();assert [node["id"] for node in value.session.project()["nodes"]]==before
-    assert value.session.edit_target_kind in ("base_structure","script_node")
+    assert value.session.edit_target_kind=="script_node"
     value.redo();assert any(node["id"]==created for node in value.session.project()["nodes"])
     value.close()

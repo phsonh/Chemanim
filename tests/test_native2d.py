@@ -23,11 +23,15 @@ def session() -> CoreSession:
 
 
 def authorize_structure(core: CoreSession):
-    node = next(item for item in core.project()["nodes"]
-                if item["type"] == "molecule_create" and
-                item.get("params", {}).get("target") == core.active_molecule)
+    node = next((item for item in reversed(core.project()["nodes"])
+                 if item["type"] == "molecule_set_structure" and
+                 item.get("params", {}).get("target") == core.active_molecule), None)
+    if node is None:
+        node_id = core.add_node("molecule_set_structure",
+                                json.dumps({"target": core.active_molecule}))
+        node = next(item for item in core.project()["nodes"] if item["id"] == node_id)
     core.edit_node(node["id"])
-    assert core.edit_target_kind == "base_structure" and core.can_edit_structure
+    assert core.edit_target_kind == "structure_snapshot" and core.can_edit_structure
     return node["id"]
 
 
@@ -36,8 +40,29 @@ def gesture(core: CoreSession, tool: str, start, end=None):
     core.pointer_down(*start); core.pointer_move(*end); return core.pointer_up(*end)
 
 
-def atoms(core: CoreSession): return core.project()["molecules"][0]["atoms"]
-def bonds(core: CoreSession): return core.project()["molecules"][0]["bonds"]
+def structure_for(core: CoreSession,target: str):
+    project=core.project()
+    current=next((item for item in project["nodes"] if item["id"]==core.edit_target_id),None)
+    if current and current["type"] in ("molecule_set_structure","molecule_gradient_structure") and current.get("params",{}).get("target")==target:
+        return current["params"]["end_snapshot" if current["type"]=="molecule_gradient_structure" else "snapshot"]
+    node=next(item for item in reversed(project["nodes"])
+              if item["type"] in ("molecule_set_structure","molecule_gradient_structure") and item.get("params",{}).get("target")==target)
+    return node["params"]["end_snapshot" if node["type"]=="molecule_gradient_structure" else "snapshot"]
+
+
+def structure(core: CoreSession):
+    project=core.project();target=core.active_molecule
+    current=next((item for item in project["nodes"] if item["id"]==core.edit_target_id),None)
+    if current and current["type"] in ("molecule_set_structure","molecule_gradient_structure"):
+        return current["params"]["end_snapshot" if current["type"]=="molecule_gradient_structure" else "snapshot"]
+    node=next(item for item in reversed(project["nodes"])
+              if item["type"]=="molecule_set_structure" and item.get("params",{}).get("target")==target)
+    return node["params"]["snapshot"]
+
+
+def atoms(core: CoreSession): return structure(core)["atoms"]
+def bonds(core: CoreSession): return structure(core)["bonds"]
+def adornments(core: CoreSession): return structure(core)["adornments"]
 
 
 def canvas_point(core: CoreSession, atom_id: str):
@@ -46,10 +71,12 @@ def canvas_point(core: CoreSession, atom_id: str):
     return point["x"], point["y"]
 
 
-def test_structure_commands_are_sealed_by_creation_node_context():
+def test_structure_commands_are_sealed_by_explicit_structure_node_context():
     core=CoreSession();core.add_blank_molecule("sealed");core.set_viewport(960,540,1,0,0)
     create=next(node for node in core.project()["nodes"] if node["type"]=="molecule_create")
-    assert core.edit_target_kind=="base_structure" and core.edit_target_id==create["id"] and core.can_edit_structure
+    assert core.edit_target_kind=="script_node" and core.edit_target_id==create["id"] and not core.can_edit_structure
+    gesture(core,"single_bond",(420,270),(452,270));assert not core.project()["molecules"][0]["atoms"]
+    authorize_structure(core)
     gesture(core,"single_bond",(420,270),(452,270));atom_id=atoms(core)[0]["id"]
     original=(atoms(core)[0]["x"],atoms(core)[0]["y"])
 
@@ -112,7 +139,7 @@ def test_stable_ids_survive_save_close_reopen_and_are_not_reused(tmp_path: Path)
     core = session(); gesture(core, "ring5", (480, 270)); before = core.project(); path = tmp_path / "roundtrip.cmm"; core.save(str(path))
     restored = CoreSession(); restored.load(str(path)); assert restored.project()["molecules"][0]["atoms"] == before["molecules"][0]["atoms"]
     authorize_structure(restored)
-    restored.set_viewport(960, 540, 48, 0, 0); removed = restored.project()["molecules"][0]["atoms"][-1]["id"]
+    restored.set_viewport(960, 540, 48, 0, 0); removed = atoms(restored)[-1]["id"]
     gesture(restored, "eraser", canvas_point(restored, removed)); gesture(restored, "atom_label", (700, 400))
     assert atoms(restored)[-1]["id"] != removed
 
@@ -126,12 +153,12 @@ def test_project_overwrite_and_molecule_ids_continue_after_reopen(tmp_path: Path
 
 def test_tween_target_drag_does_not_modify_base_structure():
     core = CoreSession(); core.import_smiles("ethanol", "CCO"); core.set_viewport(960, 540, 48, 0, 0)
-    atom = core.project()["molecules"][0]["atoms"][-1]; original = (atom["x"], atom["y"])
+    atom = atoms(core)[-1]; original = (atom["x"], atom["y"]);base=structure(core)
     core.add_node("wait", json.dumps({"frames": 10}))
     tween = core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + 2, "y": atom["y"], "frames": 30, "easing": "linear"}))
     core.edit_node(tween)
     point = canvas_point(core, atom["id"]); core.pointer_down(*point); core.pointer_move(point[0], point[1] - 40); assert core.pointer_up(point[0], point[1] - 40)["changed"]
-    after = next(item for item in core.project()["molecules"][0]["atoms"] if item["id"] == atom["id"])
+    after = next(item for item in base["atoms"] if item["id"] == atom["id"])
     assert (after["x"], after["y"]) == original
     node = next(item for item in core.project()["nodes"] if item["id"] == tween)
     assert node["params"]["y"] != original[1]
@@ -139,7 +166,7 @@ def test_tween_target_drag_does_not_modify_base_structure():
 
 def test_later_overlapping_tween_starts_from_current_state():
     core = CoreSession(); core.import_smiles("ethanol", "CCO"); core.set_viewport(960, 540, 48, 0, 0)
-    atom = core.project()["molecules"][0]["atoms"][-1]
+    atom = atoms(core)[-1]
     core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] + 6, "y": atom["y"], "frames": 60, "easing": "linear"}))
     core.add_node("wait", json.dumps({"frames": 30}))
     core.add_node("atom_lerp_xy", json.dumps({"target": core.active_molecule, "atom": atom["id"], "x": atom["x"] - 2, "y": atom["y"], "frames": 30, "easing": "linear"}))
@@ -187,7 +214,7 @@ def test_benzene_explicit_types_and_secondary_sides_survive_substitution_motion_
         assert current == original
     core.set_atom_position(ring_atoms[0]["id"], ring_atoms[0]["x"]+.2, ring_atoms[0]["y"]-.1)
     path=tmp_path/"stable-benzene.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
-    current={bond["id"]:(bond["type"],bond["secondary_line_side"]) for bond in restored.project()["molecules"][0]["bonds"] if bond["id"] in original}
+    authorize_structure(restored);current={bond["id"]:(bond["type"],bond["secondary_line_side"]) for bond in bonds(restored) if bond["id"] in original}
     assert current==original
 
 
@@ -196,7 +223,7 @@ def test_imported_pyridine_is_flattened_to_explicit_bonds_and_persisted(tmp_path
     explicit={bond["id"]:(bond["type"],bond["secondary_line_side"]) for bond in bonds(core)}
     assert len(explicit)==6 and [value[0] for value in explicit.values()].count("double")==3
     path=tmp_path/"pyridine.cmm";core.save(str(path));restored=CoreSession();restored.load(str(path))
-    reopened={bond["id"]:(bond["type"],bond["secondary_line_side"]) for bond in restored.project()["molecules"][0]["bonds"]}
+    authorize_structure(restored);reopened={bond["id"]:(bond["type"],bond["secondary_line_side"]) for bond in bonds(restored)}
     assert reopened==explicit
 
 
@@ -333,8 +360,9 @@ def test_single_bond_click_on_blank_creates_ethane_skeleton_and_undoes_to_blank(
     live_atoms=atoms(core);live_bonds=bonds(core)
     assert result["changed"] and len(live_atoms)==2 and len(live_bonds)==1
     assert live_bonds[0]["type"]=="single"
-    assert abs(live_atoms[0]["y"]-live_atoms[1]["y"])<1e-12
-    assert abs(abs(live_atoms[1]["x"]-live_atoms[0]["x"])-32.0)<1e-12
+    angle=math.degrees(math.atan2(live_atoms[1]["y"]-live_atoms[0]["y"],live_atoms[1]["x"]-live_atoms[0]["x"]))
+    assert abs(angle-30.0)<1e-9
+    assert math.isclose(math.hypot(live_atoms[1]["x"]-live_atoms[0]["x"],live_atoms[1]["y"]-live_atoms[0]["y"]),32.0,abs_tol=1e-12)
     assert result["selected_atoms"]==[] and result["selected_bonds"]==[]
     assert core.undo() and not atoms(core) and not bonds(core)
     assert core.redo() and len(atoms(core))==2 and len(bonds(core))==1
@@ -434,7 +462,7 @@ def test_equal_width_solid_and_hashed_bonds_are_distinct_persistent_styles(tmp_p
     lengths=[math.dist((float(x1),float(y1)),(float(x2),float(y2))) for x1,y1,x2,y2 in segments]
     assert len(lengths)==6 and max(lengths)-min(lengths)<1e-7
     path=tmp_path/"bars.cmm";hashed.save(str(path));restored=CoreSession();restored.load(str(path))
-    assert restored.project()["molecules"][0]["bonds"][0]["stereo"]=="hashed_bar"
+    authorize_structure(restored);assert bonds(restored)[0]["stereo"]=="hashed_bar"
 
 
 def test_solid_bar_fills_its_root_only_when_joined_to_other_bonds():
@@ -559,9 +587,9 @@ def test_view_zoom_scales_font_and_stroke_with_bonds():
         assert abs(label_boxes[2][dimension] / label_boxes[0][dimension] - 4) < 0.1
 
 
-def test_v7_serialization_contains_visual_labels_and_no_runtime_aromatic_fields(tmp_path: Path):
+def test_v8_serialization_contains_visual_labels_and_no_runtime_aromatic_fields(tmp_path: Path):
     core=CoreSession();core.import_smiles("benzene","c1ccccc1");path=tmp_path/"flat.cmm";core.save(str(path));raw=path.read_text(encoding="utf-8")
-    assert '"version": 7' in raw and '"secondary_line_side"' in raw and '"label"' in raw
+    assert '"version": 8' in raw and '"secondary_line_side"' in raw and '"label"' in raw and '"anchor"' in raw
     assert '"scale_x"' in raw and '"scale_y"' in raw and '"scale":' not in raw
     assert '"aromatic"' not in raw and '"display_type"' not in raw and '"formal_charge"' not in raw
 
@@ -626,9 +654,9 @@ def test_continuous_eraser_is_one_undo_transaction():
 
 
 def test_charge_adornment_follows_atom_and_lerps_local_offset():
-    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];gesture(core,"charge_positive",canvas_point(core,atom["id"]));adornment=core.project()["molecules"][0]["adornments"][0]
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];gesture(core,"charge_positive",canvas_point(core,atom["id"]));adornment=adornments(core)[0]
     assert adornment["text"]=="⊕"
-    core.set_atom_position(atom["id"],10,20);molecule=core.project()["molecules"][0];moved=next(value for value in molecule["atoms"] if value["id"]==atom["id"]);assert (moved["x"]+adornment["x"],moved["y"]+adornment["y"])==(10+adornment["x"],20+adornment["y"])
+    core.set_atom_position(atom["id"],10,20);molecule=structure(core);moved=next(value for value in molecule["atoms"] if value["id"]==atom["id"]);assert (moved["x"]+adornment["x"],moved["y"]+adornment["y"])==(10+adornment["x"],20+adornment["y"])
     core.add_node("adornment_lerp_offset",json.dumps({"target":core.active_molecule,"adornment":adornment["id"],"x":30,"y":-10,"frames":30,"easing":"linear"}))
     mid=core.evaluated_project(15)["molecules"][0]["adornments"][0];end=core.evaluated_project(30)["molecules"][0]["adornments"][0]
     assert abs(mid["x"]-(adornment["x"]+30)*.5)<1e-9 and abs(mid["y"]-(adornment["y"]-10)*.5)<1e-9
@@ -642,7 +670,7 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
     angle=math.radians(22);end=(point[0]+80*math.cos(angle),point[1]-80*math.sin(angle))
     moved=core.pointer_move(*end);assert moved["preview"]["kind"]=="adornment"
     assert core.pointer_up(*end)["changed"]
-    charge=core.project()["molecules"][0]["adornments"][0]
+    charge=adornments(core)[0]
     snapped=math.degrees(math.atan2(charge["y"],charge["x"]));assert abs(snapped-15)<1e-9
     svg=core.depict(False)["svg"]
     assert "class='formal-charge'" in svg and "<circle" in svg
@@ -651,15 +679,15 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
 def test_formal_charge_uses_one_fixed_twenty_unit_radius():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
     gesture(core,"charge_positive",point)
-    clicked=core.project()["molecules"][0]["adornments"][-1]
+    clicked=adornments(core)[-1]
     gesture(core,"charge_negative",point,(point[0]+100,point[1]))
-    dragged=core.project()["molecules"][0]["adornments"][-1]
+    dragged=adornments(core)[-1]
     assert math.isclose(math.hypot(clicked["x"],clicked["y"]),20,rel_tol=1e-9)
     assert math.isclose(math.hypot(dragged["x"],dragged["y"]),20,rel_tol=1e-9)
 
 
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
-    core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=core.project()["molecules"][0]
+    core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=structure(core)
     left,right=molecule["atoms"][0],molecule["atoms"][1]
     core.set_tool("atom_text");left_point=canvas_point(core,left["id"]);right_point=canvas_point(core,right["id"])
     core.pointer_down(*left_point);left_request=core.pointer_up(*left_point)["message"]
@@ -669,9 +697,9 @@ def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
     core.pointer_down(*right_point);dragged=core.pointer_up(right_point[0]-80,right_point[1])["message"]
     assert dragged==f'atom_text|{right["id"]}|left'
     assert core.set_atom_label(right["id"],"NO2","left","superscript")
-    stored=next(atom for atom in core.project()["molecules"][0]["atoms"] if atom["id"]==right["id"])
+    stored=next(atom for atom in atoms(core) if atom["id"]==right["id"])
     assert stored["label"]=="NO2" and stored["label_side"]=="left" and stored["number_style"]=="superscript"
-    raw=json.loads(core.json());saved=next(atom for atom in raw["molecules"][0]["atoms"] if atom["id"]==right["id"])
+    raw=json.loads(core.json());saved=next(atom for atom in structure(core)["atoms"] if atom["id"]==right["id"])
     assert saved["label"]=="NO2" and "alias" not in saved
 
 
@@ -706,7 +734,7 @@ def test_control_drag_is_rectangle_selection_without_switching_drawing_tool():
 
 
 def test_anchor_deletion_and_detach_preserve_world_coordinates():
-    core=session();gesture(core,"ring5",(480,270));base=core.project()["molecules"][0];ordered=sorted(base["atoms"],key=lambda value:value["creation_serial"]);positions={value["id"]:(value["x"],value["y"]) for value in ordered}
+    core=session();gesture(core,"ring5",(480,270));base=structure(core);ordered=sorted(base["atoms"],key=lambda value:value["creation_serial"]);positions={value["id"]:(value["x"],value["y"]) for value in ordered}
     gesture(core,"eraser",canvas_point(core,ordered[0]["id"]));after={value["id"]:(value["x"],value["y"]) for value in atoms(core) if value["alive"]};assert all(after[key]==positions[key] for key in after)
     destination=core.add_blank_molecule("fragment");source=core.project()["molecules"][0]["id"]
     moving=[ordered[1]["id"],ordered[2]["id"]];core.add_node("detach_subgraph",json.dumps({"target":source,"destination":destination,"atoms":moving,"bonds":[]}))
@@ -715,34 +743,35 @@ def test_anchor_deletion_and_detach_preserve_world_coordinates():
 
 
 def test_form_break_merge_and_intramolecular_form_are_reversible():
-    core=CoreSession();first=core.import_smiles("first","CC");second=core.import_smiles("second","O");project=core.project();a=project["molecules"][0]["atoms"][1]["id"];b=project["molecules"][1]["atoms"][0]["id"]
+    core=CoreSession();first=core.import_smiles("first","CC");second=core.import_smiles("second","O");a=structure_for(core,first)["atoms"][1]["id"];b=structure_for(core,second)["atoms"][0]["id"]
     core.add_node("merge_molecules",json.dumps({"target":first,"source":second,"bond":"B99","a":a,"b":b,"order":"single","frames":30,"easing":"linear"}))
     mid=core.evaluated_project(15);target=next(value for value in mid["molecules"] if value["id"]==first);bond=next(value for value in target["bonds"] if value["id"]=="B99");assert 120<=bond["alpha"]<=135
     assert next(value for value in mid["molecules"] if value["id"]==second)["retired"]
     before=core.evaluated_project(-1);assert not next(value for value in before["molecules"] if value["id"]==second)["retired"]
     # Forming a bond inside one molecule never retires or merges another molecule.
-    atom_ids=[value["id"] for value in project["molecules"][0]["atoms"]];core.add_node("bond_form",json.dumps({"target":first,"bond":"B100","a":atom_ids[0],"b":atom_ids[1],"order":"single","frames":30,"easing":"linear"}))
+    atom_ids=[value["id"] for value in structure_for(core,first)["atoms"]];core.add_node("bond_form",json.dumps({"target":first,"bond":"B100","a":atom_ids[0],"b":atom_ids[1],"order":"single","frames":30,"easing":"linear"}))
     assert any(value["id"]=="B100" for value in next(value for value in core.evaluated_project(15)["molecules"] if value["id"]==first)["bonds"])
 
 
 def test_imports_allocate_project_wide_stable_ids_for_ownership_transfer():
     core=CoreSession();first=core.import_smiles("first","CCO");second=core.import_smiles("second","C=O")
-    project=core.project();a=next(value for value in project["molecules"] if value["id"]==first);b=next(value for value in project["molecules"] if value["id"]==second)
+    a=structure_for(core,first);b=structure_for(core,second)
     assert set(value["id"] for value in a["atoms"]).isdisjoint(value["id"] for value in b["atoms"])
     assert set(value["id"] for value in a["bonds"]).isdisjoint(value["id"] for value in b["bonds"])
 
 
 def test_smiles_import_is_one_atomic_create_transaction_for_undo_and_redo():
     core=CoreSession();target=core.import_smiles("ethanol","CCO");created=core.project()
-    assert len(created["molecules"])==1 and len(created["molecules"][0]["atoms"])==3
+    assert len(created["molecules"])==1 and not created["molecules"][0]["atoms"] and len(structure_for(core,target)["atoms"])==3
     assert len([node for node in created["nodes"] if node["type"]=="molecule_create" and node["params"]["target"]==target])==1
+    assert [node["type"] for node in created["nodes"] if node.get("params",{}).get("target")==target]==["molecule_create","molecule_set_structure"]
     assert core.undo() and not core.project()["molecules"]
     assert core.redo() and core.project()["molecules"]==created["molecules"]
 
 
 def test_visual_events_generate_runtime_lua_without_chemical_fields():
     core=CoreSession();first=core.import_smiles("first","CC");second=core.import_smiles("second","O")
-    project=core.project();a=project["molecules"][0]["atoms"][0]["id"];b=project["molecules"][1]["atoms"][0]["id"]
+    a=structure_for(core,first)["atoms"][0]["id"];b=structure_for(core,second)["atoms"][0]["id"]
     core.add_node("selection_fade",json.dumps({"target":first,"atoms":[a],"bonds":[],"adornments":[],"value":0,"frames":30,"easing":"linear"}))
     core.add_node("detach_subgraph",json.dumps({"target":first,"destination":second,"atoms":[a],"bonds":[]}))
     core.add_node("merge_molecules",json.dumps({"target":first,"source":second,"bond":"B999","a":a,"b":b,"order":"single","frames":30,"easing":"linear"}))
@@ -795,6 +824,22 @@ def test_primary_node_hierarchy_matches_the_four_scope_authoring_contract():
     assert "arrow_set_position" not in {item for scope in ("object","global","set","transform") for item in types("箭头",scope)}
 
 
+def test_every_public_transform_node_exposes_a_deterministic_comparison_frame():
+    registry=[item for item in CoreSession().node_registry() if item["scope"]=="transform" and item["exposure"]=="primary"]
+    assert registry
+    for definition in registry:
+        core=CoreSession();molecule=core.import_smiles("比较对象","CC")
+        core.add_node("arrow_new",json.dumps({"target":"arrow1"}))
+        core.add_node("arrow_set_curve",json.dumps({"target":"arrow1","initialized":True,"x1":-40,"y1":0,"cx1":-10,"cy1":30,"cx2":20,"cy2":30,"x2":50,"y2":0}))
+        core.add_node("wait",json.dumps({"frames":7}))
+        params={field["key"]:field.get("default") for field in definition["fields"]}
+        if definition["target_kind"]=="molecule":params["target"]=molecule
+        elif definition["target_kind"]=="arrow":params["target"]="arrow1"
+        node=core.add_node(definition["type"],json.dumps(params));core.edit_node(node)
+        timing=next(item for item in core.node_timings() if item["id"]==node)
+        assert core.comparison_frame==timing["start"],definition["type"]
+
+
 def test_new_molecule_is_atomic_immutable_and_duplicate_is_deep_copy():
     core=CoreSession();molecule=core.add_blank_molecule("first");project=core.project()
     creates=[node for node in project["nodes"] if node["type"]=="molecule_create"]
@@ -808,17 +853,48 @@ def test_new_molecule_is_atomic_immutable_and_duplicate_is_deep_copy():
     original=core.project()["molecules"][0]
     duplicate_node=core.duplicate_node(creates[0]["id"]);project=core.project();duplicate=project["molecules"][1]
     assert duplicate_node and duplicate["id"]!=original["id"]
-    assert {atom["id"] for atom in duplicate["atoms"]}.isdisjoint({atom["id"] for atom in original["atoms"]})
-    assert {atom["creation_serial"] for atom in duplicate["atoms"]}.isdisjoint({atom["creation_serial"] for atom in original["atoms"]})
+    assert not original["atoms"] and not duplicate["atoms"]
     assert len([node for node in project["nodes"] if node["type"]=="molecule_create"])==2
 
 
-def test_v6_uniform_scale_migrates_to_v7_xy_components_and_roundtrips():
+def test_v6_uniform_scale_migrates_to_v8_xy_components_anchor_and_roundtrips():
     core=CoreSession();core.add_blank_molecule("old");raw=json.loads(core.json());raw["version"]=6
     molecule=raw["molecules"][0];molecule.pop("scale_x");molecule.pop("scale_y");molecule["scale"]=1.75
     migrated=CoreSession();migrated.replace_json(json.dumps(raw));value=migrated.project()["molecules"][0]
-    assert value["scale_x"]==value["scale_y"]==1.75 and migrated.project()["version"]==7
+    assert value["scale_x"]==value["scale_y"]==1.75 and migrated.project()["version"]==8 and value["anchor"]=={"x":0.0,"y":0.0}
     reopened=CoreSession();reopened.replace_json(migrated.json());assert reopened.project()==migrated.project()
+
+
+def test_v7_base_structure_migrates_to_v8_identity_snapshot_and_preserves_world_frame():
+    source=CoreSession();target=source.import_smiles("迁移苯","c1ccccc1");raw=json.loads(source.json());raw["version"]=7
+    structure_node=next(node for node in raw["nodes"] if node["type"]=="molecule_set_structure")
+    snapshot=structure_node["params"]["snapshot"];raw["nodes"].remove(structure_node)
+    molecule=next(item for item in raw["molecules"] if item["id"]==target);molecule.pop("anchor",None)
+    shift=(47.0,-23.0)
+    molecule["atoms"]=[{**atom,"x":atom["x"]+shift[0],"y":atom["y"]+shift[1]} for atom in snapshot["atoms"]]
+    molecule["bonds"]=snapshot["bonds"];molecule["adornments"]=snapshot["adornments"]
+    molecule["next_atom_id"]=snapshot["next_atom_id"];molecule["next_bond_id"]=snapshot["next_bond_id"];molecule["next_adornment_id"]=snapshot["next_adornment_id"]
+    molecule.update(scale_x=.45,scale_y=1.7,rotation=31.0)
+    create_index=next(i for i,node in enumerate(raw["nodes"]) if node["type"]=="molecule_create")
+    raw["nodes"][create_index+1:create_index+1]=[
+        {"id":"N800","type":"molecule_set_position","enabled":True,"params":{"target":target,"x":130.0,"y":-80.0}},
+        {"id":"N801","type":"molecule_global_set_scale_x","enabled":True,"params":{"value":1.3}},
+        {"id":"N802","type":"molecule_global_set_scale_y","enabled":True,"params":{"value":.8}},
+    ];raw["next_node_id"]=900
+    old_ids=([atom["id"] for atom in molecule["atoms"]],[bond["id"] for bond in molecule["bonds"]])
+    anchor=min((atom for atom in molecule["atoms"] if atom.get("alive",True)),key=lambda atom:atom["creation_serial"])
+    sx,sy=molecule["scale_x"]*1.3,molecule["scale_y"]*.8;r=math.radians(molecule["rotation"]);c,s=math.cos(r),math.sin(r)
+    expected={atom["id"]:(130+(atom["x"]-anchor["x"])*sx*c-(atom["y"]-anchor["y"])*sy*s,
+                              -80+(atom["x"]-anchor["x"])*sx*s+(atom["y"]-anchor["y"])*sy*c) for atom in molecule["atoms"]}
+    migrated=CoreSession();migrated.replace_json(json.dumps(raw));project=migrated.project();identity=next(item for item in project["molecules"] if item["id"]==target)
+    assert project["version"]==8 and not identity["atoms"] and identity["anchor"]=={"x":anchor["x"],"y":anchor["y"]}
+    create_index=next(i for i,node in enumerate(project["nodes"]) if node["type"]=="molecule_create" and node["params"]["target"]==target)
+    migrated_structure=project["nodes"][create_index+1];assert migrated_structure["type"]=="molecule_set_structure"
+    assert migrated_structure["params"]["coordinate_space"]=="molecule_local_v2"
+    assert ([atom["id"] for atom in migrated_structure["params"]["snapshot"]["atoms"]],[bond["id"] for bond in migrated_structure["params"]["snapshot"]["bonds"]])==old_ids
+    final=next(item for item in migrated.evaluated_project(0)["molecules"] if item["id"]==target);actual={atom["id"]:(atom["x"],atom["y"]) for atom in final["atoms"]}
+    for atom_id,point in expected.items():assert math.isclose(actual[atom_id][0],point[0],abs_tol=1e-7) and math.isclose(actual[atom_id][1],point[1],abs_tol=1e-7)
+    reopened=CoreSession();reopened.replace_json(migrated.json());assert reopened.evaluated_project(0)==migrated.evaluated_project(0) and reopened.project()["nodes"]==project["nodes"]
 
 
 def test_global_molecule_tracks_compose_after_local_and_affect_future_objects():
@@ -893,7 +969,7 @@ def test_invalid_lifetime_and_stable_member_references_report_diagnostics():
 
 def test_structure_snapshot_edits_its_own_state_without_mutating_created_structure():
     core=session();gesture(core,"single_bond",(420,270),(470,270))
-    target=core.active_molecule;base=json.loads(core.json())["molecules"][0]
+    target=core.active_molecule;identity=json.loads(core.json())["molecules"][0];base=json.loads(json.dumps(structure(core)))
     atom_id=base["atoms"][0]["id"]
     node=core.add_node("molecule_set_structure",json.dumps({"target":target,"snapshot":{}}))
     core.edit_node(node)
@@ -901,7 +977,8 @@ def test_structure_snapshot_edits_its_own_state_without_mutating_created_structu
     assert core.set_atom_position(atom_id,13.0,-7.0)
     point=next(item["center"] for item in core.depict(False)["atoms"] if item["id"]==atom_id)
     core.set_tool("single_bond");core.pointer_down(point["x"],point["y"]);core.pointer_move(point["x"]+50,point["y"]);assert core.pointer_up(point["x"]+50,point["y"])["changed"]
-    project=core.project();assert project["molecules"][0]==base
+    project=core.project();assert not project["molecules"][0]["atoms"] and project["molecules"][0]["anchor"]==identity["anchor"]
+    first=next(value for value in project["nodes"] if value["type"]=="molecule_set_structure" and value["id"]!=node);assert first["params"]["snapshot"]==base
     params=next(value["params"] for value in project["nodes"] if value["id"]==node)
     assert params["snapshot"]["id"]==target
     evaluated=next(value for value in core.evaluated_project(0)["molecules"] if value["id"]==target)
@@ -973,7 +1050,7 @@ def test_direct_molecule_axis_drag_updates_only_the_active_node_target():
 
 def test_gradient_structure_adds_explicit_h_without_exposing_member_ids_and_roundtrips(tmp_path: Path):
     core=CoreSession();target=core.import_smiles("苯","c1ccccc1");core.set_viewport(960,540,1,0,0)
-    base=json.loads(core.json())["molecules"][0]
+    identity=json.loads(core.json())["molecules"][0];base=json.loads(json.dumps(structure_for(core,target)))
     node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
     assert core.edit_target_kind=="structure_snapshot" and core.can_edit_structure
     point=core.depict(False)["atoms"][0]["center"]
@@ -983,7 +1060,7 @@ def test_gradient_structure_adds_explicit_h_without_exposing_member_ids_and_roun
     new_atom=next(atom for atom in end["atoms"] if atom["id"] not in {value["id"] for value in base["atoms"]})
     endpoint=next(value["center"] for value in core.depict(False)["atoms"] if value["id"]==new_atom["id"])
     core.set_element("H");core.set_tool("atom_label");core.pointer_down(endpoint["x"],endpoint["y"]);assert core.pointer_up(endpoint["x"],endpoint["y"])["changed"]
-    assert core.project()["molecules"][0]==base
+    current_identity=core.project()["molecules"][0];assert not current_identity["atoms"] and current_identity["anchor"]==identity["anchor"]
     start=next(value for value in core.evaluated_project(0)["molecules"] if value["id"]==target)
     middle=next(value for value in core.evaluated_project(15)["molecules"] if value["id"]==target)
     finish=next(value for value in core.evaluated_project(30)["molecules"] if value["id"]==target)
@@ -1007,7 +1084,7 @@ def test_gradient_snapshots_are_molecule_local_after_upstream_object_and_global_
     node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
     params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
     start=params["start_snapshot"]
-    assert params["coordinate_space"]=="molecule_local_v1"
+    assert params["coordinate_space"]=="molecule_local_v2"
     by_id={atom["id"]:atom for atom in start["atoms"]}
     original=start["bonds"][0];a=by_id[original["a"]];b=by_id[original["b"]]
     assert math.isclose(math.hypot(a["x"]-b["x"],a["y"]-b["y"]),start["reference_bond_length"],rel_tol=1e-6)
@@ -1038,12 +1115,12 @@ def test_gradient_local_coordinate_space_matrix_two_outward_click_bonds_and_roun
             core.add_node("wait",json.dumps({"frames":8}))
             node=core.add_node("molecule_gradient_structure",json.dumps({"frames":30,"easing":"linear"}))
             params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
-            assert params["coordinate_space"]=="molecule_local_v1"
+            assert params["coordinate_space"]=="molecule_local_v2"
             start=params["start_snapshot"];original_atoms={atom["id"]:atom for atom in start["atoms"] if atom.get("alive",True)};original_bonds={bond["id"] for bond in start["bonds"]}
             center=(sum(atom["x"] for atom in original_atoms.values())/len(original_atoms),sum(atom["y"] for atom in original_atoms.values())/len(original_atoms))
             ppu=48.0*canvas_zoom;core.set_viewport(960,540,ppu,0,0);core.set_tool("single_bond")
             for atom_id in list(original_atoms)[:2]:
-                atom=original_atoms[atom_id];screen=(480+atom["x"]*ppu,270-atom["y"]*ppu)
+                point=next(item["center"] for item in core.depict(False)["atoms"] if item["id"]==atom_id);screen=(point["x"],point["y"])
                 core.pointer_down(*screen);assert core.pointer_up(*screen)["changed"]
             end=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]["end_snapshot"]
             end_atoms={atom["id"]:atom for atom in end["atoms"] if atom.get("alive",True)};added_bonds=[bond for bond in end["bonds"] if bond["id"] not in original_bonds and bond.get("alive",True)]
@@ -1061,9 +1138,9 @@ def test_gradient_local_coordinate_space_matrix_two_outward_click_bonds_and_roun
                 assert math.isclose(math.hypot(a["x"]-b["x"],a["y"]-b["y"]),start["reference_bond_length"],rel_tol=1e-6)
 
             finish=next(item for item in core.evaluated_project(38)["molecules"] if item["id"]==target);finish_atoms={atom["id"]:atom for atom in finish["atoms"] if atom.get("alive",True)}
-            values=core.evaluated_molecules(38)[target];anchor=min(end_atoms.values(),key=lambda atom:atom["creation_serial"]);radians=math.radians(values["rotation"]);c,s=math.cos(radians),math.sin(radians)
+            values=core.evaluated_molecules(38)[target];radians=math.radians(values["rotation"]);c,s=math.cos(radians),math.sin(radians)
             for atom_id,local in end_atoms.items():
-                x=(local["x"]-anchor["x"])*values["scale_x"];y=(local["y"]-anchor["y"])*values["scale_y"]
+                x=local["x"]*values["scale_x"];y=local["y"]*values["scale_y"]
                 expected=(values["x"]+x*c-y*s,values["y"]+x*s+y*c);actual=finish_atoms[atom_id]
                 assert math.isclose(actual["x"],expected[0],abs_tol=1e-7) and math.isclose(actual["y"],expected[1],abs_tol=1e-7)
             restored=CoreSession();restored.replace_json(core.json());saved=next(item for item in restored.project()["nodes"] if item["id"]==node)["params"]
@@ -1079,7 +1156,7 @@ def test_unmarked_b719_gradient_requires_explicit_local_space_rebuild():
     summary=legacy.gradient_summary(node);assert summary["legacy_coordinate_space"] and summary["needs_review"]
     assert any("旧渐变结构使用了显示坐标" in item["message"] for item in legacy.diagnostics(30))
     assert legacy.rebuild_gradient(node);rebuilt=next(item for item in legacy.project()["nodes"] if item["id"]==node)["params"]
-    assert rebuilt["coordinate_space"]=="molecule_local_v1" and legacy.can_edit_structure
+    assert rebuilt["coordinate_space"]=="molecule_local_v2" and legacy.can_edit_structure
 
 
 def test_gradient_structure_deletion_motion_and_visual_change_crossfade():
