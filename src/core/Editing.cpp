@@ -12,6 +12,7 @@
 #include <numbers>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 
 namespace chem::core {
 namespace {
@@ -51,6 +52,11 @@ std::size_t objectLifecycleOrderViolations(const std::vector<ScriptNode>& nodes)
         const std::string kind=nodeMetadata(node.type).targetKind;
         if(kind=="molecule"&&!target.empty()&&!livingMolecules.contains(target))++violations;
         else if(kind=="arrow"&&!target.empty()&&!livingArrows.contains(target))++violations;
+        if(node.type=="molecule_merge_gradient_structure"){
+            const std::string source=params.value("source","");if(source.empty()||source==target||!livingMolecules.contains(source))++violations;
+        }else if(node.type=="molecule_split_gradient_structure"){
+            const std::string destination=params.value("destination","");if(destination.empty()||destination==target||!livingMolecules.contains(destination))++violations;
+        }
     }
     return violations;
 }
@@ -66,6 +72,11 @@ std::size_t safeObjectInsertionIndex(const Project& project,const std::string& t
     }
     if(createIndex)insertion=std::max(insertion,*createIndex+1);
     if(type!=deleteType&&deleteIndex)insertion=std::min(insertion,*deleteIndex);
+    if(type=="molecule_merge_gradient_structure"||type=="molecule_split_gradient_structure"){
+        json secondary=params;secondary["target"]=params.value(type=="molecule_merge_gradient_structure"?"source":"destination","");
+        if(!secondary.value("target","").empty()&&secondary.value("target","")!=target)
+            insertion=safeObjectInsertionIndex(project,"molecule_gradient_structure",secondary,insertion);
+    }
     return insertion;
 }
 double pointSegmentDistance(Point point, Point first, Point second) {
@@ -168,6 +179,61 @@ std::optional<Molecule> structureBeforeNode(const Project& project,std::size_t i
     if(startFrame)*startFrame=cursor;const EvaluatedScene scene=evaluateStructureNodes(prefix,cursor);const auto found=scene.molecules.find(target);
     if(found==scene.molecules.end()||found->second.retired||!found->second.visible)return std::nullopt;return found->second;
 }
+bool isMultiStructureTransform(const std::string& type) {
+    return type=="molecule_merge_gradient_structure"||type=="molecule_split_gradient_structure";
+}
+bool isEditableStructureTransform(const std::string& type) {
+    return type=="molecule_gradient_structure"||isMultiStructureTransform(type);
+}
+const char* editableSnapshotKey(const std::string& type) {
+    if(type=="molecule_merge_gradient_structure")return "target_end_snapshot";
+    if(type=="molecule_split_gradient_structure")return "source_end_snapshot";
+    return type=="molecule_gradient_structure"?"end_snapshot":"snapshot";
+}
+EvaluatedScene sceneBeforeNode(const Project& project,std::size_t index,int frame) {
+    Project prefix=project;prefix.nodes.resize(std::min(index,prefix.nodes.size()));return evaluateNodes(prefix,frame);
+}
+Point visualToLocal(Point world,const Molecule& visual) {
+    const double radians=-visual.rotation*std::numbers::pi/180.0,c=std::cos(radians),s=std::sin(radians);
+    const double dx=world.x-visual.origin.x,dy=world.y-visual.origin.y;
+    const double x=dx*c-dy*s,y=dx*s+dy*c;
+    return {std::abs(visual.scaleX)>1e-12?x/visual.scaleX:0.0,std::abs(visual.scaleY)>1e-12?y/visual.scaleY:0.0};
+}
+Point localToVisual(Point local,const Molecule& visual) {
+    const double radians=visual.rotation*std::numbers::pi/180.0,c=std::cos(radians),s=std::sin(radians);
+    const double x=local.x*visual.scaleX,y=local.y*visual.scaleY;
+    return {visual.origin.x+x*c-y*s,visual.origin.y+x*s+y*c};
+}
+std::string allocateAtomId(Molecule& molecule) {
+    std::string id;do{id="A"+std::to_string(molecule.nextAtomId++);}while(molecule.atom(id));return id;
+}
+std::string allocateBondId(Molecule& molecule) {
+    std::string id;do{id="B"+std::to_string(molecule.nextBondId++);}while(molecule.bond(id));return id;
+}
+std::string allocateAdornmentId(Molecule& molecule) {
+    std::string id;do{id="D"+std::to_string(molecule.nextAdornmentId++);}while(molecule.adornment(id));return id;
+}
+json appendStructureWithRemap(Molecule& destination,const Molecule& source,
+                              const Molecule& sourceVisual,const Molecule& destinationVisual,
+                              const std::set<std::string>* selectedAtoms=nullptr) {
+    json mapping={{"atoms",json::object()},{"bonds",json::object()},{"adornments",json::object()}};
+    const auto selected=[&](const std::string& id){return !selectedAtoms||selectedAtoms->contains(id);};
+    for(const Atom& original:source.atoms)if(original.alive&&selected(original.id)){
+        Atom atom=original;const std::string next=allocateAtomId(destination);mapping["atoms"][original.id]=next;atom.id=next;
+        atom.position=visualToLocal(localToVisual(original.position,sourceVisual),destinationVisual);
+        destination.atoms.push_back(std::move(atom));
+    }
+    for(const Bond& original:source.bonds)if(original.alive&&selected(original.atomA)&&selected(original.atomB)){
+        Bond bond=original;bond.id=allocateBondId(destination);mapping["bonds"][original.id]=bond.id;
+        bond.atomA=mapping["atoms"].value(original.atomA,"");bond.atomB=mapping["atoms"].value(original.atomB,"");
+        if(!bond.atomA.empty()&&!bond.atomB.empty())destination.bonds.push_back(std::move(bond));
+    }
+    for(const AtomAdornment& original:source.adornments)if(original.alive&&selected(original.atomId)){
+        AtomAdornment value=original;value.id=allocateAdornmentId(destination);mapping["adornments"][original.id]=value.id;value.atomId=mapping["atoms"].value(original.atomId,"");
+        if(!value.atomId.empty())destination.adornments.push_back(std::move(value));
+    }
+    return mapping;
+}
 }  // namespace
 
 Point Viewport::modelToCanvas(Point value) const {
@@ -218,7 +284,7 @@ struct EditorSession::Impl {
     std::optional<Gesture> gesture;
 
     void markGradientNodesForReview(std::size_t afterIndex=0,const std::string& moleculeId={}) {
-        for(std::size_t index=afterIndex;index<project.nodes.size();++index){ScriptNode& node=project.nodes[index];if(node.type!="molecule_gradient_structure")continue;json params=json::parse(node.paramsJson);if(!moleculeId.empty()&&params.value("target","")!=moleculeId)continue;params["needs_review"]=true;node.paramsJson=params.dump();}
+        for(std::size_t index=afterIndex;index<project.nodes.size();++index){ScriptNode& node=project.nodes[index];if(!isEditableStructureTransform(node.type))continue;json params=json::parse(node.paramsJson);if(!moleculeId.empty()&&params.value("target","")!=moleculeId&&params.value("source","")!=moleculeId&&params.value("destination","")!=moleculeId)continue;params["needs_review"]=true;node.paramsJson=params.dump();}
     }
 
     Molecule* molecule() { return project.molecule(activeMolecule); }
@@ -236,12 +302,47 @@ struct EditorSession::Impl {
             identity->nextBondId=std::max(identity->nextBondId,structureDraft->nextBondId);
             identity->nextAdornmentId=std::max(identity->nextAdornmentId,structureDraft->nextAdornmentId);
         }
-        json params=json::parse(node->paramsJson);params[node->type=="molecule_gradient_structure"?"end_snapshot":"snapshot"]=moleculeSnapshotJson(*structureDraft);node->paramsJson=params.dump();
+        json params=json::parse(node->paramsJson);params[editableSnapshotKey(node->type)]=moleculeSnapshotJson(*structureDraft);
+        if(node->type=="molecule_split_gradient_structure"){
+            const auto sourceStart=moleculeFromSnapshotJson(params.value("source_start_snapshot",json::object()));
+            const auto destinationStart=moleculeFromSnapshotJson(params.value("destination_start_snapshot",json::object()));
+            if(sourceStart&&destinationStart){
+                std::set<std::string> livingEnd;for(const Atom& atom:structureDraft->atoms)if(atom.alive)livingEnd.insert(atom.id);
+                std::set<std::string> moved;for(const Atom& atom:sourceStart->atoms)if(atom.alive&&!livingEnd.contains(atom.id))moved.insert(atom.id);
+                bool topologyCut=false;for(const Bond& bond:sourceStart->bonds)if(bond.alive){const Bond* end=structureDraft->bond(bond.id);if(!end||!end->alive){topologyCut=true;break;}}
+                if(topologyCut&&!livingEnd.empty()){
+                    std::map<std::string,std::set<std::string>> neighbours;for(const std::string& id:livingEnd)neighbours[id];
+                    for(const Bond& bond:structureDraft->bonds)if(bond.alive&&livingEnd.contains(bond.atomA)&&livingEnd.contains(bond.atomB)){neighbours[bond.atomA].insert(bond.atomB);neighbours[bond.atomB].insert(bond.atomA);}
+                    const Atom* anchor=nullptr;for(const Atom& atom:structureDraft->atoms)if(atom.alive&&(!anchor||std::tie(atom.creationSerial,atom.id)<std::tie(anchor->creationSerial,anchor->id)))anchor=&atom;
+                    std::set<std::string> keep;if(anchor){std::vector<std::string> pending{anchor->id};while(!pending.empty()){const std::string id=pending.back();pending.pop_back();if(!keep.insert(id).second)continue;for(const std::string& next:neighbours[id])pending.push_back(next);}}
+                    for(const std::string& id:livingEnd)if(!keep.contains(id))moved.insert(id);
+                }
+                Molecule transfer=*sourceStart;
+                for(const Atom& edited:structureDraft->atoms)if(moved.contains(edited.id)){if(Atom* value=transfer.atom(edited.id))*value=edited;else transfer.atoms.push_back(edited);}
+                for(Atom& atom:transfer.atoms)atom.alive=moved.contains(atom.id);
+                for(Bond& bond:transfer.bonds)bond.alive=moved.contains(bond.atomA)&&moved.contains(bond.atomB);
+                for(const Bond& edited:structureDraft->bonds)if(moved.contains(edited.atomA)&&moved.contains(edited.atomB)){if(Bond* value=transfer.bond(edited.id))*value=edited;else transfer.bonds.push_back(edited);}
+                for(Bond& bond:transfer.bonds)if(moved.contains(bond.atomA)&&moved.contains(bond.atomB))bond.alive=true;
+                for(AtomAdornment& value:transfer.adornments)value.alive=moved.contains(value.atomId);
+                for(Atom& atom:structureDraft->atoms)if(moved.contains(atom.id))atom.alive=false;
+                for(Bond& bond:structureDraft->bonds)if(moved.contains(bond.atomA)||moved.contains(bond.atomB))bond.alive=false;
+                for(AtomAdornment& value:structureDraft->adornments)if(moved.contains(value.atomId))value.alive=false;
+                Molecule destinationEnd=*destinationStart;
+                const auto found=std::find_if(project.nodes.begin(),project.nodes.end(),[&](const ScriptNode& value){return value.id==targetId;});
+                const std::size_t index=static_cast<std::size_t>(std::distance(project.nodes.begin(),found));const auto timings=compileNodeTimings(project);const auto timing=std::find_if(timings.begin(),timings.end(),[&](const NodeTiming& value){return value.id==targetId;});const int frame=timing==timings.end()?previewFrame:timing->startFrame;
+                const EvaluatedScene visual=sceneBeforeNode(project,index,frame);const auto sourceVisual=visual.molecules.find(params.value("target","")),destinationVisual=visual.molecules.find(params.value("destination",""));
+                if(sourceVisual!=visual.molecules.end()&&destinationVisual!=visual.molecules.end())params["id_map"]=appendStructureWithRemap(destinationEnd,transfer,sourceVisual->second,destinationVisual->second,&moved);
+                params["source_end_snapshot"]=moleculeSnapshotJson(*structureDraft);
+                params["destination_end_snapshot"]=moleculeSnapshotJson(destinationEnd);
+                if(Molecule* identity=project.molecule(params.value("destination",""))){identity->nextAtomId=std::max(identity->nextAtomId,destinationEnd.nextAtomId);identity->nextBondId=std::max(identity->nextBondId,destinationEnd.nextBondId);identity->nextAdornmentId=std::max(identity->nextAdornmentId,destinationEnd.nextAdornmentId);}
+            }
+        }
+        node->paramsJson=params.dump();
     }
 
     void loadStructureDraft(const ScriptNode& node) {
-        const json params=json::parse(node.paramsJson);const auto snapshot=params.find(node.type=="molecule_gradient_structure"?"end_snapshot":"snapshot");
-        if(node.type=="molecule_gradient_structure"&&params.value("coordinate_space","")!="molecule_local_v2"){
+        const json params=json::parse(node.paramsJson);const auto snapshot=params.find(editableSnapshotKey(node.type));
+        if(isEditableStructureTransform(node.type)&&params.value("coordinate_space","")!="molecule_local_v2"){
             structureDraft.reset();return;
         }
         if(snapshot!=params.end()&&snapshot->is_object()&&snapshot->contains("id")&&snapshot->contains("atoms")){
@@ -729,7 +830,7 @@ void EditorSession::editScriptNode(const std::string& nodeId) {
     impl_->previewFrame=found==timings.end()?0:found->endFrame;
     const std::string capability=nodeMetadata(node->type).structureEditCapability;
     EditTargetKind desired=capability=="base"?EditTargetKind::BaseStructure:capability=="snapshot"?EditTargetKind::StructureSnapshot:EditTargetKind::ScriptNode;
-    if(node->type=="molecule_gradient_structure"&&params.value("coordinate_space","")!="molecule_local_v2")desired=EditTargetKind::ScriptNode;
+    if(isEditableStructureTransform(node->type)&&params.value("coordinate_space","")!="molecule_local_v2")desired=EditTargetKind::ScriptNode;
     const bool sameContext=impl_->targetId==nodeId&&impl_->targetKind==desired&&
         (desired!=EditTargetKind::StructureSnapshot||impl_->structureDraft.has_value());
     if(sameContext){impl_->previewFrame=found==timings.end()?0:found->endFrame;return;}
@@ -1197,6 +1298,37 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame+params["frames"].get<int>();impl_->structureDraft=*start;
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
     }
+    if(isMultiStructureTransform(type)){
+        if(impl_->activeMolecule.empty())throw std::runtime_error("多分子结构变换需要当前活动分子");
+        json requested=paramsJson.empty()?json::object():json::parse(paramsJson);const bool merging=type=="molecule_merge_gradient_structure";const char* secondaryKey=merging?"source":"destination";
+        std::size_t insertion=std::min(index.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());std::string secondary=requested.value(secondaryKey,"");
+        const auto validSecondary=[&](const std::string& id){return !id.empty()&&id!=impl_->activeMolecule&&structureBeforeNode(impl_->project,insertion,id).has_value();};
+        if(merging&&!validSecondary(secondary))for(auto found=impl_->project.molecules.rbegin();found!=impl_->project.molecules.rend();++found)if(validSecondary(found->id)){secondary=found->id;break;}
+        if(merging&&secondary.empty())throw std::runtime_error("合并结构变换需要另一个仍然存活的分子");
+        if(!merging&&!validSecondary(secondary)){
+            json primaryOnly={{"target",impl_->activeMolecule}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",primaryOnly,insertion);
+            secondary=impl_->project.addBlankMolecule("分出分子",insertion);++insertion;
+        }
+        json lifecycle={{"target",impl_->activeMolecule},{secondaryKey,secondary}};insertion=safeObjectInsertionIndex(impl_->project,type,lifecycle,insertion);
+        int startFrame=0;const auto primaryStart=structureBeforeNode(impl_->project,insertion,impl_->activeMolecule,&startFrame);const auto secondaryStart=structureBeforeNode(impl_->project,insertion,secondary);
+        if(!primaryStart||!secondaryStart)throw std::runtime_error("两个分子必须在当前节点位置同时存活");
+        const EvaluatedScene visual=sceneBeforeNode(impl_->project,insertion,startFrame);const auto primaryVisual=visual.molecules.find(impl_->activeMolecule),secondaryVisual=visual.molecules.find(secondary);
+        if(primaryVisual==visual.molecules.end()||secondaryVisual==visual.molecules.end())throw std::runtime_error("无法取得多分子结构变换的坐标空间");
+        json params={{"target",impl_->activeMolecule},{secondaryKey,secondary},{"frames",std::max(0,requested.value("frames",30))},{"easing",requested.value("easing","linear")},{"coordinate_space","molecule_local_v2"},{"needs_review",false}};
+        Molecule draft=*primaryStart;
+        if(merging){
+            params["target_start_snapshot"]=moleculeSnapshotJson(*primaryStart);params["source_start_snapshot"]=moleculeSnapshotJson(*secondaryStart);
+            params["id_map"]=appendStructureWithRemap(draft,*secondaryStart,secondaryVisual->second,primaryVisual->second);
+            Molecule empty=*secondaryStart;empty.atoms.clear();empty.bonds.clear();empty.adornments.clear();empty.poses.clear();
+            params["target_end_snapshot"]=moleculeSnapshotJson(draft);params["source_end_snapshot"]=moleculeSnapshotJson(empty);
+            if(Molecule* identity=impl_->project.molecule(impl_->activeMolecule)){identity->nextAtomId=std::max(identity->nextAtomId,draft.nextAtomId);identity->nextBondId=std::max(identity->nextBondId,draft.nextBondId);identity->nextAdornmentId=std::max(identity->nextAdornmentId,draft.nextAdornmentId);}
+        }else{
+            params["source_start_snapshot"]=moleculeSnapshotJson(*primaryStart);params["source_end_snapshot"]=moleculeSnapshotJson(*primaryStart);
+            params["destination_start_snapshot"]=moleculeSnapshotJson(*secondaryStart);params["destination_end_snapshot"]=moleculeSnapshotJson(*secondaryStart);params["id_map"]=json::object();
+        }
+        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame+params["frames"].get<int>();impl_->structureDraft=std::move(draft);
+        impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
+    }
     const json requested=paramsJson.empty()||paramsJson=="{}"?json::parse(defaultNodeParamsJson(type)):json::parse(paramsJson);const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,requested,index.value_or(impl_->project.nodes.size()));
     const std::string id=impl_->project.addNode(type,requested.dump(),insertion);
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
@@ -1205,10 +1337,11 @@ bool EditorSession::updateScriptNode(const std::string& nodeId,const std::string
     ScriptNode* node=impl_->project.node(nodeId);if(!node)return false;const json value=json::parse(paramsJson);
     if(!value.is_object())throw std::runtime_error("Node params must be an object");
     if(nodeMetadata(node->type).targetImmutable){const json old=json::parse(node->paramsJson);if(value.value("target","")!=old.value("target",""))throw std::runtime_error("The target of a new-molecule node is immutable");}
+    if(isMultiStructureTransform(node->type)){const json old=json::parse(node->paramsJson);const char* key=node->type=="molecule_merge_gradient_structure"?"source":"destination";if(value.value("target","")!=old.value("target","")||value.value(key,"")!=old.value(key,""))throw std::runtime_error("多分子结构变换的对象在创建后不可重新指向");}
     const std::string normalized=value.dump();
     if(node->paramsJson==normalized)return false;Project before=impl_->project;node->paramsJson=normalized;
     const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& item){return item.id==nodeId;})));
-    if(node->type!="molecule_gradient_structure")impl_->markGradientNodesForReview(index+1);
+    if(!isEditableStructureTransform(node->type))impl_->markGradientNodesForReview(index+1);
     if(impl_->targetId==nodeId){
         const auto timings=compileNodeTimings(impl_->project);const auto timing=std::find_if(timings.begin(),timings.end(),[&](const NodeTiming& item){return item.id==nodeId;});
         if(timing!=timings.end())impl_->previewFrame=timing->endFrame;
@@ -1243,8 +1376,8 @@ std::string EditorSession::duplicateScriptNode(const std::string& nodeId,std::op
         Project before=impl_->project;const json params=json::parse(node->paramsJson);const std::size_t insertion=safeObjectInsertionIndex(impl_->project,node->type,params,index);const std::string created=impl_->project.addNode(node->type,params.dump(),insertion);
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return created;
     }
-    if(node->type=="molecule_gradient_structure"){
-        Project before=impl_->project;json params=json::parse(node->paramsJson);params["needs_review"]=true;const std::string created=impl_->project.addNode(node->type,params.dump(),index);
+    if(isEditableStructureTransform(node->type)){
+        Project before=impl_->project;json params=json::parse(node->paramsJson);params["needs_review"]=true;const std::size_t insertion=safeObjectInsertionIndex(impl_->project,node->type,params,index);const std::string created=impl_->project.addNode(node->type,params.dump(),insertion);
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return created;
     }
     return addScriptNode(node->type,node->paramsJson,index);
@@ -1255,8 +1388,9 @@ bool EditorSession::deleteScriptNode(const std::string& nodeId) {
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
 }
 std::string EditorSession::gradientStructureSummary(const std::string& nodeId) const {
-    const ScriptNode* node=impl_->project.node(nodeId);if(!node||node->type!="molecule_gradient_structure")return "{}";const json params=json::parse(node->paramsJson);
-    const auto start=moleculeFromSnapshotJson(params.value("start_snapshot",json::object())),end=moleculeFromSnapshotJson(params.value("end_snapshot",json::object()));if(!start||!end)return "{}";
+    const ScriptNode* node=impl_->project.node(nodeId);if(!node||!isEditableStructureTransform(node->type))return "{}";const json params=json::parse(node->paramsJson);
+    const char* startKey=node->type=="molecule_merge_gradient_structure"?"target_start_snapshot":node->type=="molecule_split_gradient_structure"?"source_start_snapshot":"start_snapshot";
+    const auto start=moleculeFromSnapshotJson(params.value(startKey,json::object())),end=moleculeFromSnapshotJson(params.value(editableSnapshotKey(node->type),json::object()));if(!start||!end)return "{}";
     std::map<std::string,const Atom*> firstAtoms,secondAtoms;for(const Atom& value:start->atoms)if(value.alive)firstAtoms[value.id]=&value;for(const Atom& value:end->atoms)if(value.alive)secondAtoms[value.id]=&value;
     std::map<std::string,const Bond*> firstBonds,secondBonds;for(const Bond& value:start->bonds)if(value.alive)firstBonds[value.id]=&value;for(const Bond& value:end->bonds)if(value.alive)secondBonds[value.id]=&value;
     std::map<std::string,const AtomAdornment*> firstAdornments,secondAdornments;for(const AtomAdornment& value:start->adornments)if(value.alive)firstAdornments[value.id]=&value;for(const AtomAdornment& value:end->adornments)if(value.alive)secondAdornments[value.id]=&value;

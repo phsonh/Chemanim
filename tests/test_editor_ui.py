@@ -9,7 +9,7 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-                             QLineEdit, QPlainTextEdit, QSpinBox, QToolBar,
+                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar,
                              QPushButton, QToolButton)
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -261,11 +261,26 @@ def test_primary_node_toolbar_uses_four_visible_rows_and_direct_action_buttons()
         return [button.text() for button in buttons]
     assert visible_sections("全局")==["颜色","缩放"] and actions("颜色")==["透明度","颜色"]
     assert visible_sections("设定")==["结构","位置","缩放","旋转","颜色","排列"] and actions("位置")==["坐标","横坐标","纵坐标"]
-    assert visible_sections("变换")==["结构","位置","缩放","旋转","颜色"] and actions("结构")==["渐变结构"]
+    assert visible_sections("变换")==["结构","位置","缩放","旋转","颜色"] and actions("结构")==["渐变结构","合并分子并变换结构","分裂分子并变换结构"]
     assert panel.secondary_row.isVisible() and panel.scope_row.isVisible() and panel.section_row.isVisible() and panel.scroll.isVisible()
     panel.set_category("箭头")
     assert visible_sections("设定")==["曲线","绘制","缩放","颜色","线条"]
     assert "位置" not in visible_sections("设定") and "位置" not in visible_sections("变换")
+    value.close()
+
+
+def test_multi_molecule_structure_transforms_have_human_readable_locked_targets_and_no_internal_ids():
+    value=window();first=value.session.import_smiles("主分子","CC");second=value.session.import_smiles("并入分子","O");last=value.session.project()["nodes"][-1]["id"];value.refresh_all(last);value.session.set_active_molecule(first)
+    node=value._add_node("molecule_merge_gradient_structure",{"source":second,"frames":24,"easing":"linear"},False);QApplication.processEvents()
+    created=next(item for item in value.session.project()["nodes"] if item["id"]==node)
+    assert created["params"]["target"]==first and created["params"]["source"]==second
+    item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node)
+    assert item.text(0)=="24 帧内将主分子与并入分子合并并变换结构，线性"
+    value._edit_node_dialog(node);QApplication.processEvents()
+    assert value.inspector.title.text()=="合并分子并变换结构 · 主分子"
+    assert set(value.inspector.editors)=={"target","source","frames","easing"}
+    assert value.inspector.editors["target"][0].isReadOnly() and value.inspector.editors["source"][0].isReadOnly()
+    assert not any("ID" in label.text() for label in value.inspector.findChildren(QLabel))
     value.close()
 
 

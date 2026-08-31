@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
 
 LEGACY_STRUCTURE_TYPES = {"molecule_lerp_structure", "bond_form", "bond_break",
                           "selection_show", "selection_hide", "selection_fade"}
+STRUCTURE_TRANSFORM_TYPES = {"molecule_gradient_structure", "molecule_merge_gradient_structure",
+                             "molecule_split_gradient_structure"}
 
 
 def molecule_name(project, stable_id):
@@ -96,14 +98,15 @@ class NodeInspector(QWidget):
             self.title.setText("旧版结构节点")
             note=QLabel("旧版结构节点，仅用于兼容。目标对象会在画布中高亮；内部引用不可手工编辑。")
             note.setWordWrap(True);self.layout.addRow(note);return
-        if node["type"]=="molecule_gradient_structure":
-            self.title.setText(f'渐变结构 · {molecule_name(project,params.get("target",""))}')
+        if node["type"] in STRUCTURE_TRANSFORM_TYPES:
+            self.title.setText(f'{definition.get("label","结构变换")} · {molecule_name(project,params.get("target",""))}')
         else:self.title.setText(definition.get("label", "节点"))
         for spec in definition.get("fields", []):
             key, kind = spec["key"], spec["kind"]; value = params.get(key, spec.get("default")); editor = None
-            if node["type"]=="molecule_gradient_structure" and key=="target":
+            if node["type"] in STRUCTURE_TRANSFORM_TYPES and key in ("target","source","destination"):
                 editor=QLineEdit(molecule_name(project,value));editor.setReadOnly(True)
-                self.editors[key]=(editor,"readonly_target");self.layout.addRow("目标分子",editor);continue
+                labels={"target":"来源分子" if node["type"]=="molecule_split_gradient_structure" else "主分子" if node["type"]=="molecule_merge_gradient_structure" else "目标分子","source":"并入分子","destination":"分出分子"}
+                self.editors[key]=(editor,"readonly_target");self.layout.addRow(labels[key],editor);continue
             choices = self._choices(kind, params)
             if choices:
                 editor = QComboBox()
@@ -125,10 +128,10 @@ class NodeInspector(QWidget):
             self.editors[key] = (editor, kind); self.layout.addRow(spec["label"], editor)
             if key == "target" and definition.get("target_immutable"):
                 editor.setEnabled(False);editor.setToolTip("新建分子的目标由 Core 分配，不可重新指向")
-        if node["type"]=="molecule_gradient_structure":
+        if node["type"] in STRUCTURE_TRANSFORM_TYPES:
             summary=self.session.gradient_summary(self.node_id)
             if summary.get("legacy_coordinate_space"):
-                warning=QLabel("旧渐变结构使用了显示坐标，需要重建终态");warning.setWordWrap(True);warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
+                warning=QLabel("旧结构变换使用了显示坐标，需要重建终态");warning.setWordWrap(True);warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
             elif summary.get("needs_review"):
                 warning=QLabel("起点结构已变化，需要检查");warning.setStyleSheet("color:#f0ad4e;font-weight:600");self.layout.addRow(warning)
             if summary.get("needs_review"):

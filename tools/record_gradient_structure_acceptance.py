@@ -85,8 +85,8 @@ def main() -> None:
     panel.set_script_section("结构")
     QApplication.processEvents()
     actions = visible_tools(window)
-    if [button.text() for button in actions] != ["渐变结构"]:
-        raise RuntimeError("分子/变换/结构没有唯一显示渐变结构")
+    if [button.text() for button in actions] != ["渐变结构", "合并分子并变换结构", "分裂分子并变换结构"]:
+        raise RuntimeError("分子/变换/结构没有显示完整的结构变换动作")
     capture(window, output / "toolbar-four-visible-rows.png")
     QTest.mouseClick(actions[0], Qt.MouseButton.LeftButton)
     QApplication.processEvents()

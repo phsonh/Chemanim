@@ -1,0 +1,500 @@
+{
+  "format": "chemanim-native-2d",
+  "mod": "multi_structure_acceptance",
+  "molecules": [
+    {
+      "adornments": [],
+      "alpha": 255,
+      "anchor": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "anchor_initialized": true,
+      "atoms": [],
+      "bonds": [],
+      "color": {
+        "b": 255,
+        "g": 255,
+        "r": 255
+      },
+      "id": "molecule1",
+      "layer": 0,
+      "name": "主分子",
+      "next_adornment_id": 1,
+      "next_atom_id": 4,
+      "next_bond_id": 2,
+      "poses": {},
+      "reference_bond_length": 32.0,
+      "retired": false,
+      "rotation": 0.0,
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "source_smiles": "",
+      "visible": true
+    },
+    {
+      "adornments": [],
+      "alpha": 255,
+      "anchor": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "anchor_initialized": true,
+      "atoms": [],
+      "bonds": [],
+      "color": {
+        "b": 255,
+        "g": 255,
+        "r": 255
+      },
+      "id": "molecule2",
+      "layer": 0,
+      "name": "并入分子",
+      "next_adornment_id": 1,
+      "next_atom_id": 4,
+      "next_bond_id": 2,
+      "poses": {},
+      "reference_bond_length": 32.0,
+      "retired": false,
+      "rotation": 0.0,
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "source_smiles": "",
+      "visible": true
+    }
+  ],
+  "next_creation_serial": 4,
+  "next_molecule_id": 3,
+  "next_node_id": 11,
+  "next_timeline_id": 1,
+  "nodes": [
+    {
+      "enabled": true,
+      "id": "N1",
+      "params": {},
+      "type": "scene"
+    },
+    {
+      "enabled": true,
+      "id": "N2",
+      "params": {
+        "target": "molecule1"
+      },
+      "type": "molecule_create"
+    },
+    {
+      "enabled": true,
+      "id": "N3",
+      "params": {
+        "coordinate_space": "molecule_local_v2",
+        "snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 1,
+              "element": "C",
+              "hidden": false,
+              "id": "A1",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -16.0,
+              "y": 1.1842378929335002e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 2,
+              "element": "C",
+              "hidden": false,
+              "id": "A2",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 16.0,
+              "y": -1.1842378929335002e-15
+            }
+          ],
+          "bonds": [
+            {
+              "a": "A1",
+              "alive": true,
+              "alpha": 255,
+              "b": "A2",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B1",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            }
+          ],
+          "id": "molecule1",
+          "name": "主分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 3,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        },
+        "target": "molecule1"
+      },
+      "type": "molecule_set_structure"
+    },
+    {
+      "enabled": true,
+      "id": "N4",
+      "params": {
+        "target": "molecule2"
+      },
+      "type": "molecule_create"
+    },
+    {
+      "enabled": true,
+      "id": "N5",
+      "params": {
+        "coordinate_space": "molecule_local_v2",
+        "snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 3,
+              "element": "O",
+              "hidden": false,
+              "id": "A3",
+              "implicit_hydrogens": 2,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 0.0,
+              "y": 0.0
+            }
+          ],
+          "bonds": [],
+          "id": "molecule2",
+          "name": "并入分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 4,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        },
+        "target": "molecule2"
+      },
+      "type": "molecule_set_structure"
+    },
+    {
+      "enabled": true,
+      "id": "N6",
+      "params": {
+        "target": "molecule1",
+        "x": -75,
+        "y": 15
+      },
+      "type": "molecule_set_position"
+    },
+    {
+      "enabled": true,
+      "id": "N7",
+      "params": {
+        "target": "molecule1",
+        "value": 18
+      },
+      "type": "molecule_set_rotation"
+    },
+    {
+      "enabled": true,
+      "id": "N8",
+      "params": {
+        "target": "molecule2",
+        "x": 85,
+        "y": -20
+      },
+      "type": "molecule_set_position"
+    },
+    {
+      "enabled": true,
+      "id": "N9",
+      "params": {
+        "coordinate_space": "molecule_local_v2",
+        "easing": "linear",
+        "frames": 30,
+        "id_map": {
+          "adornments": {},
+          "atoms": {
+            "A3": "A3"
+          },
+          "bonds": {}
+        },
+        "needs_review": false,
+        "source": "molecule2",
+        "source_end_snapshot": {
+          "adornments": [],
+          "atoms": [],
+          "bonds": [],
+          "id": "molecule2",
+          "name": "并入分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 4,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        },
+        "source_start_snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 3,
+              "element": "O",
+              "hidden": false,
+              "id": "A3",
+              "implicit_hydrogens": 2,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 0.0,
+              "y": 0.0
+            }
+          ],
+          "bonds": [],
+          "id": "molecule2",
+          "name": "并入分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 4,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        },
+        "target": "molecule1",
+        "target_end_snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 1,
+              "element": "C",
+              "hidden": false,
+              "id": "A1",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -16.0,
+              "y": 1.1842378929335002e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 2,
+              "element": "C",
+              "hidden": false,
+              "id": "A2",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 16.0,
+              "y": -1.1842378929335002e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 3,
+              "element": "O",
+              "hidden": false,
+              "id": "A3",
+              "implicit_hydrogens": 2,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 141.3534478041014,
+              "y": -82.72969717032196
+            }
+          ],
+          "bonds": [
+            {
+              "a": "A1",
+              "alive": true,
+              "alpha": 255,
+              "b": "A2",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B1",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            }
+          ],
+          "id": "molecule1",
+          "name": "主分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 4,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        },
+        "target_start_snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 1,
+              "element": "C",
+              "hidden": false,
+              "id": "A1",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -16.0,
+              "y": 1.1842378929335002e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 2,
+              "element": "C",
+              "hidden": false,
+              "id": "A2",
+              "implicit_hydrogens": 3,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 16.0,
+              "y": -1.1842378929335002e-15
+            }
+          ],
+          "bonds": [
+            {
+              "a": "A1",
+              "alive": true,
+              "alpha": 255,
+              "b": "A2",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B1",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            }
+          ],
+          "id": "molecule1",
+          "name": "主分子",
+          "next_adornment_id": 1,
+          "next_atom_id": 3,
+          "next_bond_id": 2,
+          "reference_bond_length": 32.0
+        }
+      },
+      "type": "molecule_merge_gradient_structure"
+    },
+    {
+      "enabled": true,
+      "id": "N10",
+      "params": {
+        "frames": 30
+      },
+      "type": "wait"
+    }
+  ],
+  "scene": {
+    "background": "FFFFFFFF",
+    "fps": 60,
+    "height": 1080,
+    "logic_height": 540,
+    "logic_width": 960,
+    "title": "native2d",
+    "view_zoom": 2.2,
+    "width": 1920
+  },
+  "style": {
+    "bond_length_pt": 14.4,
+    "double_bond_spacing": 0.18,
+    "font_family": "Arial",
+    "font_file": "C:/Windows/Fonts/arial.ttf",
+    "font_pt": 10.0,
+    "line_width_pt": 0.6,
+    "preset": "acs_document_1996"
+  },
+  "version": 8
+}

@@ -101,6 +101,8 @@ const json& registry() {
         definition("molecule_set_structure", "设定分子结构", "分子", "结构", {field("target","分子","molecule",""),field("snapshot","结构快照","multiline","{}")}),
         definition("molecule_lerp_structure", "变换分子结构形变", "分子", "结构", {field("target","分子","molecule",""),field("atoms","稳定原子坐标","multiline","{}"),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("molecule_gradient_structure", "渐变结构", "分子", "结构", {field("target","目标分子","molecule",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_merge_gradient_structure", "合并分子并变换结构", "分子", "结构", {field("target","主分子","molecule",""),field("source","并入分子","molecule",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("molecule_split_gradient_structure", "分裂分子并变换结构", "分子", "结构", {field("target","来源分子","molecule",""),field("destination","分出分子","molecule",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("selection_show", "变换分子选区显现", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("selection_hide", "变换分子选区消失", "分子", "结构", {field("target","分子","molecule",""),field("atoms","原子 ID","text",""),field("bonds","键 ID","text",""),field("adornments","标记 ID","text",""),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("molecule_global_set_alpha", "设定全局分子透明度", "分子", "颜色", {field("value","Alpha","alpha",255)}),
@@ -150,6 +152,8 @@ const std::map<std::string,NodeMetadata>& metadataRegistry() {
         moleculeSet("molecule_set_rotation","旋转",30);moleculeSet("molecule_set_alpha","颜色",40);moleculeSet("molecule_set_color","颜色",41);moleculeSet("molecule_set_layer","排列",50);
         const auto moleculeTransform=[&](const char* type,const char* section,int order,const char* capability="none",bool immutable=false){put(type,metadata("分子","transform",section,order,"primary","molecule",capability,true,immutable));};
         moleculeTransform("molecule_gradient_structure","结构",0,"snapshot",true);
+        moleculeTransform("molecule_merge_gradient_structure","结构",1,"snapshot",true);
+        moleculeTransform("molecule_split_gradient_structure","结构",2,"snapshot",true);
         moleculeTransform("molecule_lerp_position","位置",10);moleculeTransform("molecule_lerp_x","位置",11);moleculeTransform("molecule_lerp_y","位置",12);
         moleculeTransform("molecule_lerp_scale","缩放",20);moleculeTransform("molecule_lerp_scale_x","缩放",21);moleculeTransform("molecule_lerp_scale_y","缩放",22);
         moleculeTransform("molecule_lerp_rotation","旋转",30);moleculeTransform("molecule_lerp_alpha","颜色",40);moleculeTransform("molecule_lerp_color","颜色",41);
@@ -184,7 +188,7 @@ const std::map<std::string,std::string>& toolLabels(){
         {"molecule_create","新建分子"},{"molecule_delete","删除分子"},{"merge_molecules","合并分子"},
         {"molecule_global_set_alpha","透明度"},{"molecule_global_set_color","颜色"},{"molecule_global_set_scale","缩放"},{"molecule_global_set_scale_x","横向缩放"},{"molecule_global_set_scale_y","纵向缩放"},
         {"molecule_set_structure","分子结构"},{"molecule_set_position","坐标"},{"molecule_set_x","横坐标"},{"molecule_set_y","纵坐标"},{"molecule_set_scale","缩放"},{"molecule_set_scale_x","横向缩放"},{"molecule_set_scale_y","纵向缩放"},{"molecule_set_rotation","旋转角度"},{"molecule_set_alpha","透明度"},{"molecule_set_color","颜色"},{"molecule_set_layer","图层"},
-        {"molecule_gradient_structure","渐变结构"},{"molecule_lerp_position","坐标"},{"molecule_lerp_x","横坐标"},{"molecule_lerp_y","纵坐标"},{"molecule_lerp_scale","缩放"},{"molecule_lerp_scale_x","横向缩放"},{"molecule_lerp_scale_y","纵向缩放"},{"molecule_lerp_rotation","旋转角度"},{"molecule_lerp_alpha","透明度"},{"molecule_lerp_color","颜色"},
+        {"molecule_gradient_structure","渐变结构"},{"molecule_merge_gradient_structure","合并分子并变换结构"},{"molecule_split_gradient_structure","分裂分子并变换结构"},{"molecule_lerp_position","坐标"},{"molecule_lerp_x","横坐标"},{"molecule_lerp_y","纵坐标"},{"molecule_lerp_scale","缩放"},{"molecule_lerp_scale_x","横向缩放"},{"molecule_lerp_scale_y","纵向缩放"},{"molecule_lerp_rotation","旋转角度"},{"molecule_lerp_alpha","透明度"},{"molecule_lerp_color","颜色"},
         {"arrow_new","新建箭头"},{"arrow_delete","删除箭头"},{"arrow_global_set_alpha","透明度"},{"arrow_global_set_color","颜色"},{"arrow_global_set_scale","缩放"},{"arrow_global_set_scale_x","横向缩放"},{"arrow_global_set_scale_y","纵向缩放"},{"arrow_global_set_width","线宽倍率"},
         {"arrow_set_curve","箭头曲线"},{"arrow_set_progress","绘制进度"},{"arrow_set_scale","缩放"},{"arrow_set_scale_x","横向缩放"},{"arrow_set_scale_y","纵向缩放"},{"arrow_set_alpha","透明度"},{"arrow_set_color","颜色"},{"arrow_set_width","线宽"},
         {"arrow_lerp_progress","绘制进度"},{"arrow_lerp_scale","缩放"},{"arrow_lerp_scale_x","横向缩放"},{"arrow_lerp_scale_y","纵向缩放"},{"arrow_lerp_alpha","透明度"},{"arrow_lerp_color","颜色"},{"arrow_lerp_width","线宽"}
@@ -361,6 +365,13 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
         const json p=parseParams(node);const std::string target=targetOf(p);auto found=result.molecules.find(target);Molecule* molecule=found==result.molecules.end()?nullptr:&found->second;
         const int duration=hasDuration(node.type)?framesOf(p):0;const Easing easing=easingOf(p);
         const NodeMetadata& meta=nodeMetadata(node.type);
+        if(node.type=="molecule_merge_gradient_structure"||node.type=="molecule_split_gradient_structure"){
+            const char* key=node.type=="molecule_merge_gradient_structure"?"source":"destination";
+            const std::string secondary=p.value(key,"");
+            if(secondary.empty()||secondary==target||!result.molecules.contains(secondary)||!liveTargets.contains(secondary)){
+                diagnostic(node,std::string(node.type=="molecule_merge_gradient_structure"?"并入分子":"分出分子")+"在该节点处无效: "+secondary);continue;
+            }
+        }
         if(node.type=="molecule_create"){
             if(!molecule){diagnostic(node,"新建分子节点引用了不存在的分子 "+target);continue;}
             if(++createCounts[target]>1)diagnostic(node,"旧文件包含重复的新建分子节点；该节点按兼容语义保留");
@@ -413,6 +424,29 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
                 molecule->poses=blended.poses;molecule->referenceBondLength=blended.referenceBondLength;
                 molecule->nextAtomId=std::max(molecule->nextAtomId,end->nextAtomId);molecule->nextBondId=std::max(molecule->nextBondId,end->nextBondId);molecule->nextAdornmentId=std::max(molecule->nextAdornmentId,end->nextAdornmentId);
             }catch(...){diagnostic(node,"渐变结构快照不是有效 JSON");}
+        }
+        else if((node.type=="molecule_merge_gradient_structure"||node.type=="molecule_split_gradient_structure")&&molecule&&frame>=timing.startFrame){
+            try{
+                const bool merging=node.type=="molecule_merge_gradient_structure";
+                const std::string secondaryId=p.value(merging?"source":"destination","");
+                Molecule& secondary=result.molecules.at(secondaryId);
+                const char* primaryStartKey=merging?"target_start_snapshot":"source_start_snapshot";
+                const char* primaryEndKey=merging?"target_end_snapshot":"source_end_snapshot";
+                const char* secondaryStartKey=merging?"source_start_snapshot":"destination_start_snapshot";
+                const char* secondaryEndKey=merging?"source_end_snapshot":"destination_end_snapshot";
+                const auto readSnapshot=[&](const char* key){json value=p.value(key,json::object());if(value.is_string())value=json::parse(value.get<std::string>());return moleculeSnapshot(value);};
+                const auto primaryStart=readSnapshot(primaryStartKey),primaryEnd=readSnapshot(primaryEndKey),secondaryStart=readSnapshot(secondaryStartKey),secondaryEnd=readSnapshot(secondaryEndKey);
+                if(!primaryStart||!primaryEnd||!secondaryStart||!secondaryEnd){diagnostic(node,"多分子结构变换缺少有效的局部结构快照");continue;}
+                const double raw=duration<=0?1.0:static_cast<double>(frame-timing.startFrame)/duration;
+                const double progress=easingValue(easing,raw);
+                const Molecule primaryBlend=blendMoleculeStructures(*primaryStart,*primaryEnd,progress);
+                const Molecule secondaryBlend=blendMoleculeStructures(*secondaryStart,*secondaryEnd,progress);
+                molecule->atoms=primaryBlend.atoms;molecule->bonds=primaryBlend.bonds;molecule->adornments=primaryBlend.adornments;molecule->poses=primaryBlend.poses;molecule->referenceBondLength=primaryBlend.referenceBondLength;
+                secondary.atoms=secondaryBlend.atoms;secondary.bonds=secondaryBlend.bonds;secondary.adornments=secondaryBlend.adornments;secondary.poses=secondaryBlend.poses;secondary.referenceBondLength=secondaryBlend.referenceBondLength;
+                molecule->nextAtomId=std::max(molecule->nextAtomId,primaryEnd->nextAtomId);molecule->nextBondId=std::max(molecule->nextBondId,primaryEnd->nextBondId);molecule->nextAdornmentId=std::max(molecule->nextAdornmentId,primaryEnd->nextAdornmentId);
+                secondary.nextAtomId=std::max(secondary.nextAtomId,secondaryEnd->nextAtomId);secondary.nextBondId=std::max(secondary.nextBondId,secondaryEnd->nextBondId);secondary.nextAdornmentId=std::max(secondary.nextAdornmentId,secondaryEnd->nextAdornmentId);
+                if(merging&&frame>=timing.endFrame){secondary.retired=true;secondary.visible=false;liveTargets.erase(secondaryId);}
+            }catch(...){diagnostic(node,"多分子结构变换快照不是有效 JSON");}
         }
         else if(node.type=="molecule_lerp_structure"&&molecule){
             try{json atoms=p.value("atoms",std::string("{}"));if(atoms.is_string())atoms=json::parse(atoms.get<std::string>());for(const auto& [id,value]:atoms.items())if(const Atom* atom=molecule->atom(id)){const std::string prefix=target+":atom:"+id;add(prefix+":x",atom->position.x,timing.startFrame,duration,value.value("x",atom->position.x),easing);add(prefix+":y",atom->position.y,timing.startFrame,duration,value.value("y",atom->position.y),easing);}else diagnostic(node,"结构形变引用了已经消失的原子 "+id);}

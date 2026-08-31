@@ -26,7 +26,7 @@
 
 - 对象身份：`molecule_create` 只建立稳定 molecule ID、名称、生命周期和独立 `anchor`；对象本身不保存可编辑结构。
 - 新空对象的 `anchor_initialized=false`。第一次提交非空结构时，Core 以存活原子的包围盒中心初始化一次真实锚点，同时反向平移局部坐标以保持画面不跳；此后拓扑变化不再自动重算锚点。缺少该字段的既有 v8 文件按已初始化处理，避免静默改变已有动画。
-- 结构状态：`molecule_set_structure` 保存瞬时完整结构；`molecule_gradient_structure` 保存起点/终点结构。快照中的 atom/bond/adornment 使用稳定 ID 和 molecule-local 坐标。
+- 结构状态：`molecule_set_structure` 保存瞬时完整结构；`molecule_gradient_structure` 保存单分子的起点/终点结构。`molecule_merge_gradient_structure` 固定主分子与并入分子并保存两套起止快照，`molecule_split_gradient_structure` 固定来源与分出分子并保存两套起止快照。快照中的 atom/bond/adornment 使用稳定 ID 和 molecule-local 坐标；多分子节点的确定性 ID 映射只存于节点内部，不向 UI 暴露。
 - 对象变换：位置节点修改 `anchor`，X/Y 缩放和旋转围绕该锚点求值；原子增删、首原子删除和拓扑变化都不能改变锚点。
 - 编辑视图：Core 将局部结构套用节点处的对象/全局变换后显示，并把世界空间手势经逆变换写回局部快照。洋葱皮属于编辑器覆盖层，不序列化、不导出。
 

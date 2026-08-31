@@ -97,6 +97,8 @@ class NodeList(QWidget):
         if scope=="transform":
             frames=_number(params.get("frames",30));easing=EASING_NAMES.get(params.get("easing","linear"),params.get("easing","linear"))
             if node_type=="molecule_gradient_structure":return f"{frames} 帧内将{target}结构渐变为终态，{easing}"
+            if node_type=="molecule_merge_gradient_structure":return f'{frames} 帧内将{target}与{molecule_name(project,params.get("source",""))}合并并变换结构，{easing}'
+            if node_type=="molecule_split_gradient_structure":return f'{frames} 帧内将{target}分裂为自身与{molecule_name(project,params.get("destination",""))}，{easing}'
             destination=f"变为 {value}" if value else "变为目标状态"
             return f"{frames} 帧内将{target}{action}{destination}，{easing}"
         if scope=="set":return f"设定{target}{action}"+(f"为 {value}" if value else "")

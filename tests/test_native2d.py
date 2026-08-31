@@ -843,7 +843,7 @@ def test_primary_node_hierarchy_matches_the_four_scope_authoring_contract():
     assert types("分子","object")==["molecule_create","molecule_delete","merge_molecules"]
     assert types("分子","global")==["molecule_global_set_alpha","molecule_global_set_color","molecule_global_set_scale","molecule_global_set_scale_x","molecule_global_set_scale_y"]
     assert types("分子","set")==["molecule_set_structure","molecule_set_position","molecule_set_x","molecule_set_y","molecule_set_scale","molecule_set_scale_x","molecule_set_scale_y","molecule_set_rotation","molecule_set_alpha","molecule_set_color","molecule_set_layer"]
-    assert types("分子","transform")==["molecule_gradient_structure","molecule_lerp_position","molecule_lerp_x","molecule_lerp_y","molecule_lerp_scale","molecule_lerp_scale_x","molecule_lerp_scale_y","molecule_lerp_rotation","molecule_lerp_alpha","molecule_lerp_color"]
+    assert types("分子","transform")==["molecule_gradient_structure","molecule_merge_gradient_structure","molecule_split_gradient_structure","molecule_lerp_position","molecule_lerp_x","molecule_lerp_y","molecule_lerp_scale","molecule_lerp_scale_x","molecule_lerp_scale_y","molecule_lerp_rotation","molecule_lerp_alpha","molecule_lerp_color"]
     assert types("箭头","object")==["arrow_new","arrow_delete"]
     assert types("箭头","global")==["arrow_global_set_alpha","arrow_global_set_color","arrow_global_set_scale","arrow_global_set_scale_x","arrow_global_set_scale_y","arrow_global_set_width"]
     assert types("箭头","set")==["arrow_set_curve","arrow_set_progress","arrow_set_scale","arrow_set_scale_x","arrow_set_scale_y","arrow_set_alpha","arrow_set_color","arrow_set_width"]
@@ -856,17 +856,81 @@ def test_primary_node_hierarchy_matches_the_four_scope_authoring_contract():
     assert "arrow_set_position" not in {item for scope in ("object","global","set","transform") for item in types("箭头",scope)}
 
 
+def test_merge_structure_transform_uses_two_fixed_molecules_and_preserves_world_geometry():
+    core=CoreSession();main=core.import_smiles("主分子","CC");joined=core.import_smiles("并入分子","O")
+    core.set_active_molecule(main);core.add_node("molecule_set_position",json.dumps({"target":main,"x":-40,"y":15}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":main,"value":1.5}));core.add_node("molecule_set_rotation",json.dumps({"target":main,"value":20}))
+    core.add_node("molecule_set_position",json.dumps({"target":joined,"x":90,"y":-25}))
+    before=core.evaluated_project(0);source_before=next(m for m in before["molecules"] if m["id"]==joined);source_points=[(a["x"],a["y"]) for a in source_before["atoms"] if a.get("alive",True)]
+    node=core.add_node("molecule_merge_gradient_structure",json.dumps({"source":joined,"frames":30,"easing":"linear"}))
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    assert params["target"]==main and params["source"]==joined and params["coordinate_space"]=="molecule_local_v2"
+    redirected=dict(params);redirected["source"]=main
+    try:core.update_node(node,json.dumps(redirected));assert False,"多分子结构变换不应允许重指向"
+    except RuntimeError:pass
+    assert params["id_map"]["atoms"] and not ({a["id"] for a in params["target_start_snapshot"]["atoms"]}&{a["id"] for a in params["source_start_snapshot"]["atoms"]})
+    middle=core.evaluated_project(15);middle_main=next(m for m in middle["molecules"] if m["id"]==main)
+    assert any(0<a["alpha"]<255 for a in middle_main["atoms"])
+    final=core.evaluated_project(30);main_final=next(m for m in final["molecules"] if m["id"]==main);source_final=next(m for m in final["molecules"] if m["id"]==joined)
+    assert source_final["retired"] and not source_final["visible"]
+    final_points=[(a["x"],a["y"]) for a in main_final["atoms"] if a.get("alive",True)]
+    for expected in source_points:assert min(((x-expected[0])**2+(y-expected[1])**2)**.5 for x,y in final_points)<1e-6
+    restored=CoreSession();restored.replace_json(core.json());assert restored.evaluated_project(30)==final
+    lua=core.generate_lua();assert lua.count("LerpStructure(")>=2 and f"{joined}:Delete()" in lua
+
+
+def test_split_structure_transform_moves_deleted_subgraph_to_second_molecule_without_ids_in_ui_schema():
+    core=CoreSession();source=core.import_smiles("来源分子","CC");destination=core.add_blank_molecule("分出分子");core.set_active_molecule(source)
+    core.add_node("molecule_set_position",json.dumps({"target":source,"x":75,"y":20}));core.add_node("molecule_set_rotation",json.dumps({"target":source,"value":-25}))
+    node=core.add_node("molecule_split_gradient_structure",json.dumps({"destination":destination,"frames":20,"easing":"linear"}))
+    core.edit_node(node);core.set_viewport(960,540,1,0,0);core.set_tool("eraser")
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"];removed=params["source_end_snapshot"]["atoms"][-1]["id"]
+    before=core.evaluated_project(0);source_before=next(m for m in before["molecules"] if m["id"]==source);expected=next((a["x"],a["y"]) for a in source_before["atoms"] if a["id"]==removed)
+    point=next(item["center"] for item in core.depict(False)["atoms"] if item["id"]==removed);core.pointer_down(point["x"],point["y"]);assert core.pointer_up(point["x"],point["y"])["changed"]
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    assert len([a for a in params["destination_end_snapshot"]["atoms"] if a.get("alive",True)])==1 and params["id_map"]["atoms"][removed]
+    final=core.evaluated_project(20);source_final=next(m for m in final["molecules"] if m["id"]==source);destination_final=next(m for m in final["molecules"] if m["id"]==destination)
+    assert len([a for a in source_final["atoms"] if a.get("alive",True)])==1 and len([a for a in destination_final["atoms"] if a.get("alive",True)])==1
+    actual=next((a["x"],a["y"]) for a in destination_final["atoms"] if a.get("alive",True));assert abs(actual[0]-expected[0])<1e-6 and abs(actual[1]-expected[1])<1e-6
+    definition=next(item for item in core.node_registry() if item["type"]=="molecule_split_gradient_structure")
+    assert [field["key"] for field in definition["fields"]]==["target","destination","frames","easing"] and all("ID" not in field["label"] for field in definition["fields"])
+    restored=CoreSession();restored.replace_json(core.json());assert restored.evaluated_project(20)==final
+
+
+def test_split_structure_transform_creates_its_output_identity_as_one_undo_transaction():
+    core=CoreSession();source=core.import_smiles("来源","CC");before=core.project();node=core.add_node("molecule_split_gradient_structure",json.dumps({"frames":12}))
+    project=core.project();created=next(item for item in project["nodes"] if item["id"]==node);destination=created["params"]["destination"]
+    assert destination!=source and len(project["molecules"])==len(before["molecules"])+1
+    index=next(index for index,item in enumerate(project["nodes"]) if item["id"]==node)
+    assert project["nodes"][index-1]["type"]=="molecule_create" and project["nodes"][index-1]["params"]["target"]==destination
+    assert core.undo() and core.project()==before
+    assert core.redo() and next(item for item in core.project()["nodes"] if item["id"]==node)["params"]["destination"]==destination
+
+
+def test_split_structure_transform_treats_erased_bridge_as_the_natural_split_gesture():
+    core=CoreSession();source=core.import_smiles("来源","CCC");core.set_active_molecule(source);node=core.add_node("molecule_split_gradient_structure",json.dumps({"frames":10}));core.edit_node(node);core.set_viewport(960,540,1,0,0);core.set_tool("eraser")
+    bond=core.depict(False)["bonds"][-1];point=((bond["first"]["x"]+bond["second"]["x"])*.5,(bond["first"]["y"]+bond["second"]["y"])*.5)
+    core.pointer_down(*point);assert core.pointer_up(*point)["changed"]
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    assert len([atom for atom in params["source_end_snapshot"]["atoms"] if atom.get("alive",True)])==2
+    assert len([atom for atom in params["destination_end_snapshot"]["atoms"] if atom.get("alive",True)])==1
+
+
 def test_every_public_transform_node_exposes_a_deterministic_comparison_frame():
     registry=[item for item in CoreSession().node_registry() if item["scope"]=="transform" and item["exposure"]=="primary"]
     assert registry
     for definition in registry:
         core=CoreSession();molecule=core.import_smiles("比较对象","CC")
+        secondary=core.import_smiles("第二对象","O") if definition["type"] in ("molecule_merge_gradient_structure","molecule_split_gradient_structure") else ""
+        core.set_active_molecule(molecule)
         core.add_node("arrow_new",json.dumps({"target":"arrow1"}))
         core.add_node("arrow_set_curve",json.dumps({"target":"arrow1","initialized":True,"x1":-40,"y1":0,"cx1":-10,"cy1":30,"cx2":20,"cy2":30,"x2":50,"y2":0}))
         core.add_node("wait",json.dumps({"frames":7}))
         params={field["key"]:field.get("default") for field in definition["fields"]}
         if definition["target_kind"]=="molecule":params["target"]=molecule
         elif definition["target_kind"]=="arrow":params["target"]="arrow1"
+        if definition["type"]=="molecule_merge_gradient_structure":params["source"]=secondary
+        elif definition["type"]=="molecule_split_gradient_structure":params["destination"]=secondary
         node=core.add_node(definition["type"],json.dumps(params));core.edit_node(node)
         timing=next(item for item in core.node_timings() if item["id"]==node)
         assert core.comparison_frame==timing["start"],definition["type"]

@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialo
 from .canvas import StructureCanvas
 from .core import BUILD_COMMIT, DOCUMENT_VERSION, CoreSession
 from .mode_toolbar import ModeToolPanel
-from .node_inspector import LEGACY_STRUCTURE_TYPES, NodeInspector, molecule_name
+from .node_inspector import (LEGACY_STRUCTURE_TYPES, STRUCTURE_TRANSFORM_TYPES,
+                             NodeInspector, molecule_name)
 from .node_list import NodeList
 from .periodic_table import PeriodicTableDialog
 from .scene_inspector import SceneInspector
@@ -121,7 +122,7 @@ class MainWindow(QMainWindow):
         elif self.session.edit_target_kind=="base_structure":self.edit_mode.setText("编辑：基础结构节点")
         elif self.session.edit_target_kind=="structure_snapshot":
             node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==self.session.edit_target_id),{})
-            self.edit_mode.setText("正在编辑：渐变结构终态" if node.get("type")=="molecule_gradient_structure" else "正在编辑：分子结构")
+            self.edit_mode.setText("正在编辑：结构变换终态" if node.get("type") in STRUCTURE_TRANSFORM_TYPES else "正在编辑：分子结构")
         elif self.session.edit_target_kind=="script_node":self.edit_mode.setText("编辑：动画节点")
         else:self.edit_mode.setText("预览：只读")
 
@@ -136,27 +137,28 @@ class MainWindow(QMainWindow):
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
         self.canvas.show_edit_frame(frame)
-        is_gradient=node["type"]=="molecule_gradient_structure";self.gradient_controls.setVisible(is_gradient)
+        is_gradient=node["type"] in STRUCTURE_TRANSFORM_TYPES;self.gradient_controls.setVisible(is_gradient)
         for key,button in self.gradient_buttons.items():button.setChecked(is_gradient and key=="end")
         definition=next((item for item in self.session.node_registry() if item["type"]==node["type"]),{})
         target=node.get("params",{}).get("target","");human_target=molecule_name(self.session.project(),target) if target else ""
         legacy_gradient=is_gradient and self.session.gradient_summary(node_id).get("legacy_coordinate_space",False)
         if node["type"] in LEGACY_STRUCTURE_TYPES:human="旧版结构节点，仅用于兼容"
-        elif is_gradient:human=f"渐变结构 · {human_target}"
+        elif is_gradient:human=f'{definition.get("label","结构变换")} · {human_target}'
         else:human=definition.get("label","节点")
-        label="编辑：场景节点" if node["type"]=="scene" else ("旧渐变结构使用了显示坐标，需要重建终态" if legacy_gradient else "正在编辑：渐变结构终态" if is_gradient else "正在编辑：分子结构" if node["type"]=="molecule_set_structure" and self.session.can_edit_structure else f'编辑节点：{human}')
+        label="编辑：场景节点" if node["type"]=="scene" else ("旧结构变换使用了显示坐标，需要重建终态" if legacy_gradient else f'正在编辑：{definition.get("label","结构变换")}终态' if is_gradient else "正在编辑：分子结构" if node["type"]=="molecule_set_structure" and self.session.can_edit_structure else f'编辑节点：{human}')
         self.statusBar().showMessage(label if legacy_gradient else human)
         self._sync_edit_state(label);return True
 
     def _show_gradient_phase(self,phase):
         node_id=self.node_list.current_id();node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
-        if not node or node["type"]!="molecule_gradient_structure":return
+        if not node or node["type"] not in STRUCTURE_TRANSFORM_TYPES:return
+        definition=next((item for item in self.session.node_registry() if item["type"]==node["type"]),{});name=definition.get("label","结构变换")
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"start":0,"end":0})
         for key,button in self.gradient_buttons.items():button.setChecked(key==phase)
         if phase=="end":
-            self.session.edit_node(node_id);frame=int(timing["end"]);self.canvas.show_edit_frame(frame);label="正在编辑：渐变结构终态" if self.session.can_edit_structure else "旧渐变结构使用了显示坐标，需要重建终态";self._sync_edit_state(label)
+            self.session.edit_node(node_id);frame=int(timing["end"]);self.canvas.show_edit_frame(frame);label=f"正在编辑：{name}终态" if self.session.can_edit_structure else "旧结构变换使用了显示坐标，需要重建终态";self._sync_edit_state(label)
         else:
-            frame=int(timing["start"] if phase=="start" else self.frame_spin.value());self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state("渐变结构起点：只读" if phase=="start" else "渐变结构当前帧：只读")
+            frame=int(timing["start"] if phase=="start" else self.frame_spin.value());self.session.preview_timeline(frame);self.canvas.show_edit_frame(frame);self._sync_edit_state(f"{name}起点：只读" if phase=="start" else f"{name}当前帧：只读")
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False);self.canvas.request_refresh()
 
     def _select_default_authoring_node(self):
@@ -239,7 +241,7 @@ class MainWindow(QMainWindow):
         elif node_type.startswith("arrow_") and not params.get("target"):params["target"]=self._latest_arrow(index)
         if node_type=="arrow_set_curve":params["initialized"]=False
         node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index);self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
-        if node_type=="molecule_gradient_structure":open_editor=False
+        if node_type in STRUCTURE_TRANSFORM_TYPES:open_editor=False
         if open_editor:self._edit_node_dialog(node_id)
         return node_id
 
