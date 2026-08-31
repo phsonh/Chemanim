@@ -98,6 +98,10 @@ struct Molecule {
     // molecule-local coordinates and never act as the object's transform
     // anchor.
     Point origin;
+    // New empty v8 objects have no meaningful transform centre until their
+    // first non-empty structure state is committed.  Older v8 documents are
+    // treated as initialized to preserve their authored animation exactly.
+    bool anchorInitialized = false;
     double referenceBondLength = 32.0;
     std::uint64_t nextAtomId = 1;
     std::uint64_t nextBondId = 1;

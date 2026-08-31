@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDoubleSpinBox, QToolBar, QToolButton
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+                             QLineEdit, QPlainTextEdit, QSpinBox, QToolBar,
+                             QPushButton, QToolButton)
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
@@ -39,6 +42,15 @@ def active_structure(value):
     node=next(item for item in value.session.project()["nodes"] if item["id"]==current)
     key="end_snapshot" if node["type"]=="molecule_gradient_structure" else "snapshot"
     return node["params"][key]
+
+
+def open_inspector_real(value,node_id):
+    item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node_id)
+    value.node_list.tree.scrollToItem(item);QApplication.processEvents();rect=value.node_list.tree.visualItemRect(item)
+    QTest.mouseClick(value.node_list.tree.viewport(),Qt.MouseButton.LeftButton,pos=rect.center());QTest.qWait(40)
+    QTest.mouseDClick(value.node_list.tree.viewport(),Qt.MouseButton.LeftButton,pos=rect.center(),delay=60);QApplication.processEvents()
+    assert value.inspector_panel.isVisible() and value.inspector.node_id==node_id
+    return value.inspector
 
 
 def test_scene_is_single_core_state_and_artboard_updates():
@@ -80,6 +92,70 @@ def test_node_ui_edits_the_core_ordered_sequence(tmp_path:Path):
     timing=next(item for item in value.session.node_timings() if item["id"]==lerp_id);assert timing["start"]==0
     path=tmp_path/"ui-roundtrip.cmm";value.session.save(str(path));value.session.load(str(path))
     assert [node["id"] for node in value.session.project()["nodes"]]==[node["id"] for node in json.loads(path.read_text(encoding="utf-8"))["nodes"]]
+    value.close()
+
+
+def test_node_move_cannot_cross_its_object_creation_boundary():
+    value=window();target=value.session.import_smiles("苯","c1ccccc1");value.node_list.refresh()
+    nodes=value.session.project()["nodes"];create=next(node for node in nodes if node["type"]=="molecule_create" and node["params"]["target"]==target)
+    structure=next(node for node in nodes if node["type"]=="molecule_set_structure" and node["params"]["target"]==target)
+    item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==structure["id"])
+    value.node_list.tree.setCurrentItem(item);before=[node["id"] for node in nodes]
+    up=next(button for button in value.node_list.findChildren(QPushButton) if button.text()=="上移")
+    QTest.mouseClick(up,Qt.MouseButton.LeftButton);QApplication.processEvents()
+    assert [node["id"] for node in value.session.project()["nodes"]]==before
+    assert value.node_list.current_id()==structure["id"] and value.session.depict_at(0)["atoms"]
+    assert next(index for index,node in enumerate(nodes) if node["id"]==create["id"])<next(index for index,node in enumerate(nodes) if node["id"]==structure["id"])
+    value.close()
+
+
+def test_node_list_ctrl_copy_paste_inserts_after_selection_and_deep_copies_creation():
+    value=window();first=value._add_node("wait",{"frames":11},False);second=value._add_node("wait",{"frames":22},False)
+    def select(node_id):
+        item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node_id)
+        value.node_list.tree.setCurrentItem(item);value.node_list.tree.setFocus();QApplication.processEvents()
+    select(first);QTest.keyClick(value.node_list.tree,Qt.Key.Key_C,Qt.KeyboardModifier.ControlModifier)
+    select(second);QTest.keyClick(value.node_list.tree,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    pasted=value.node_list.current_id();nodes=value.session.project()["nodes"];ids=[node["id"] for node in nodes]
+    assert ids.index(pasted)==ids.index(second)+1 and next(node for node in nodes if node["id"]==pasted)["params"]["frames"]==11
+    value.undo();assert pasted not in [node["id"] for node in value.session.project()["nodes"]]
+    create=next(node for node in value.session.project()["nodes"] if node["type"]=="molecule_create")
+    select(create["id"]);QTest.keyClick(value.node_list.tree,Qt.Key.Key_C,Qt.KeyboardModifier.ControlModifier);QTest.keyClick(value.node_list.tree,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    creation_nodes=[node for node in value.session.project()["nodes"] if node["type"]=="molecule_create"]
+    assert len(creation_nodes)==2 and len({node["params"]["target"] for node in creation_nodes})==2
+    value.close()
+
+
+def test_editor_arrow_uses_v1_progress_shape_with_a_filled_head():
+    value=window();path,head=value.canvas._arrow_shape(QPointF(0,0),QPointF(30,-40),QPointF(70,-40),QPointF(100,0),1.0,20.0,15.0)
+    assert len(head)==3 and abs(head[0].x()-100)<1e-6 and abs(head[0].y())<1e-6
+    assert path.currentPosition().x()<head[0].x()
+    half_path,half_head=value.canvas._arrow_shape(QPointF(0,0),QPointF(30,0),QPointF(70,0),QPointF(100,0),.5,20.0,15.0)
+    assert len(half_head)==3 and 45<half_head[0].x()<55 and half_path.currentPosition().x()<half_head[0].x()
+    value.close()
+
+
+def test_arrow_curve_editor_shows_complete_arrow_when_draw_progress_is_zero():
+    value=window();created=value._add_node("arrow_new",{"target":"arrow1"},False);curve=value._add_node("arrow_set_curve",{"target":"arrow1"},False)
+    value.session.update_node(curve,json.dumps({"target":"arrow1","x1":-80,"y1":0,"cx1":-30,"cy1":50,"cx2":30,"cy2":50,"x2":80,"y2":0,"initialized":True}))
+    value._add_node("arrow_set_progress",{"target":"arrow1","value":0},False);value._node_selected(curve);value.canvas._sync_core_viewport()
+    assert value.session.evaluated_arrows(value.canvas.preview_frame)["arrow1"]["progress"]==0
+    image=QImage(value.canvas.size(),QImage.Format.Format_ARGB32);image.fill(QColor(0,0,0,0));painter=QPainter(image);value.canvas._draw_arrows(painter);painter.end()
+    painted=sum(image.pixelColor(x,y).alpha()>0 for x in range(image.width()) for y in range(image.height()))
+    assert 100<painted<2500
+    value.close()
+
+
+def test_node_list_is_one_natural_language_column():
+    value=window();target=value.session.active_molecule
+    value._add_node("molecule_set_alpha",{"target":target,"value":255},False)
+    value._add_node("molecule_lerp_position",{"target":target,"x":0,"y":0,"frames":30,"easing":"linear"},False)
+    value._add_node("wait",{"frames":120},False);value.node_list.refresh()
+    texts=[value.node_list.tree.topLevelItem(index).text(0) for index in range(value.node_list.tree.topLevelItemCount())]
+    assert value.node_list.tree.columnCount()==1 and value.node_list.tree.isHeaderHidden()
+    assert "设定分子 1透明度为 255" in texts
+    assert "30 帧内将分子 1坐标变为 (0, 0)，线性" in texts
+    assert "等待 120 帧" in texts
     value.close()
 
 
@@ -191,7 +267,7 @@ def test_primary_node_toolbar_uses_four_visible_rows_and_direct_action_buttons()
 def test_gradient_inspector_and_tree_hide_internal_ids_and_legacy_fields():
     value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
     node=value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()
-    item=value.node_list.tree.currentItem();assert item.text(0)=="渐变结构 · 苯" and "N" not in item.text(0)
+    item=value.node_list.tree.currentItem();assert item.text(0)=="30 帧内将苯结构渐变为终态，线性" and "N" not in item.text(0)
     inspector=NodeInspector(value.session);inspector.set_node(node)
     visible=" ".join(label.text() for label in inspector.findChildren(__import__('PyQt6.QtWidgets',fromlist=['QLabel']).QLabel))
     assert "目标分子" not in visible or "苯" in visible
@@ -419,6 +495,73 @@ def test_double_click_parameter_panel_is_nonmodal_and_coordinate_drag_uses_real_
     assert abs(params["x"]-(after_world.x()-before_world.x()))<1.0 and abs(params["y"]-(after_world.y()-before_world.y()))<1.0
     assert abs(value.inspector.editors["x"][0].value()-params["x"])<.01
     value.close()
+
+
+def test_alpha_real_keyboard_commits_keep_inspector_alive_and_use_one_undo_each():
+    value=window();target=value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    node=value._add_node("molecule_set_alpha",{"target":target,"value":255},False);inspector=open_inspector_real(value,node)
+    editor=inspector.editors["value"][0];assert isinstance(editor,QSpinBox)
+    def commit(number,key):
+        editor.setFocus();QTest.keyClick(editor,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(editor,str(number));QTest.keyClick(editor,key);QApplication.processEvents();QTest.qWait(40)
+        assert inspector.node_id==node and inspector.editors["value"][0] is editor and value.inspector_panel.isVisible()
+        return next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["value"]
+    assert commit(0,Qt.Key.Key_Return)==0
+    evaluated=next(item for item in value.session.evaluated_project(value.session.preview_frame)["molecules"] if item["id"]==target);assert evaluated["alpha"]==0
+    assert commit(128,Qt.Key.Key_Tab)==128
+    assert commit(255,Qt.Key.Key_Return)==255
+    value.undo();assert next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["value"]==128
+    value.undo();assert next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["value"]==0
+    value.undo();assert next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["value"]==255
+    value.redo();assert next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["value"]==0
+    value.close()
+
+
+def test_all_parameter_widget_classes_use_real_events_without_rebuilding(tmp_path):
+    value=window();target=value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
+    second=value.session.add_blank_molecule("第二分子");second_create=next(item["id"] for item in value.session.project()["nodes"] if item["type"]=="molecule_create" and item["params"]["target"]==second);value.refresh_all(second_create);value._node_selected(second_create)
+
+    position=value._add_node("molecule_lerp_position",{"target":target,"x":0.0,"y":0.0,"frames":30,"easing":"linear"},False)
+    inspector=open_inspector_real(value,position);x=inspector.editors["x"][0];frames=inspector.editors["frames"][0];easing=inspector.editors["easing"][0]
+    assert isinstance(x,QDoubleSpinBox) and isinstance(frames,QSpinBox) and isinstance(easing,QComboBox)
+    x.setFocus();QTest.keyClick(x,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(x,"42.5");QTest.keyClick(x,Qt.Key.Key_Return)
+    frames.setFocus();QTest.keyClick(frames,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(frames,"18");QTest.keyClick(frames,Qt.Key.Key_Tab)
+    easing.setFocus();QTest.keyClick(easing,Qt.Key.Key_Down);QApplication.processEvents();assert inspector.editors["x"][0] is x
+
+    alpha=value._add_node("molecule_set_alpha",{"target":target,"value":255},False);inspector=open_inspector_real(value,alpha);target_box=inspector.editors["target"][0]
+    assert isinstance(target_box,QComboBox) and target_box.count()>=2;choice=target_box.findData(second);assert choice>=0
+    target_box.setFocus();target_box.showPopup();QApplication.processEvents();QTest.keyClick(target_box,Qt.Key.Key_End);QTest.keyClick(target_box,Qt.Key.Key_Return);QApplication.processEvents()
+    assert next(item for item in value.session.project()["nodes"] if item["id"]==alpha)["params"]["target"]==second
+
+    color=value._add_node("molecule_set_color",{"target":target,"r":255,"g":255,"b":255},False);inspector=open_inspector_real(value,color);red=inspector.editors["r"][0]
+    assert isinstance(red,QSpinBox);red.setFocus();QTest.keyClick(red,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(red,"64");QTest.keyClick(red,Qt.Key.Key_Return);QApplication.processEvents()
+    layer=value._add_node("molecule_set_layer",{"target":target,"value":0},False);inspector=open_inspector_real(value,layer);layer_spin=inspector.editors["value"][0]
+    assert isinstance(layer_spin,QSpinBox);layer_spin.setFocus();QTest.keyClick(layer_spin,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(layer_spin,"3");QTest.keyClick(layer_spin,Qt.Key.Key_Tab);QApplication.processEvents()
+
+    visible=value._add_node("molecule_set_visible",{"target":target,"value":True},False);inspector=open_inspector_real(value,visible);check=inspector.editors["value"][0]
+    assert isinstance(check,QCheckBox);check.setFocus();QTest.keyClick(check,Qt.Key.Key_Space);QApplication.processEvents();assert not next(item for item in value.session.project()["nodes"] if item["id"]==visible)["params"]["value"]
+
+    atom=next(item for item in value.session.evaluated_project(0)["molecules"] if item["id"]==target)["atoms"][0]["id"]
+    text_node=value._add_node("atom_set_element",{"target":target,"atom":atom,"value":"C"},False);inspector=open_inspector_real(value,text_node);line=inspector.editors["value"][0]
+    assert isinstance(line,QLineEdit);line.setFocus();QTest.keyClick(line,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(line,"N");QTest.keyClick(line,Qt.Key.Key_Return);QApplication.processEvents()
+
+    raw=value._add_node("raw_lua",{"code":"-- initial"},False);inspector=open_inspector_real(value,raw);multiline=inspector.editors["code"][0]
+    assert isinstance(multiline,QPlainTextEdit);multiline.setFocus();QTest.keyClick(multiline,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(multiline,"-- edited once");QTest.qWait(320);QApplication.processEvents()
+    assert inspector.editors["code"][0] is multiline and next(item for item in value.session.project()["nodes"] if item["id"]==raw)["params"]["code"]=="-- edited once"
+
+    arrow=value._add_node("arrow_new",{"target":"arrow1"},False);curve=value._add_node("arrow_set_curve",{"target":"arrow1"},False);inspector=open_inspector_real(value,curve);control=inspector.editors["cx1"][0]
+    assert isinstance(control,QDoubleSpinBox);control.setFocus();QTest.keyClick(control,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(control,"73.5");QTest.keyClick(control,Qt.Key.Key_Return);QApplication.processEvents();assert inspector.editors["cx1"][0] is control
+
+    saved=tmp_path/"parameter-controls.cmm";value.session.save(str(saved));value.load(saved)
+    reopened={item["id"]:item for item in value.session.project()["nodes"]};assert reopened[position]["params"]["x"]==42.5 and reopened[position]["params"]["frames"]==18
+    assert reopened[color]["params"]["r"]==64 and reopened[layer]["params"]["value"]==3
+    assert reopened[text_node]["params"]["value"]=="N" and reopened[raw]["params"]["code"]=="-- edited once" and reopened[curve]["params"]["cx1"]==73.5
+    value.close()
+
+
+def test_parameter_panel_native_crash_probe_exits_cleanly():
+    run=subprocess.run([sys.executable,"-X","faulthandler","-u",str(ROOT/"tools"/"probe_parameter_panel.py")],cwd=ROOT,capture_output=True,text=True,timeout=30)
+    assert run.returncode==0,(run.returncode,run.stdout,run.stderr)
+    assert '"checkpoint": "alpha-committed"' in run.stdout and '"stored": 0' in run.stdout and '"checkpoint": "normal-exit"' in run.stdout
 
 
 def test_arrow_curve_real_ui_free_drag_then_all_four_handles_remain_editable():

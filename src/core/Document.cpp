@@ -449,6 +449,7 @@ std::string toJson(const Project& project, int indent) {
     for (const Molecule& molecule : project.molecules) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
             {"anchor", {{"x", molecule.origin.x}, {"y", molecule.origin.y}}},
+            {"anchor_initialized", molecule.anchorInitialized},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
             {"next_bond_id", molecule.nextBondId}, {"next_adornment_id", molecule.nextAdornmentId},
             {"rotation", molecule.rotation}, {"scale_x", molecule.scaleX}, {"scale_y", molecule.scaleY}, {"alpha", molecule.alpha},
@@ -518,7 +519,14 @@ Project fromJson(const std::string& source) {
     for (const json& raw : root.value("molecules", json::array())) {
         Molecule molecule;
         molecule.id = raw.value("id", ""); molecule.name = raw.value("name", molecule.id); molecule.sourceSmiles = raw.value("source_smiles", "");
-        if (version >= 8) molecule.origin = pointFromJson(raw.value("anchor", json::object()));
+        if (version >= 8) {
+            molecule.origin = pointFromJson(raw.value("anchor", json::object()));
+            // b531d49-era v8 files did not persist this bit.  They may already
+            // contain animated local snapshots, so silently re-centring them
+            // would alter the picture.  Only newly authored files explicitly
+            // opt into the one-time initialization path with false.
+            molecule.anchorInitialized = raw.value("anchor_initialized", true);
+        }
         molecule.referenceBondLength = raw.value("reference_bond_length", molecule.referenceBondLength);
         molecule.nextAtomId = raw.value("next_atom_id", std::uint64_t{1}); molecule.nextBondId = raw.value("next_bond_id", std::uint64_t{1});
         molecule.nextAdornmentId = raw.value("next_adornment_id", std::uint64_t{1});
@@ -639,6 +647,7 @@ Project fromJson(const std::string& source) {
             Point anchor{};
             if (const Atom* atom = molecule.anchorAtom()) anchor = atom->position;
             molecule.origin = anchor;
+            molecule.anchorInitialized = true;
 
             Molecule local = molecule;
             local.origin = {};
@@ -665,7 +674,7 @@ Project fromJson(const std::string& source) {
                 temporary.molecules = {local};
                 temporary.nodes.clear();
                 json snapshot = json::parse(toJson(temporary, 0))["molecules"][0];
-                for (const char* key : {"source_smiles", "anchor", "rotation", "scale_x",
+                for (const char* key : {"source_smiles", "anchor", "anchor_initialized", "rotation", "scale_x",
                                         "scale_y", "alpha", "color", "layer", "visible",
                                         "retired", "poses"}) snapshot.erase(key);
                 const auto create = std::find_if(project.nodes.begin(), project.nodes.end(),
@@ -694,6 +703,7 @@ Project fromJson(const std::string& source) {
                     atom["y"] = atom.value("y", 0.0) - anchor.y;
                 }
                 snapshot.erase("anchor");
+                snapshot.erase("anchor_initialized");
             };
             for (ScriptNode& node : project.nodes) {
                 json params = json::parse(node.paramsJson);

@@ -120,7 +120,7 @@ public:
     bool updateNode(const std::string& id,const std::string& params){return session_.updateScriptNode(id,params);}
     bool enableNode(const std::string& id,bool enabled){return session_.setScriptNodeEnabled(id,enabled);}
     bool moveNode(const std::string& id,int index){return index>=0&&session_.moveScriptNode(id,static_cast<std::size_t>(index));}
-    std::string duplicateNode(const std::string& id){return session_.duplicateScriptNode(id);}
+    std::string duplicateNode(const std::string& id,int index=-1){return session_.duplicateScriptNode(id,index<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(index)));}
     bool deleteNode(const std::string& id){return session_.deleteScriptNode(id);}
     py::object gradientSummary(const std::string& id)const{return jsonObject(session_.gradientStructureSummary(id));}
     bool rebuildGradient(const std::string& id){return session_.rebuildGradientStructure(id);}
@@ -293,7 +293,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("node_registry",&CoreSession::nodeRegistry).def("node_timings",&CoreSession::nodeTimings)
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
-        .def("duplicate_node",&CoreSession::duplicateNode).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
+        .def("duplicate_node",&CoreSession::duplicateNode,py::arg("id"),py::arg("index")=-1).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
         .def("gradient_summary",&CoreSession::gradientSummary).def("rebuild_gradient",&CoreSession::rebuildGradient)
         .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("diagnostics",&CoreSession::diagnostics).def("evaluated_project",&CoreSession::evaluatedProject)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)

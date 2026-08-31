@@ -209,21 +209,55 @@ class StructureCanvas(QWidget):
             y += spacing
         painter.restore()
 
+    @staticmethod
+    def _cubic(p0, p1, p2, p3, t):
+        u=1.0-t
+        return QPointF(u**3*p0.x()+3*u*u*t*p1.x()+3*u*t*t*p2.x()+t**3*p3.x(),
+                       u**3*p0.y()+3*u*u*t*p1.y()+3*u*t*t*p2.y()+t**3*p3.y())
+
+    def _arrow_shape(self,p0,p1,p2,p3,progress,head_length,head_width):
+        progress=max(0.0,min(1.0,progress));path=QPainterPath(p0)
+        if progress<=0:return path,QPolygonF()
+        samples=192;points=[self._cubic(p0,p1,p2,p3,index/samples) for index in range(samples+1)];cumulative=[0.0]
+        for index in range(1,len(points)):
+            delta=points[index]-points[index-1];cumulative.append(cumulative[-1]+(delta.x()**2+delta.y()**2)**.5)
+        def through_length(target):
+            result=[points[0]]
+            for index in range(1,len(points)):
+                if cumulative[index]<=target:result.append(points[index]);continue
+                segment=cumulative[index]-cumulative[index-1]
+                if target>cumulative[index-1] and segment>0:
+                    local=(target-cumulative[index-1])/segment;a,b=points[index-1],points[index]
+                    result.append(QPointF(a.x()+(b.x()-a.x())*local,a.y()+(b.y()-a.y())*local))
+                break
+            return result
+        target_length=cumulative[-1]*progress;tip_points=through_length(target_length)
+        if len(tip_points)<2:return path,QPolygonF()
+        tip=tip_points[-1];shaft_points=through_length(max(0.0,target_length-head_length));base=shaft_points[-1]
+        for point in shaft_points[1:]:path.lineTo(point)
+        delta=tip-base;axis_length=max(.001,(delta.x()**2+delta.y()**2)**.5);width_scale=min(1.0,axis_length/max(1.0,head_length))
+        normal=QPointF(-delta.y()/axis_length*head_width*width_scale*.5,delta.x()/axis_length*head_width*width_scale*.5)
+        return path,QPolygonF([tip,base+normal,base-normal])
+
     def _draw_arrows(self, painter,frame=None,onion=False):
-        for arrow in self.session.evaluated_arrows(self.preview_frame if frame is None else frame).values():
-            if not arrow["exists"] or not arrow["visible"] or arrow["alpha"] <= 0 or arrow["progress"] <= 0:
+        edited=next((node for node in self.session.project().get("nodes",[]) if node["id"]==self.session.edit_target_id),None)
+        edited_curve=(edited or {}).get("type")=="arrow_set_curve";edited_target=(edited or {}).get("params",{}).get("target","")
+        for arrow_id,arrow in self.session.evaluated_arrows(self.preview_frame if frame is None else frame).items():
+            curve_context=edited_curve and edited_target==arrow_id and frame is None and not self.final_effect
+            progress=1.0 if curve_context else arrow["progress"]
+            if not arrow["exists"] or not arrow["visible"] or (arrow["alpha"]<=0 and not curve_context) or progress<=0:
                 continue
             pos = arrow["position"]
             def point(name):
                 value = arrow[name]
                 return self.world_to_screen(QPointF(value["x"]+pos["x"], value["y"]+pos["y"]))
-            path = QPainterPath(point("start"))
-            path.cubicTo(point("control1"), point("control2"), point("end"))
+            stroke=max(.7,arrow["width"]*self.view_scale)
+            path,head=self._arrow_shape(point("start"),point("control1"),point("control2"),point("end"),progress,stroke*(20.0/3.0),stroke*5.0)
             color = QColor(55,145,225,92) if onion else QColor(*(max(0,min(255,round(arrow[key]))) for key in ("r","g","b","alpha")))
-            painter.setPen(QPen(color, max(.7, arrow["width"]*self.view_scale), Qt.PenStyle.SolidLine,
+            if curve_context and color.alpha()==0:color=QColor(44,145,235,150)
+            painter.setPen(QPen(color,stroke, Qt.PenStyle.SolidLine,
                                 Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
+            painter.setBrush(Qt.BrushStyle.NoBrush);painter.drawPath(path);painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(color);painter.drawPolygon(head)
 
     def _draw_direct_controls(self,painter):
         controls={item["id"]:self.world_to_screen(QPointF(item["position"]["x"],item["position"]["y"])) for item in self.session.direct_controls()}

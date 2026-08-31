@@ -62,8 +62,8 @@ class MainWindow(QMainWindow):
         """)
         self._build_actions();self._build_menu()
         self.mode_panel=ModeToolPanel(self.session);self.mode_panel.nodeRequested.connect(self._add_node);self.mode_panel.drawToolRequested.connect(self._set_tool);self.mode_panel.elementRequested.connect(self._set_element);self.mode_panel.periodicTableRequested.connect(self.choose_element)
-        self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(420);self.node_list.setMaximumWidth(600);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited);self.node_list.undoRequested.connect(self.undo);self.node_list.redoRequested.connect(self.redo)
-        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.manipulationChanged.connect(lambda:self.inspector.refresh() if self.inspector_panel.isVisible() else None);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo);self.canvas.atomTextRequested.connect(self._edit_atom_text)
+        self.node_list=NodeList(self.session);self.node_list.setMinimumWidth(420);self.node_list.setMaximumWidth(600);self.node_list.nodeSelected.connect(self._node_selected);self.node_list.editRequested.connect(self._edit_node_dialog);self.node_list.frameRequested.connect(self._set_frame);self.node_list.sequenceEdited.connect(self._sequence_edited);self.node_list.operationRejected.connect(lambda message:self.statusBar().showMessage(message,4000));self.node_list.undoRequested.connect(self.undo);self.node_list.redoRequested.connect(self.redo)
+        self.canvas=StructureCanvas(self.session);self.canvas.selectionChanged.connect(self._selection);self.canvas.transactionCommitted.connect(self._transaction);self.canvas.manipulationChanged.connect(self._sync_inspector_values);self.canvas.hoverChanged.connect(self._hover);self.canvas.zoomChanged.connect(self._zoom_status);self.canvas.contextRequested.connect(self._canvas_context);self.canvas.undoRequested.connect(self.undo);self.canvas.redoRequested.connect(self.redo);self.canvas.atomTextRequested.connect(self._edit_atom_text)
         self.inspector_panel=QWidget();self.inspector_panel.setMinimumWidth(300);self.inspector_panel.setMaximumWidth(460)
         inspector_layout=QVBoxLayout(self.inspector_panel);inspector_layout.setContentsMargins(8,8,8,8)
         inspector_head=QHBoxLayout();inspector_head.addWidget(QLabel("节点参数"));inspector_head.addStretch();inspector_close=QPushButton("关闭");inspector_close.clicked.connect(self.inspector_panel.hide);inspector_head.addWidget(inspector_close)
@@ -129,7 +129,9 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return False
         self.session.edit_node(node_id)
-        if self.inspector_panel.isVisible():self.inspector.set_node(node_id)
+        if self.inspector_panel.isVisible():
+            if self.inspector.node_id!=node_id:self.inspector.set_node(node_id)
+            else:self.inspector.sync_values()
         self.mode_panel.sync_draw_tool()
         timing=next((item for item in self.session.node_timings() if item["id"]==node_id),{"end":0});frame=int(timing["end"])
         self.frame_spin.blockSignals(True);self.frame_slider.blockSignals(True);self.frame_spin.setValue(frame);self.frame_slider.setValue(frame);self.frame_spin.blockSignals(False);self.frame_slider.blockSignals(False)
@@ -184,6 +186,8 @@ class MainWindow(QMainWindow):
         current=self.node_list.current_id()
         if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
     def _selection(self,atoms,bonds):pass
+    def _sync_inspector_values(self):
+        if self.inspector_panel.isVisible():self.inspector.sync_values()
     def _delete_focused(self):
         focus=QApplication.focusWidget()
         if focus is self.node_list.tree or self.node_list.isAncestorOf(focus):self.node_list.delete()
@@ -246,9 +250,10 @@ class MainWindow(QMainWindow):
         node=next((item for item in self.session.project().get("nodes",[]) if item["id"]==node_id),None)
         if not node:return
         if node["type"]=="scene":self._scene_dialog();return
+        if not self._activate_node(node_id):return
         self.inspector.set_node(node_id);self.inspector_panel.show()
         sizes=self.main_splitter.sizes();total=max(sum(sizes),900);side=max(320,min(420,total//4));self.main_splitter.setSizes([max(260,sizes[0] if sizes else 340),max(420,total-side-340),side])
-        self.inspector_panel.setFocus();self._activate_node(node_id)
+        self.inspector_panel.setFocus()
 
     def _rebuild_gradient(self,node_id,inspector=None):
         answer=QMessageBox.question(self,"重建渐变结构终态","这会丢弃当前终态编辑，并以新的起点结构重新建立终态。是否继续？")
@@ -312,7 +317,14 @@ class MainWindow(QMainWindow):
         menu.exec(global_pos)
 
     def _node_parameters_changed(self,node_id):
-        self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id)
+        try:
+            self.mark_dirty();self.node_list.refresh(node_id)
+            end=max(0,self.session.end_frame);frame=int(self.session.preview_frame)
+            self.frame_slider.blockSignals(True);self.frame_spin.blockSignals(True)
+            self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.frame_slider.setValue(frame);self.frame_spin.setValue(frame)
+            self.frame_slider.blockSignals(False);self.frame_spin.blockSignals(False)
+            self.canvas.show_edit_frame(frame);self.canvas.request_refresh();self._sync_edit_state()
+        except Exception as error:QMessageBox.warning(self,"参数更新失败",str(error))
     def _set_frame(self,frame):self.frame_spin.setValue(frame)
     def _preview_frame(self,frame):
         for button in getattr(self,"gradient_buttons",{}).values():button.setChecked(False)
