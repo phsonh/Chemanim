@@ -123,6 +123,11 @@ def test_node_list_ctrl_copy_paste_inserts_after_selection_and_deep_copies_creat
     select(create["id"]);QTest.keyClick(value.node_list.tree,Qt.Key.Key_C,Qt.KeyboardModifier.ControlModifier);QTest.keyClick(value.node_list.tree,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
     creation_nodes=[node for node in value.session.project()["nodes"] if node["type"]=="molecule_create"]
     assert len(creation_nodes)==2 and len({node["params"]["target"] for node in creation_nodes})==2
+    target=creation_nodes[0]["params"]["target"];alpha=value._add_node("molecule_set_alpha",{"target":target,"value":77},False)
+    select(alpha);QTest.keyClick(value.node_list.tree,Qt.Key.Key_C,Qt.KeyboardModifier.ControlModifier)
+    scene=next(node["id"] for node in value.session.project()["nodes"] if node["type"]=="scene");select(scene);QTest.keyClick(value.node_list.tree,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    pasted=value.node_list.current_id();nodes=value.session.project()["nodes"];create_index=next(index for index,node in enumerate(nodes) if node["type"]=="molecule_create" and node["params"]["target"]==target);paste_index=next(index for index,node in enumerate(nodes) if node["id"]==pasted)
+    assert paste_index>create_index and next(node for node in nodes if node["id"]==pasted)["params"]==next(node for node in nodes if node["id"]==alpha)["params"]
     value.close()
 
 

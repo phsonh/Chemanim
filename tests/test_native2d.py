@@ -228,6 +228,15 @@ def test_object_nodes_cannot_be_moved_past_their_delete_boundary():
     assert [node["id"] for node in core.project()["nodes"]]==before
 
 
+def test_new_and_pasted_object_nodes_are_clamped_inside_the_lifecycle():
+    core=CoreSession();target=core.import_smiles("苯","c1ccccc1");deleted=core.add_node("molecule_delete",json.dumps({"target":target}));alpha=core.add_node("molecule_set_alpha",json.dumps({"target":target,"value":128}),1)
+    nodes=core.project()["nodes"];indexes={node["id"]:index for index,node in enumerate(nodes)};created=next(node["id"] for node in nodes if node["type"]=="molecule_create")
+    assert indexes[created]<indexes[alpha]<indexes[deleted]
+    structure=next(node for node in nodes if node["type"]=="molecule_set_structure");other=core.add_blank_molecule("另一个分子")
+    copied=core.duplicate_node(structure["id"],1);copied_node=next(node for node in core.project()["nodes"] if node["id"]==copied)
+    assert copied_node["params"]["target"]==target and copied_node["params"]["snapshot"]==structure["params"]["snapshot"]
+
+
 def test_benzene_explicit_types_and_secondary_sides_survive_substitution_motion_and_reopen(tmp_path: Path):
     core = session(); gesture(core, "benzene", (480, 270))
     ring_atoms = list(atoms(core)); original = {bond["id"]: (bond["type"],bond["secondary_line_side"]) for bond in bonds(core)}
@@ -981,11 +990,18 @@ def test_arrow_scale_keeps_curve_start_fixed_and_legacy_position_remains_hidden(
 
 def test_invalid_lifetime_and_stable_member_references_report_diagnostics():
     core=CoreSession();target=core.add_blank_molecule("invalid");create=next(node for node in core.project()["nodes"] if node["type"]=="molecule_create")
-    core.add_node("molecule_delete",json.dumps({"target":target}))
+    deleted=core.add_node("molecule_delete",json.dumps({"target":target}))
     invalid=core.add_node("atom_set_xy",json.dumps({"target":target,"atom":"A999","x":1,"y":2}))
     messages={item["node_id"]:item["message"] for item in core.diagnostics(0)}
+    assert invalid in messages and "已经消失的原子" in messages[invalid]
+    raw=json.loads(core.json())
+    invalid_node=next(node for node in raw["nodes"] if node["id"]==invalid)
+    raw["nodes"].remove(invalid_node)
+    delete_index=next(index for index,node in enumerate(raw["nodes"]) if node["id"]==deleted)
+    raw["nodes"].insert(delete_index+1,invalid_node)
+    lifetime=CoreSession();lifetime.replace_json(json.dumps(raw));messages={item["node_id"]:item["message"] for item in lifetime.diagnostics(0)}
     assert invalid in messages and "已经删除" in messages[invalid]
-    raw=json.loads(core.json());create_index=next(index for index,node in enumerate(raw["nodes"]) if node["type"]=="molecule_create");raw["nodes"].insert(create_index+1,{"id":"N999","type":"molecule_create","enabled":True,"params":{"target":target}});raw["next_node_id"]=1000
+    create_index=next(index for index,node in enumerate(raw["nodes"]) if node["type"]=="molecule_create");raw["nodes"].insert(create_index+1,{"id":"N999","type":"molecule_create","enabled":True,"params":{"target":target}});raw["next_node_id"]=1000
     legacy=CoreSession();legacy.replace_json(json.dumps(raw));messages={item["node_id"]:item["message"] for item in legacy.diagnostics(0)}
     assert "N999" in messages and "重复" in messages["N999"]
 
