@@ -83,6 +83,9 @@ struct EvaluatedScene {
 [[nodiscard]] const NodeMetadata& nodeMetadata(const std::string& type);
 [[nodiscard]] std::vector<NodeTiming> compileNodeTimings(const Project& project);
 [[nodiscard]] EvaluatedScene evaluateNodes(const Project& project, int frame);
+// Evaluates local structure and object-local visual tracks without baking
+// transforms into atom coordinates and without scene-global multipliers.
+[[nodiscard]] EvaluatedScene evaluateLocalObjectNodes(const Project& project, int frame);
 // Evaluates lifecycle, topology, stable-member structure and member-local
 // tracks only. Object transforms and global visual tracks remain unapplied.
 [[nodiscard]] EvaluatedScene evaluateStructureNodes(const Project& project, int frame);

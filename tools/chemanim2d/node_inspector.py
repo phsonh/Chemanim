@@ -9,9 +9,10 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
 
 
 LEGACY_STRUCTURE_TYPES = {"molecule_lerp_structure", "bond_form", "bond_break",
-                          "selection_show", "selection_hide", "selection_fade"}
-STRUCTURE_TRANSFORM_TYPES = {"molecule_gradient_structure", "molecule_merge_gradient_structure",
-                             "molecule_split_gradient_structure"}
+                          "selection_show", "selection_hide", "selection_fade",
+                          "molecule_merge_gradient_structure", "molecule_split_gradient_structure"}
+STRUCTURE_TRANSFORM_TYPES = {"molecule_gradient_structure"}
+OBJECT_OPERATION_TYPES = {"merge_molecules", "split_molecule"}
 
 
 def molecule_name(project, stable_id):
@@ -94,18 +95,24 @@ class NodeInspector(QWidget):
         if not node: self.title.setText("未选择节点"); return
         definition = next((item for item in self.session.node_registry() if item["type"] == node["type"]), None)
         params = node.get("params", {})
-        if node["type"] in LEGACY_STRUCTURE_TYPES:
+        if node["type"] in LEGACY_STRUCTURE_TYPES or (node["type"] == "merge_molecules" and params.get("operation_version") != "object_v1"):
             self.title.setText("旧版结构节点")
             note=QLabel("旧版结构节点，仅用于兼容。目标对象会在画布中高亮；内部引用不可手工编辑。")
             note.setWordWrap(True);self.layout.addRow(note);return
         if node["type"] in STRUCTURE_TRANSFORM_TYPES:
             self.title.setText(f'{definition.get("label","结构变换")} · {molecule_name(project,params.get("target",""))}')
+        elif node["type"] in OBJECT_OPERATION_TYPES:
+            self.title.setText(f'{definition.get("label","对象操作")} · {molecule_name(project,params.get("output",""))}')
         else:self.title.setText(definition.get("label", "节点"))
         for spec in definition.get("fields", []):
             key, kind = spec["key"], spec["kind"]; value = params.get(key, spec.get("default")); editor = None
             if node["type"] in STRUCTURE_TRANSFORM_TYPES and key in ("target","source","destination"):
                 editor=QLineEdit(molecule_name(project,value));editor.setReadOnly(True)
                 labels={"target":"来源分子" if node["type"]=="molecule_split_gradient_structure" else "主分子" if node["type"]=="molecule_merge_gradient_structure" else "目标分子","source":"并入分子","destination":"分出分子"}
+                self.editors[key]=(editor,"readonly_target");self.layout.addRow(labels[key],editor);continue
+            if node["type"] in OBJECT_OPERATION_TYPES and key in ("target","source","output"):
+                editor=QLineEdit(molecule_name(project,value));editor.setReadOnly(True)
+                labels={"target":"原分子" if node["type"]=="split_molecule" else "主分子","source":"并入分子","output":"新分子"}
                 self.editors[key]=(editor,"readonly_target");self.layout.addRow(labels[key],editor);continue
             choices = self._choices(kind, params)
             if choices:

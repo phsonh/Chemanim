@@ -56,6 +56,13 @@ std::size_t objectLifecycleOrderViolations(const std::vector<ScriptNode>& nodes)
             const std::string source=params.value("source","");if(source.empty()||source==target||!livingMolecules.contains(source))++violations;
         }else if(node.type=="molecule_split_gradient_structure"){
             const std::string destination=params.value("destination","");if(destination.empty()||destination==target||!livingMolecules.contains(destination))++violations;
+        }else if(node.type=="split_molecule"){
+            const std::string output=params.value("output","");if(output.empty()||output==target||!livingMolecules.contains(output))++violations;
+        }else if(node.type=="merge_molecules"&&params.value("operation_version","")=="object_v1"){
+            const std::string source=params.value("source",""),output=params.value("output","");
+            if(source.empty()||source==target||!livingMolecules.contains(source))++violations;
+            if(output.empty()||output==target||output==source||!livingMolecules.contains(output))++violations;
+            livingMolecules.erase(target);livingMolecules.erase(source);
         }
     }
     return violations;
@@ -76,6 +83,13 @@ std::size_t safeObjectInsertionIndex(const Project& project,const std::string& t
         json secondary=params;secondary["target"]=params.value(type=="molecule_merge_gradient_structure"?"source":"destination","");
         if(!secondary.value("target","").empty()&&secondary.value("target","")!=target)
             insertion=safeObjectInsertionIndex(project,"molecule_gradient_structure",secondary,insertion);
+    }
+    if(type=="split_molecule"||(type=="merge_molecules"&&params.value("operation_version","")=="object_v1")){
+        for(const char* key:{"source","output"}){
+            const std::string secondaryId=params.value(key,"");if(secondaryId.empty()||secondaryId==target)continue;
+            json secondary=params;secondary["target"]=secondaryId;
+            insertion=safeObjectInsertionIndex(project,"molecule_gradient_structure",secondary,insertion);
+        }
     }
     return insertion;
 }
@@ -193,6 +207,9 @@ const char* editableSnapshotKey(const std::string& type) {
 EvaluatedScene sceneBeforeNode(const Project& project,std::size_t index,int frame) {
     Project prefix=project;prefix.nodes.resize(std::min(index,prefix.nodes.size()));return evaluateNodes(prefix,frame);
 }
+EvaluatedScene localObjectSceneBeforeNode(const Project& project,std::size_t index,int frame) {
+    Project prefix=project;prefix.nodes.resize(std::min(index,prefix.nodes.size()));return evaluateLocalObjectNodes(prefix,frame);
+}
 Point visualToLocal(Point world,const Molecule& visual) {
     const double radians=-visual.rotation*std::numbers::pi/180.0,c=std::cos(radians),s=std::sin(radians);
     const double dx=world.x-visual.origin.x,dy=world.y-visual.origin.y;
@@ -233,6 +250,13 @@ json appendStructureWithRemap(Molecule& destination,const Molecule& source,
         if(!value.atomId.empty())destination.adornments.push_back(std::move(value));
     }
     return mapping;
+}
+void captureObjectState(json& params,const Molecule& value) {
+    params["coordinate_space"]="molecule_local_v2";params["snapshot"]=moleculeSnapshotJson(value);
+    params["origin_x"]=value.origin.x;params["origin_y"]=value.origin.y;params["anchor_initialized"]=value.anchorInitialized;
+    params["scale_x"]=value.scaleX;params["scale_y"]=value.scaleY;params["rotation"]=value.rotation;
+    params["alpha"]=value.alpha;params["r"]=value.color.red;params["g"]=value.color.green;params["b"]=value.color.blue;
+    params["layer"]=value.layer;params["visible"]=value.visible;
 }
 }  // namespace
 
@@ -1298,6 +1322,39 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame+params["frames"].get<int>();impl_->structureDraft=*start;
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
     }
+    if(type=="split_molecule"||type=="merge_molecules"){
+        json requested=paramsJson.empty()?json::object():json::parse(paramsJson);const bool merging=type=="merge_molecules";
+        const std::string target=requested.value("target",impl_->activeMolecule);if(target.empty())throw std::runtime_error(merging?"合并分子需要主分子":"分裂分子需要当前活动分子");
+        std::size_t insertion=std::min(index.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
+        json targetParams={{"target",target}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",targetParams,insertion);
+        std::string source=requested.value("source","");
+        const auto validAt=[&](const std::string& id){return !id.empty()&&id!=target&&structureBeforeNode(impl_->project,insertion,id).has_value();};
+        if(merging&&!validAt(source))for(auto found=impl_->project.molecules.rbegin();found!=impl_->project.molecules.rend();++found)if(validAt(found->id)){source=found->id;break;}
+        if(merging&&!validAt(source))throw std::runtime_error("合并分子需要另一个在当前节点处仍然存活的分子");
+        if(merging){json sourceParams={{"target",source}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",sourceParams,insertion);}
+        int startFrame=0;const auto targetStructure=structureBeforeNode(impl_->project,insertion,target,&startFrame);
+        if(!targetStructure)throw std::runtime_error("原分子在当前节点位置尚未创建、已经删除或没有有效状态");
+        const EvaluatedScene local=localObjectSceneBeforeNode(impl_->project,insertion,startFrame),visual=sceneBeforeNode(impl_->project,insertion,startFrame);
+        const auto targetLocal=local.molecules.find(target),targetVisual=visual.molecules.find(target);
+        if(targetLocal==local.molecules.end()||targetVisual==visual.molecules.end())throw std::runtime_error("无法取得原分子的对象状态");
+        const Molecule* sourceLocal=nullptr;const Molecule* sourceVisual=nullptr;
+        if(merging){const auto localFound=local.molecules.find(source),visualFound=visual.molecules.find(source);if(localFound==local.molecules.end()||visualFound==visual.molecules.end())throw std::runtime_error("无法取得并入分子的对象状态");sourceLocal=&localFound->second;sourceVisual=&visualFound->second;}
+        const std::string outputName=merging?"合并分子":(targetLocal->second.name.empty()?"分出分子":targetLocal->second.name+" 分体");
+        const std::string output=impl_->project.addBlankMolecule(outputName,insertion);++insertion;
+        Molecule* identity=impl_->project.molecule(output);if(!identity)throw std::runtime_error("无法创建对象操作的输出分子");
+        Molecule outputState=*identity;outputState.referenceBondLength=targetLocal->second.referenceBondLength;
+        outputState.origin=targetLocal->second.origin;outputState.anchorInitialized=targetLocal->second.anchorInitialized;
+        outputState.scaleX=targetLocal->second.scaleX;outputState.scaleY=targetLocal->second.scaleY;outputState.rotation=targetLocal->second.rotation;
+        outputState.alpha=targetLocal->second.alpha;outputState.color=targetLocal->second.color;outputState.layer=targetLocal->second.layer;outputState.visible=targetLocal->second.visible;
+        json mapping={{"target",appendStructureWithRemap(outputState,targetLocal->second,targetVisual->second,targetVisual->second)}};
+        if(merging)mapping["source"]=appendStructureWithRemap(outputState,*sourceLocal,*sourceVisual,targetVisual->second);
+        for(Atom& atom:outputState.atoms)atom.creationSerial=impl_->project.allocateCreationSerial();
+        for(AtomAdornment& value:outputState.adornments)value.creationSerial=impl_->project.allocateCreationSerial();
+        identity->nextAtomId=std::max(identity->nextAtomId,outputState.nextAtomId);identity->nextBondId=std::max(identity->nextBondId,outputState.nextBondId);identity->nextAdornmentId=std::max(identity->nextAdornmentId,outputState.nextAdornmentId);
+        json params={{"operation_version","object_v1"},{"target",target},{"output",output},{"frames",0},{"id_map",mapping}};if(merging)params["source"]=source;captureObjectState(params,outputState);
+        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->activeMolecule=output;impl_->targetKind=EditTargetKind::ScriptNode;impl_->targetId=id;impl_->previewFrame=startFrame;impl_->structureDraft.reset();impl_->tool=Tool::SelectRectangle;
+        impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
+    }
     if(isMultiStructureTransform(type)){
         if(impl_->activeMolecule.empty())throw std::runtime_error("多分子结构变换需要当前活动分子");
         json requested=paramsJson.empty()?json::object():json::parse(paramsJson);const bool merging=type=="molecule_merge_gradient_structure";const char* secondaryKey=merging?"source":"destination";
@@ -1338,6 +1395,9 @@ bool EditorSession::updateScriptNode(const std::string& nodeId,const std::string
     if(!value.is_object())throw std::runtime_error("Node params must be an object");
     if(nodeMetadata(node->type).targetImmutable){const json old=json::parse(node->paramsJson);if(value.value("target","")!=old.value("target",""))throw std::runtime_error("The target of a new-molecule node is immutable");}
     if(isMultiStructureTransform(node->type)){const json old=json::parse(node->paramsJson);const char* key=node->type=="molecule_merge_gradient_structure"?"source":"destination";if(value.value("target","")!=old.value("target","")||value.value(key,"")!=old.value(key,""))throw std::runtime_error("多分子结构变换的对象在创建后不可重新指向");}
+    if((node->type=="split_molecule"||node->type=="merge_molecules")&&value.value("operation_version","")=="object_v1"){
+        const json old=json::parse(node->paramsJson);for(const char* key:{"target","source","output"})if(value.value(key,"")!=old.value(key,""))throw std::runtime_error("对象操作的输入和输出在创建后不可重新指向");
+    }
     const std::string normalized=value.dump();
     if(node->paramsJson==normalized)return false;Project before=impl_->project;node->paramsJson=normalized;
     const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& item){return item.id==nodeId;})));

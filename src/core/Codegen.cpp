@@ -54,6 +54,21 @@ std::string moleculeDeclaration(const Molecule& molecule) {
     while(result.size()>1&&result.back()=='\n'&&result[result.size()-2]=='\n')result.pop_back();
     return result;
 }
+std::string capturedObjectCommands(const json& params) {
+    const std::string output=params.value("output","");if(output.empty())return{};
+    json snapshot=params.value("snapshot",json::object());if(snapshot.is_string())snapshot=json::parse(snapshot.get<std::string>());
+    const auto molecule=decodedSnapshot(snapshot);if(!molecule)return{};
+    std::ostringstream out;out<<output<<":SetStructure("<<moleculeTable(*molecule,{})<<")\n"
+       <<output<<".SetPos("<<number(params.value("origin_x",0.0))<<", "<<number(params.value("origin_y",0.0))<<")\n"
+       <<output<<".SetScaleX("<<number(params.value("scale_x",1.0))<<")\n"
+       <<output<<".SetScaleY("<<number(params.value("scale_y",1.0))<<")\n"
+       <<output<<".SetRotation("<<number(params.value("rotation",0.0))<<")\n"
+       <<output<<".SetAlpha("<<params.value("alpha",255)<<")\n"
+       <<output<<".SetLayer("<<params.value("layer",0)<<")\n"
+       <<output<<".SetColor("<<params.value("r",255)<<", "<<params.value("g",255)<<", "<<params.value("b",255)<<")\n"
+       <<output<<".SetVisible("<<(params.value("visible",true)?"true":"false")<<")";
+    return out.str();
+}
 }  // namespace
 
 std::string compileLua(const Project& project) {
@@ -85,6 +100,9 @@ std::string compileLua(const Project& project) {
         else if(node.type=="molecule_set_layer")line=target+".SetLayer("+std::to_string(p.value("value",0))+")";
         else if(node.type=="molecule_set_visible")line=target+".SetVisible("+std::string(p.value("value",true)?"true":"false")+")";
         else if(node.type=="molecule_delete")line=target+".Delete()";
+        else if(node.type=="split_molecule"||(node.type=="merge_molecules"&&p.value("operation_version","")=="object_v1")){
+            line=capturedObjectCommands(p);if(node.type=="merge_molecules")line+="\n"+target+".Delete()\n"+p.value("source","")+".Delete()";
+        }
         else if(node.type=="molecule_set_structure"){try{json snapshot=p.value("snapshot",json::object());if(snapshot.is_string())snapshot=json::parse(snapshot.get<std::string>());if(const auto value=decodedSnapshot(snapshot))line=target+":SetStructure("+moleculeTable(*value,{})+")";}catch(...){} }
         else if(node.type=="molecule_gradient_structure"){try{json start=p.value("start_snapshot",json::object()),end=p.value("end_snapshot",json::object());if(start.is_string())start=json::parse(start.get<std::string>());if(end.is_string())end=json::parse(end.get<std::string>());const auto startMolecule=decodedSnapshot(start),endMolecule=decodedSnapshot(end);if(startMolecule&&endMolecule)line=target+":LerpStructure("+moleculeTable(*startMolecule,{})+", "+moleculeTable(*endMolecule,{})+", "+std::to_string(p.value("frames",30))+", "+quote(p.value("easing","linear"))+")";}catch(...){} }
         else if(node.type=="molecule_merge_gradient_structure"||node.type=="molecule_split_gradient_structure"){try{const bool merging=node.type=="molecule_merge_gradient_structure";const std::string secondary=p.value(merging?"source":"destination","");const char* firstStartKey=merging?"target_start_snapshot":"source_start_snapshot";const char* firstEndKey=merging?"target_end_snapshot":"source_end_snapshot";const char* secondStartKey=merging?"source_start_snapshot":"destination_start_snapshot";const char* secondEndKey=merging?"source_end_snapshot":"destination_end_snapshot";json a=p.value(firstStartKey,json::object()),b=p.value(firstEndKey,json::object()),c=p.value(secondStartKey,json::object()),d=p.value(secondEndKey,json::object());const auto firstStart=decodedSnapshot(a),firstEnd=decodedSnapshot(b),secondStart=decodedSnapshot(c),secondEnd=decodedSnapshot(d);if(firstStart&&firstEnd&&secondStart&&secondEnd){const std::string frames=std::to_string(p.value("frames",30)),ease=quote(p.value("easing","linear"));line=target+":LerpStructure("+moleculeTable(*firstStart,{})+", "+moleculeTable(*firstEnd,{})+", "+frames+", "+ease+")\n"+secondary+":LerpStructure("+moleculeTable(*secondStart,{})+", "+moleculeTable(*secondEnd,{})+", "+frames+", "+ease+")";if(merging)line+="\nlocal __merge_frame = chem.GetFrame()\nchem.SetFrame(__merge_frame + "+frames+")\n"+secondary+":Delete()\nchem.SetFrame(__merge_frame)";}}catch(...){} }

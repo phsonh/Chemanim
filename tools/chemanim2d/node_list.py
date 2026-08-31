@@ -90,6 +90,8 @@ class NodeList(QWidget):
         if node_type in LEGACY_STRUCTURE_TYPES:return f'旧版结构节点 · {target}' if target else "旧版结构节点"
         if node_type=="molecule_create":return f"新建{target}"
         if node_type=="arrow_new":return f"新建{target}"
+        if node_type=="split_molecule":return f'分裂{target}，生成同位置的{molecule_name(project,params.get("output",""))}'
+        if node_type=="merge_molecules" and params.get("operation_version")=="object_v1":return f'合并{target}与{molecule_name(project,params.get("source",""))}，生成{molecule_name(project,params.get("output",""))}'
         if scope=="object":return f"{label} {target}".strip()
         value=cls._parameter_value(definition,params);action=definition.get("tool_label") or definition.get("group") or label
         if definition.get("target_kind")=="molecule" and action.startswith("分子"):action=action[2:]
