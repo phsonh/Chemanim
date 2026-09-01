@@ -115,6 +115,13 @@ BuiltMolecule build(const Molecule& source) {
         if(!value.visible || !value.alive)continue;
         const auto a = result.indices.find(value.atomA), b = result.indices.find(value.atomB);
         if (a == result.indices.end() || b == result.indices.end() || a->second == b->second) continue;
+        // Structure gradients may deliberately carry two visual bonds with
+        // the same endpoints while a bond style changes.  RDKit is used here
+        // only as an atom-label/layout helper; the authoritative bond glyphs
+        // are drawn later by explicitBondSvg().  Register one topology edge
+        // per atom pair so RDKit does not reject the visual cross-fade with
+        // "bond already exists".
+        if (result.value->getBondBetweenAtoms(a->second, b->second)) continue;
         result.value->addBond(a->second, b->second, rdBondType(value.type));
         RDKit::Bond* bond = result.value->getBondBetweenAtoms(a->second, b->second);
         if (value.stereo == BondStereo::SolidWedge) bond->setBondDir(RDKit::Bond::BEGINWEDGE);
@@ -143,13 +150,15 @@ std::vector<Point> bondHitPolygon(Point first, Point second, double padding) {
             {first.x - extension.x - normal.x, first.y - extension.y - normal.y}};
 }
 
-std::string rgb(const Color& local, const Color& molecule) {
-    const int r = std::clamp(local.red * molecule.red / 255, 0, 255);
-    const int g = std::clamp(local.green * molecule.green / 255, 0, 255);
-    const int b = std::clamp(local.blue * molecule.blue / 255, 0, 255);
+Color resolvedColor(const Color& local,const Molecule& molecule){return molecule.colorOverride?molecule.color:local;}
+std::string rgb(const Color& local, const Molecule& molecule) {
+    const Color resolved=resolvedColor(local,molecule);
+    const int r = std::clamp(resolved.red, 0, 255);
+    const int g = std::clamp(resolved.green, 0, 255);
+    const int b = std::clamp(resolved.blue, 0, 255);
     std::ostringstream stream; stream << "rgb(" << r << ',' << g << ',' << b << ')'; return stream.str();
 }
-std::string hexColor(const Color& local,const Color& molecule){const int r=std::clamp(local.red*molecule.red/255,0,255),g=std::clamp(local.green*molecule.green/255,0,255),b=std::clamp(local.blue*molecule.blue/255,0,255);std::ostringstream stream;stream<<'#'<<std::uppercase<<std::hex<<std::setfill('0')<<std::setw(2)<<r<<std::setw(2)<<g<<std::setw(2)<<b;return stream.str();}
+std::string hexColor(const Color& local,const Molecule& molecule){const Color resolved=resolvedColor(local,molecule);const int r=std::clamp(resolved.red,0,255),g=std::clamp(resolved.green,0,255),b=std::clamp(resolved.blue,0,255);std::ostringstream stream;stream<<'#'<<std::uppercase<<std::hex<<std::setfill('0')<<std::setw(2)<<r<<std::setw(2)<<g<<std::setw(2)<<b;return stream.str();}
 
 template <typename Drawer>
 std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& drawer) {
@@ -162,7 +171,7 @@ std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& d
         if(!adornment.alive||!owner||!owner->alive)continue;
         const auto center=drawer.getDrawCoords(RDGeom::Point2D(
             owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y));
-        const std::string color=rgb(adornment.color,molecule.color);
+        const std::string color=rgb(adornment.color,molecule);
         const double opacity=std::clamp(adornment.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
         const bool negative=adornment.text.find("⊖")!=std::string::npos||
                             adornment.text.find("−")!=std::string::npos||
@@ -221,7 +230,7 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
         const double length=std::max(1e-9,std::hypot(dx,dy)); const Point normal{-dy/length,dx/length};
         const Point tangent{dx/length,dy/length};
         const auto point=[&](Point p){return drawer.getDrawCoords(RDGeom::Point2D(p.x,p.y));};
-        const std::string color=rgb(bond.color,molecule.color);
+        const std::string color=rgb(bond.color,molecule);
         const double opacity=std::clamp(bond.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
         const double lineWidth=style.lineWidthPt;
         const auto line=[&](Point offset,double minimum=0.0,const char* lineCap="round"){
@@ -443,10 +452,11 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     for (const Atom& atom : molecule.atoms) {
         if (!atom.alive || atom.hidden || atom.alias.empty() ||
             atom.numberStyle != AtomNumberStyle::Normal) continue;
+        const Color resolved=resolvedColor(atom.color,molecule);
         drawer.setColour(RDKit::DrawColour(
-            std::clamp(atom.color.red * molecule.color.red / (255.0 * 255.0), 0.0, 1.0),
-            std::clamp(atom.color.green * molecule.color.green / (255.0 * 255.0), 0.0, 1.0),
-            std::clamp(atom.color.blue * molecule.color.blue / (255.0 * 255.0), 0.0, 1.0),
+            std::clamp(resolved.red / 255.0, 0.0, 1.0),
+            std::clamp(resolved.green / 255.0, 0.0, 1.0),
+            std::clamp(resolved.blue / 255.0, 0.0, 1.0),
             std::clamp(atom.alpha * molecule.alpha / (255.0 * 255.0), 0.0, 1.0)));
         drawer.drawString(orientedAlias(atom),
             RDGeom::Point2D(atom.position.x, atom.position.y),
@@ -518,7 +528,7 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     unsigned labelIndex=0;
-    for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule.color)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
+    for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
     result.svg=std::regex_replace(result.svg,std::regex("<path class='bond-[^>]*?(?:/>|></path>)"),"");
     // MolDraw2D ACS output also emits small anonymous miter patches at
     // carbon junctions.  Once the classed RDKit bonds are replaced by our

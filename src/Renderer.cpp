@@ -82,9 +82,13 @@ std::string Renderer::string(int tableIndex, const char* key, const char* fallba
 
 Color Renderer::objectColor(int tableIndex,const char* scope) const {
     const auto channel = [&](const char* key, double fallback) {
-        return static_cast<unsigned char>(std::clamp(number(tableIndex,key,fallback)*engine_.globalValue(scope,key,currentFrame_)/255.0,0.0,255.0));
+        const double value=engine_.globalActive(scope,key,currentFrame_)
+            ? engine_.globalValue(scope,key,currentFrame_):number(tableIndex,key,fallback);
+        return static_cast<unsigned char>(std::clamp(value,0.0,255.0));
     };
-    const double alpha = std::clamp(number(tableIndex,"alpha",1.0)*engine_.globalValue(scope,"alpha",currentFrame_)/255.0,0.0,1.0);
+    const double alpha = engine_.globalActive(scope,"alpha",currentFrame_)
+        ? std::clamp(engine_.globalValue(scope,"alpha",currentFrame_)/255.0,0.0,1.0)
+        : std::clamp(number(tableIndex,"alpha",1.0),0.0,1.0);
     return Color{channel("r", 255), channel("g", 255), channel("b", 255),
                  static_cast<unsigned char>(std::round(alpha * 255.0))};
 }
@@ -98,7 +102,11 @@ void Renderer::renderScene(int frame) {
     for (const auto& object : engine_.objects()) {
         if (frame < object->bornFrame || frame >= object->deadFrame) continue;
         lua_rawgeti(state, LUA_REGISTRYINDEX, object->luaRef);
-        const bool visible = number(-1, "visible", 1) != 0 && number(-1, "alpha", 1) > 0;
+        const char* scope=object->kind=="molecule"?"molecule":object->kind=="arrow"?"arrow":"sprite";
+        // Global alpha is an override for molecules/arrows.  Do not cull an
+        // object solely because its local alpha is zero when an active global
+        // node makes it visible again.
+        const bool visible = number(-1, "visible", 1) != 0 && objectColor(-1,scope).a > 0;
         const double layer = number(-1, "layer", 0);
         lua_pop(state, 1);
         if (visible) entries.push_back({object.get(), layer});
@@ -153,13 +161,19 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const float rasterScale = std::max(0.001f,std::max(expectedX, expectedY));
     SvgCacheEntry& cache = moleculeSvgs_[object.id];
     if (!cache.hasViewport) {
-        core::Molecule extent=*evaluatedMolecule;if(const auto finalMolecule=engine_.moleculeAt(object.id,engine_.maxScheduledFrame());finalMolecule)extent.atoms.insert(extent.atoms.end(),finalMolecule->atoms.begin(),finalMolecule->atoms.end());
-        double minX = extent.atoms.front().position.x, maxX = minX;
-        double minY = extent.atoms.front().position.y, maxY = minY;
-        for (const auto& atom : extent.atoms) {
-            minX = std::min(minX, atom.position.x); maxX = std::max(maxX, atom.position.x);
-            minY = std::min(minY, atom.position.y); maxY = std::max(maxY, atom.position.y);
+        // A structure can reach its largest extent at an intermediate frame
+        // and return before the final frame.  Size the monotonic SVG viewport
+        // from every scheduled state so a cached texture never clips that
+        // excursion or changes its centre during playback.
+        bool any=false;double minX=0.0,maxX=0.0,minY=0.0,maxY=0.0;
+        for(int frame=0;frame<=engine_.maxScheduledFrame();++frame){
+            const auto extent=engine_.moleculeAt(object.id,frame);if(!extent)continue;
+            for(const auto& atom:extent->atoms){if(!atom.alive)continue;
+                if(!any){minX=maxX=atom.position.x;minY=maxY=atom.position.y;any=true;}
+                else{minX=std::min(minX,atom.position.x);maxX=std::max(maxX,atom.position.x);minY=std::min(minY,atom.position.y);maxY=std::max(maxY,atom.position.y);}
+            }
         }
+        if(!any)return;
         const double reference = std::max(0.01, evaluatedMolecule->referenceBondLength);
         const double pixelsPerUnit = 14.4 / reference;
         cache.viewport.width = std::max(64, static_cast<int>(std::ceil((maxX - minX) * pixelsPerUnit + 64.0)));
@@ -170,6 +184,8 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     }
     core::Molecule currentMolecule = *evaluatedMolecule;
     const Color moleculeTint=objectColor(table,"molecule");currentMolecule.color={moleculeTint.r,moleculeTint.g,moleculeTint.b};
+    const auto activeObjectColor=[&](const char* key){const auto found=object.numericTracks.find(key);if(found==object.numericTracks.end())return false;return std::any_of(found->second.segments.begin(),found->second.segments.end(),[&](const Segment& value){return value.start<=currentFrame_;});};
+    currentMolecule.colorOverride=currentMolecule.colorOverride||activeObjectColor("r")||activeObjectColor("g")||activeObjectColor("b")||engine_.globalActive("molecule","r",currentFrame_)||engine_.globalActive("molecule","g",currentFrame_)||engine_.globalActive("molecule","b",currentFrame_);
     for (auto& atom : currentMolecule.atoms) {
         const auto x = object.numericTracks.find("atom:" + atom.id + ":x");
         const auto y = object.numericTracks.find("atom:" + atom.id + ":y");
@@ -195,13 +211,14 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         if(const auto value=object.numericTracks.find("bond:"+bond.id+":color:b");value!=object.numericTracks.end())bond.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
     }
     for(auto& adornment:currentMolecule.adornments){const std::string prefix="adornment:"+adornment.id+":";if(const auto value=object.numericTracks.find(prefix+"x");value!=object.numericTracks.end())adornment.offset.x=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"y");value!=object.numericTracks.end())adornment.offset.y=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"alpha");value!=object.numericTracks.end())adornment.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.stringTracks.find(prefix+"text");value!=object.stringTracks.end())adornment.text=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"color:r");value!=object.numericTracks.end())adornment.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:g");value!=object.numericTracks.end())adornment.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:b");value!=object.numericTracks.end())adornment.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));}
-    std::ostringstream geometry; geometry << std::setprecision(12);
+    std::ostringstream geometry; geometry << std::setprecision(12)
+        << "molecule-color:" << currentMolecule.color.red << ':' << currentMolecule.color.green << ':' << currentMolecule.color.blue << ':' << currentMolecule.colorOverride << ';';
     for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.alias << ':'
         << static_cast<int>(atom.labelSide) << ':' << static_cast<int>(atom.numberStyle) << ':'
-        << atom.position.x << ':' << atom.position.y << ':' << atom.alive << ':' << atom.alpha << ':'
+        << atom.position.x << ':' << atom.position.y << ':' << atom.hidden << ':' << atom.alive << ':' << atom.alpha << ':'
         << atom.color.red << ':' << atom.color.green << ':' << atom.color.blue << ';';
-    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.secondaryLineSide) << ':' << static_cast<int>(bond.stereo) << ':' << bond.alive << ':' << bond.alpha << ':' << bond.color.red << ':' << bond.color.green << ':' << bond.color.blue << ';';
-    for(const auto& value:currentMolecule.adornments)geometry<<value.id<<':'<<value.atomId<<':'<<value.text<<':'<<value.offset.x<<':'<<value.offset.y<<':'<<value.alpha<<':'<<value.alive<<';';
+    for (const auto& bond : currentMolecule.bonds) geometry << bond.id << ':' << bond.atomA << ':' << bond.atomB << ':' << static_cast<int>(bond.type) << ':' << static_cast<int>(bond.secondaryLineSide) << ':' << static_cast<int>(bond.stereo) << ':' << bond.visible << ':' << bond.alive << ':' << bond.alpha << ':' << bond.color.red << ':' << bond.color.green << ':' << bond.color.blue << ';';
+    for(const auto& value:currentMolecule.adornments)geometry<<value.id<<':'<<value.atomId<<':'<<value.text<<':'<<value.offset.x<<':'<<value.offset.y<<':'<<value.alpha<<':'<<value.alive<<':'<<value.color.red<<':'<<value.color.green<<':'<<value.color.blue<<';';
     const std::string geometryKey = geometry.str();
     const bool geometryChanged = cache.geometryKey != geometryKey;
     if (geometryChanged) {

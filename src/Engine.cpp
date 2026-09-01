@@ -187,6 +187,12 @@ double Engine::globalValue(const std::string& scope,const std::string& property,
     return property=="width_override"?-1.0:(property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
 }
 
+bool Engine::globalActive(const std::string& scope,const std::string& property,int frame) const {
+    const auto found=globalTracks_.find(scope+":"+property);if(found==globalTracks_.end())return false;
+    return std::any_of(found->second.segments.begin(),found->second.segments.end(),
+                       [&](const Segment& value){return value.start<=frame;});
+}
+
 unsigned long long Engine::addStringKey(Object& object, const std::string& property, int frame,
                                         std::string value) {
     auto [it, inserted] = object.stringTracks.try_emplace(property);

@@ -117,6 +117,8 @@ public:
     py::object nodeRegistry() const{return jsonObject(core::nodeRegistryJson());}
     py::list nodeTimings() const{py::list result;for(const auto& timing:core::compileNodeTimings(session_.project())){py::dict item;item["id"]=timing.id;item["type"]=timing.type;item["target"]=timing.target;item["start"]=timing.startFrame;item["end"]=timing.endFrame;item["enabled"]=timing.enabled;result.append(item);}return result;}
     std::string addNode(const std::string& type,const std::string& params,int index){return session_.addScriptNode(type,params,index<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(index)));}
+    py::list livingMoleculeTargets(int insertionIndex)const{py::list result;for(const std::string& id:session_.livingMoleculeTargets(insertionIndex<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(insertionIndex))))result.append(id);return result;}
+    std::string createMergedGradient(const std::string& target,const std::string& source,int frames,const std::string& easing,int insertionIndex){return session_.createMergedGradientStructure(target,source,frames,easing,insertionIndex<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(insertionIndex)));}
     bool updateNode(const std::string& id,const std::string& params){return session_.updateScriptNode(id,params);}
     bool enableNode(const std::string& id,bool enabled){return session_.setScriptNodeEnabled(id,enabled);}
     bool moveNode(const std::string& id,int index){return index>=0&&session_.moveScriptNode(id,static_cast<std::size_t>(index));}
@@ -124,6 +126,9 @@ public:
     bool deleteNode(const std::string& id){return session_.deleteScriptNode(id);}
     py::object gradientSummary(const std::string& id)const{return jsonObject(session_.gradientStructureSummary(id));}
     bool rebuildGradient(const std::string& id){return session_.rebuildGradientStructure(id);}
+    bool retargetGradient(const std::string& id,const std::string& target){return session_.retargetGradientStructure(id,target);}
+    bool repairMoleculeAnchor(const std::string& target){return session_.repairMoleculeAnchor(target);}
+    py::dict selectConnectedComponent(const std::string& atom,bool additive){return editResult(session_.selectConnectedComponent(atom,additive));}
     bool updateScene(const std::string& value){return session_.updateScene(value);}
     int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
     py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
@@ -274,6 +279,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("pointer_down", &CoreSession::pointerDown, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_move", &CoreSession::pointerMove, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("pointer_up", &CoreSession::pointerUp, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
+        .def("select_connected_component",&CoreSession::selectConnectedComponent,py::arg("atom_id"),py::arg("additive")=false)
         .def("adjust_arrow_curve_bend", &CoreSession::adjustArrowCurveBend)
         .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll).def("delete_selection", &CoreSession::deleteSelection)
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
@@ -292,9 +298,11 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("direct_controls",&CoreSession::directControls)
         .def("node_registry",&CoreSession::nodeRegistry).def("node_timings",&CoreSession::nodeTimings)
         .def("add_node",&CoreSession::addNode,py::arg("type"),py::arg("params_json")="{}",py::arg("index")=-1)
+        .def("living_molecule_targets",&CoreSession::livingMoleculeTargets,py::arg("insertion_index")=-1)
+        .def("create_merged_gradient",&CoreSession::createMergedGradient,py::arg("target"),py::arg("source"),py::arg("frames")=30,py::arg("easing")="linear",py::arg("insertion_index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
         .def("duplicate_node",&CoreSession::duplicateNode,py::arg("id"),py::arg("index")=-1).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
-        .def("gradient_summary",&CoreSession::gradientSummary).def("rebuild_gradient",&CoreSession::rebuildGradient)
+        .def("gradient_summary",&CoreSession::gradientSummary).def("rebuild_gradient",&CoreSession::rebuildGradient).def("retarget_gradient",&CoreSession::retargetGradient).def("repair_molecule_anchor",&CoreSession::repairMoleculeAnchor)
         .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("diagnostics",&CoreSession::diagnostics).def("evaluated_project",&CoreSession::evaluatedProject)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)
         .def("depict_at", &CoreSession::depictAt, py::arg("frame"), py::arg("final_effect")=false);

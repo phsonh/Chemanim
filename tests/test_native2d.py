@@ -989,7 +989,8 @@ def test_split_structure_transform_creates_its_output_identity_as_one_undo_trans
     assert destination!=source and len(project["molecules"])==len(before["molecules"])+1
     index=next(index for index,item in enumerate(project["nodes"]) if item["id"]==node)
     assert project["nodes"][index-1]["type"]=="molecule_create" and project["nodes"][index-1]["params"]["target"]==destination
-    assert core.undo() and core.project()==before
+    assert core.undo();restored=core.project()
+    assert restored["nodes"]==before["nodes"] and restored["molecules"]==before["molecules"]
     assert core.redo() and next(item for item in core.project()["nodes"] if item["id"]==node)["params"]["destination"]==destination
 
 
@@ -1087,9 +1088,45 @@ def test_global_molecule_tracks_compose_after_local_and_affect_future_objects():
     core.add_node("molecule_global_set_color",json.dumps({"r":128,"g":64,"b":255}))
     second=core.add_blank_molecule("future");values=core.evaluated_molecules(0)
     assert values[first]["scale_x"]==8 and values[first]["scale_y"]==15
-    assert values[first]["alpha"]==round(200*128/255) and values[first]["r"]==round(100*128/255)
+    assert values[first]["alpha"]==128 and values[first]["r"]==128 and values[first]["g"]==64 and values[first]["b"]==255
     assert values[second]["scale_x"]==4 and values[second]["scale_y"]==5 and values[second]["alpha"]==128
     saved=core.json();restored=CoreSession();restored.replace_json(saved);assert restored.evaluated_molecules(0)==values
+
+
+def test_local_and_global_color_nodes_render_and_global_visuals_override_except_scale():
+    core=CoreSession();molecule=core.import_smiles("colored","c1ccccc1")
+    # The declaration's neutral white object colour is an identity state, not
+    # an instruction to paint black structure primitives white in the engine.
+    assert f"{molecule}.SetColor" not in core.generate_lua()
+    core.add_node("molecule_set_color",json.dumps({"target":molecule,"r":255,"g":0,"b":0}))
+    assert f"{molecule}.SetColor(255, 0, 0)" in core.generate_lua()
+    assert "rgb(255,0,0)" in core.depict_at(0,True)["svg"]
+    core.add_node("molecule_lerp_color",json.dumps({"target":molecule,"r":15,"g":90,"b":210,"frames":20,"easing":"linear"}))
+    middle=core.evaluated_molecules(10)[molecule]
+    assert (middle["r"],middle["g"],middle["b"])==(135,45,105)
+    core.add_node("molecule_set_alpha",json.dumps({"target":molecule,"value":0}))
+    core.add_node("molecule_global_set_alpha",json.dumps({"value":140}))
+    core.add_node("molecule_global_set_color",json.dumps({"r":12,"g":34,"b":56}))
+    core.add_node("molecule_set_scale",json.dumps({"target":molecule,"value":2}))
+    core.add_node("molecule_global_set_scale",json.dumps({"value":3}))
+    final=core.evaluated_molecules(20)[molecule]
+    assert (final["alpha"],final["r"],final["g"],final["b"])==(140,12,34,56)
+    assert final["scale_x"]==final["scale_y"]==6
+    assert "rgb(12,34,56)" in core.depict_at(20,True)["svg"]
+
+    core.add_node("arrow_new",json.dumps({"target":"arrow1"}))
+    core.add_node("arrow_set_curve",json.dumps({"target":"arrow1","initialized":True,"x1":0,"y1":0,"cx1":20,"cy1":20,"cx2":40,"cy2":20,"x2":60,"y2":0}))
+    core.add_node("arrow_set_color",json.dumps({"target":"arrow1","r":240,"g":30,"b":60}))
+    core.add_node("arrow_lerp_color",json.dumps({"target":"arrow1","r":20,"g":130,"b":220,"frames":20,"easing":"linear"}))
+    arrow_middle=core.evaluated_arrows(10)["arrow1"]
+    assert (arrow_middle["r"],arrow_middle["g"],arrow_middle["b"])==(130.0,80.0,140.0)
+    core.add_node("arrow_set_alpha",json.dumps({"target":"arrow1","value":0}))
+    core.add_node("arrow_set_width",json.dumps({"target":"arrow1","value":9}))
+    core.add_node("arrow_global_set_color",json.dumps({"r":20,"g":80,"b":160}))
+    core.add_node("arrow_global_set_alpha",json.dumps({"value":170}))
+    core.add_node("arrow_global_set_width",json.dumps({"value":4}))
+    arrow=core.evaluated_arrows(20)["arrow1"]
+    assert (arrow["alpha"],arrow["r"],arrow["g"],arrow["b"],arrow["width"])==(170.0,20.0,80.0,160.0,4.0)
 
 
 def test_global_override_order_delete_undo_redo_and_reload_are_deterministic():
@@ -1205,11 +1242,39 @@ def test_initialized_anchor_does_not_drift_after_topology_change_or_roundtrip():
     assert identity["anchor_initialized"] is True and identity["anchor"]==before
 
 
-def test_existing_v8_without_anchor_flag_is_preserved_as_initialized():
+def test_existing_v8_without_anchor_flag_is_preserved_and_marked_for_explicit_repair():
     core=session();gesture(core,"benzene",(620,330));raw=json.loads(core.json())
-    identity=raw["molecules"][0];anchor=identity["anchor"];identity.pop("anchor_initialized")
+    identity=raw["molecules"][0];anchor=identity["anchor"];identity.pop("anchor_initialized");identity.pop("anchor_needs_repair",None)
     restored=CoreSession();restored.replace_json(json.dumps(raw));loaded=restored.project()["molecules"][0]
-    assert loaded["anchor_initialized"] is True and loaded["anchor"]==anchor
+    assert loaded["anchor_initialized"] is True and loaded["anchor"]==anchor and loaded["anchor_needs_repair"] is True
+    assert any("锚点需要检查" in item["message"] for item in restored.diagnostics(0))
+
+
+def test_explicit_old_v8_anchor_repair_recentres_local_structure_without_moving_picture():
+    core=CoreSession();target=core.import_smiles("old","c1ccccc1");raw=json.loads(core.json())
+    identity=next(item for item in raw["molecules"] if item["id"]==target);identity.pop("anchor_initialized",None);identity.pop("anchor_needs_repair",None)
+    structure=next(item for item in raw["nodes"] if item["type"]=="molecule_set_structure" and item["params"]["target"]==target)["params"]["snapshot"]
+    for atom in structure["atoms"]:atom["x"]+=140.0;atom["y"]-=65.0
+    core.replace_json(json.dumps(raw));before=next(item for item in core.evaluated_project(0)["molecules"] if item["id"]==target)
+    before_points={atom["id"]:(atom["x"],atom["y"]) for atom in before["atoms"] if atom.get("alive",True)}
+    assert core.repair_molecule_anchor(target)
+    after=next(item for item in core.evaluated_project(0)["molecules"] if item["id"]==target)
+    assert {atom["id"]:(atom["x"],atom["y"]) for atom in after["atoms"] if atom.get("alive",True)}==before_points
+    local=next(item for item in core.project()["nodes"] if item["type"]=="molecule_set_structure")["params"]["snapshot"]["atoms"]
+    assert abs((min(atom["x"] for atom in local)+max(atom["x"] for atom in local))*.5)<1e-8
+    assert core.project()["molecules"][0]["anchor_needs_repair"] is False
+
+
+def test_first_structure_after_position_nonuniform_scale_and_rotation_does_not_jump():
+    core=CoreSession();target=core.add_blank_molecule("molecule");core.set_viewport(960,540,1,0,0)
+    core.add_node("molecule_set_position",json.dumps({"target":target,"x":85.0,"y":-35.0}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":target,"value":0.55}))
+    core.add_node("molecule_set_scale_y",json.dumps({"target":target,"value":1.7}))
+    core.add_node("molecule_set_rotation",json.dumps({"target":target,"value":28.0}))
+    node=core.add_node("molecule_set_structure",json.dumps({"target":target}));core.edit_node(node);core.set_tool("benzene")
+    core.pointer_down(670,355);preview=core.pointer_move(670,355)["preview"];assert core.pointer_up(670,355)["changed"]
+    actual=[item["center"] for item in core.depict(False)["atoms"]]
+    assert all(min(math.dist((point["x"],point["y"]),(other["x"],other["y"])) for other in actual)<1e-6 for point in preview["polygon"])
 
 
 def test_smiles_import_uses_the_same_one_time_anchor_normalization():
@@ -1434,3 +1499,138 @@ def test_gradient_structure_undo_duplicate_move_and_upstream_review():
     assert core.move_node(node,len(core.project()["nodes"])-1)
     assert core.gradient_summary(node)["needs_review"]
     assert core.rebuild_gradient(node) and not core.gradient_summary(node)["needs_review"]
+
+
+def test_living_molecule_targets_are_resolved_at_the_exact_insertion_point():
+    core=CoreSession();first=core.import_smiles("first","c1ccccc1")
+    before_second=len(core.project()["nodes"]);second=core.import_smiles("second","O=[N+]=O")
+    assert list(core.living_molecule_targets(before_second))==[first]
+    assert list(core.living_molecule_targets())==[first,second]
+    node=core.add_node("molecule_gradient_structure",json.dumps({"target":second,"frames":18,"easing":"linear"}))
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    assert params["target"]==second
+    assert params["start_snapshot"]["id"]==second and params["end_snapshot"]["id"]==second
+    assert core.active_molecule==second
+
+
+def test_merge_then_gradient_is_one_undo_and_lifecycle_block_cannot_be_orphaned():
+    core=CoreSession();first=core.import_smiles("first","c1ccccc1");second=core.import_smiles("second","O=[N+]=O")
+    before=core.project();gradient=core.create_merged_gradient(first,second,30,"linear")
+    project=core.project();created,merge,node=project["nodes"][-3:]
+    assert [created["type"],merge["type"],node["type"]]==["molecule_create","merge_molecules","molecule_gradient_structure"]
+    assert node["id"]==gradient and node["params"]["target"]==merge["params"]["output"]
+    start=node["params"]["start_snapshot"]
+    assert len([atom for atom in start["atoms"] if atom.get("alive",True)])==9
+    assert not core.delete_node(merge["id"])  # the gradient consumes its output
+    assert core.undo();restored=core.project()
+    assert restored["nodes"]==before["nodes"] and restored["molecules"]==before["molecules"]
+    assert core.redo() and any(item["id"]==gradient for item in core.project()["nodes"])
+    assert core.delete_node(gradient)
+    merge=next(item for item in core.project()["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("operation_version")=="object_v1")
+    output=merge["params"]["output"];assert core.delete_node(merge["id"])
+    assert not any(item.get("params",{}).get("target")==output or item.get("params",{}).get("output")==output for item in core.project()["nodes"])
+
+
+def test_gradient_component_selection_drag_snap_alt_and_cancel_are_atomic():
+    core=CoreSession();core.set_viewport(960,540,1,0,0)
+    ring=core.import_smiles("ring","c1ccccc1");nitro=core.import_smiles("nitro","O=[N+]=O")
+    core.add_node("molecule_set_position",json.dumps({"target":nitro,"x":120.0,"y":0.0}))
+    gradient=core.create_merged_gradient(ring,nitro,30,"linear");core.edit_node(gradient);core.set_tool("move")
+    nodes=core.project()["nodes"];merge=next(item for item in nodes if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
+    mapping=merge["params"]["id_map"];source_atoms=set(mapping["source"]["atoms"].values());target_atoms=set(mapping["target"]["atoms"].values())
+    end=next(item for item in nodes if item["id"]==gradient)["params"]["end_snapshot"]
+    nitrogen=next(atom["id"] for atom in end["atoms"] if atom["id"] in source_atoms and (atom.get("label") or atom.get("element"))=="N")
+    selected=core.select_connected_component(nitrogen)
+    assert set(selected["selected_atoms"])==source_atoms
+    drawing=core.depict(False);points={item["id"]:item["center"] for item in drawing["atoms"]}
+    pivot=points[nitrogen];stationary=points[next(iter(target_atoms))]
+    destination=(stationary["x"]+32.0,stationary["y"])
+    core.pointer_down(pivot["x"],pivot["y"]);preview=core.pointer_move(*destination)["preview"]
+    assert preview["snap_atom"] in target_atoms and preview["text"].startswith("1.00×")
+    assert core.pointer_up(*destination)["changed"]
+    after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    moved=next(atom for atom in after["atoms"] if atom["id"]==nitrogen)
+    target=next(atom for atom in after["atoms"] if atom["id"]==preview["snap_atom"])
+    assert math.isclose(math.hypot(moved["x"]-target["x"],moved["y"]-target["y"]),after["reference_bond_length"],rel_tol=1e-7)
+    # Alt bypasses the chemical snap, and Esc/cancel restores the private endpoint draft.
+    core.pointer_down(*destination);unsnapped=core.pointer_move(stationary["x"]+32.0,stationary["y"],True)["preview"]
+    assert unsnapped["snap_atom"] is None
+    before_cancel=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    core.cancel_gesture();assert next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]==before_cancel
+
+
+def test_double_to_single_keeps_primary_stroke_and_fades_only_secondary_glyph():
+    core=CoreSession();target=core.import_smiles("alkene","C=C")
+    node=core.add_node("molecule_gradient_structure",json.dumps({"target":target,"frames":30,"easing":"linear"}))
+    params=next(item for item in core.project()["nodes"] if item["id"]==node)["params"]
+    bond=params["end_snapshot"]["bonds"][0];bond["type"]="single"
+    assert core.update_node(node,json.dumps(params))
+    middle=next(item for item in core.evaluated_project(15)["molecules"] if item["id"]==target)
+    common=next(item for item in middle["bonds"] if item["id"]==bond["id"])
+    extra=next(item for item in middle["bonds"] if item["id"].startswith("__gradient_secondary_bond__"))
+    assert common["type"]=="single" and common["alpha"]==255 and 120<=extra["alpha"]<=135
+    core.preview_timeline(15)
+    # The transient secondary stroke is a visual overlay with the same atom
+    # endpoints.  Depiction must not feed both edges to RDKit's topology model.
+    assert "<svg" in core.depict(False)["svg"]
+    assert core.gradient_summary(node)["changed_bonds"]==1
+
+
+def test_merge_bakes_each_source_object_appearance_without_recolouring_the_other_component():
+    core=CoreSession();first=core.import_smiles("first","C");second=core.import_smiles("second","O")
+    for target in (first,second):
+        node=next(item for item in core.project()["nodes"] if item["type"]=="molecule_set_structure" and item["params"]["target"]==target)
+        params=node["params"]
+        for atom in params["snapshot"]["atoms"]:atom["color"]={"r":255,"g":255,"b":255}
+        assert core.update_node(node["id"],json.dumps(params))
+    core.add_node("molecule_set_color",json.dumps({"target":first,"r":255,"g":0,"b":0}));core.add_node("molecule_set_alpha",json.dumps({"target":first,"value":128}))
+    core.add_node("molecule_set_color",json.dumps({"target":second,"r":0,"g":0,"b":255}));core.add_node("molecule_set_alpha",json.dumps({"target":second,"value":64}))
+    gradient=core.create_merged_gradient(first,second,12,"linear");project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
+    start=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["start_snapshot"]
+    by_id={atom["id"]:atom for atom in start["atoms"]};first_id=next(iter(merge["params"]["id_map"]["target"]["atoms"].values()));second_id=next(iter(merge["params"]["id_map"]["source"]["atoms"].values()))
+    assert by_id[first_id]["color"]=={"r":255,"g":0,"b":0} and by_id[first_id]["alpha"]==128
+    assert by_id[second_id]["color"]=={"r":0,"g":0,"b":255} and by_id[second_id]["alpha"]==64
+    assert merge["params"]["r"]==merge["params"]["g"]==merge["params"]["b"]==255 and merge["params"]["alpha"]==255
+
+
+def test_one_merged_gradient_expresses_nitro_attack_geometry_bond_charge_h_and_bond_order_together():
+    core=CoreSession();ring=core.import_smiles("ring","c1ccccc1");nitro=core.import_smiles("nitro","O=[N+]=O")
+    core.add_node("molecule_set_position",json.dumps({"target":nitro,"x":115.0,"y":0.0}))
+    node=core.create_merged_gradient(ring,nitro,30,"linear");project=core.project();gradient=next(item for item in project["nodes"] if item["id"]==node);merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item["params"].get("output")==gradient["params"]["target"])
+    params=gradient["params"];start=params["start_snapshot"];end=json.loads(json.dumps(params["end_snapshot"]));atoms_by_id={atom["id"]:atom for atom in end["atoms"]}
+    source_ids=set(merge["params"]["id_map"]["source"]["atoms"].values());ring_ids=set(merge["params"]["id_map"]["target"]["atoms"].values())
+    nitrogen=next(atom for atom in end["atoms"] if atom["id"] in source_ids and (atom.get("label") or atom.get("element"))=="N")
+    oxygens=[atom for atom in end["atoms"] if atom["id"] in source_ids and (atom.get("label") or atom.get("element"))=="O"]
+    carbon=next(atom for atom in end["atoms"] if atom["id"] in ring_ids);length=end["reference_bond_length"]
+    old_n=(nitrogen["x"],nitrogen["y"]);old_vectors=[(atom["x"]-old_n[0],atom["y"]-old_n[1]) for atom in oxygens]
+    first_angle=math.atan2(old_vectors[0][1],old_vectors[0][0]);second_angle=math.atan2(old_vectors[1][1],old_vectors[1][0]);delta=(second_angle-first_angle+math.pi)%(2*math.pi)-math.pi
+    if abs(delta)<math.pi*.9:delta=math.pi if delta>=0 else -math.pi
+    centre=first_angle+delta*.5;sign=1 if delta>=0 else -1
+    new_n=(carbon["x"]+length,carbon["y"]);nitrogen["x"],nitrogen["y"]=new_n
+    for atom,angle in zip(oxygens,(centre-sign*math.pi/3,centre+sign*math.pi/3)):
+        atom["x"]=new_n[0]+length*math.cos(angle);atom["y"]=new_n[1]+length*math.sin(angle)
+    new_bond=f'B{end["next_bond_id"]}';end["next_bond_id"]+=1
+    end["bonds"].append({"id":new_bond,"a":carbon["id"],"b":nitrogen["id"],"type":"single","secondary_line_side":"center","stereo":"none","visible":True,"alive":True,"alpha":255,"color":{"r":0,"g":0,"b":0}})
+    changed=next(bond for bond in end["bonds"] if bond["a"] in ring_ids and bond["b"] in ring_ids and bond["type"]=="double");changed["type"]="single"
+    positive_carbon=next(atoms_by_id[bond["b"] if bond["a"]==carbon["id"] else bond["a"]] for bond in end["bonds"] if carbon["id"] in (bond["a"],bond["b"]) and (bond["b"] if bond["a"]==carbon["id"] else bond["a"]) in ring_ids)
+    adornment=f'D{end["next_adornment_id"]}';end["next_adornment_id"]+=1
+    end["adornments"].append({"id":adornment,"creation_serial":999001,"atom":positive_carbon["id"],"text":"⊕","x":18.0,"y":18.0,"alpha":255,"alive":True,"color":{"r":0,"g":0,"b":0}})
+    hydrogen=f'A{end["next_atom_id"]}';end["next_atom_id"]+=1
+    end["atoms"].append({"id":hydrogen,"creation_serial":999002,"element":"H","label":"H","label_side":"right","number_style":"subscript","isotope":0,"radical_electrons":0,"implicit_hydrogens":0,"hidden":False,"alive":True,"alpha":255,"color":{"r":0,"g":0,"b":0},"x":carbon["x"],"y":carbon["y"]+length})
+    h_bond=f'B{end["next_bond_id"]}';end["next_bond_id"]+=1
+    end["bonds"].append({"id":h_bond,"a":carbon["id"],"b":hydrogen,"type":"single","secondary_line_side":"center","stereo":"none","visible":True,"alive":True,"alpha":255,"color":{"r":0,"g":0,"b":0}})
+    params["end_snapshot"]=end;assert core.update_node(node,json.dumps(params))
+    def molecule(frame):return next(item for item in core.evaluated_project(frame)["molecules"] if item["id"]==gradient["params"]["target"])
+    beginning,middle,finish=molecule(0),molecule(15),molecule(30)
+    assert not any(atom["id"]==hydrogen for atom in beginning["atoms"])
+    for stable_id in (new_bond,h_bond):assert 120<=next(bond for bond in middle["bonds"] if bond["id"]==stable_id)["alpha"]<=135
+    assert 120<=next(item for item in middle["adornments"] if item["id"]==adornment)["alpha"]<=135
+    middle_n=next(atom for atom in middle["atoms"] if atom["id"]==nitrogen["id"]);assert math.isclose(middle_n["x"],(old_n[0]+new_n[0])*.5,abs_tol=1e-6)
+    def angle(state):
+        by={atom["id"]:atom for atom in state["atoms"]};n=by[nitrogen["id"]];vectors=[(by[o["id"]]["x"]-n["x"],by[o["id"]]["y"]-n["y"]) for o in oxygens]
+        return abs(math.degrees(math.acos(max(-1,min(1,(vectors[0][0]*vectors[1][0]+vectors[0][1]*vectors[1][1])/(math.hypot(*vectors[0])*math.hypot(*vectors[1])))))))
+    assert 145<=angle(middle)<=155 and 118<=angle(finish)<=122
+    assert next(bond for bond in middle["bonds"] if bond["id"]==changed["id"])["type"]=="single"
+    assert any(bond["id"].startswith("__gradient_secondary_bond__") for bond in middle["bonds"])
+    summary=core.gradient_summary(node);assert summary["added_atoms"]==1 and summary["added_bonds"]==2 and summary["added_adornments"]==1 and summary["changed_bonds"]==1
+    assert next(item for item in core.evaluated_project(30)["molecules"] if item["id"]==nitro)["retired"] is True

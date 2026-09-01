@@ -178,7 +178,7 @@ json moleculeSnapshotJson(const Molecule& molecule) {
     // A structure snapshot is deliberately not a serialized render object.
     // Keep stable structure data and allocation counters only; object and
     // scene transforms are evaluated later by the normal animation layer.
-    for(const char* key:{"source_smiles","anchor","anchor_initialized","rotation","scale_x","scale_y","alpha","color",
+    for(const char* key:{"source_smiles","anchor","anchor_initialized","anchor_needs_repair","rotation","scale_x","scale_y","alpha","color",
                          "layer","visible","retired","poses"})snapshot.erase(key);
     return snapshot;
 }
@@ -238,6 +238,14 @@ std::string allocateBondId(Molecule& molecule) {
 std::string allocateAdornmentId(Molecule& molecule) {
     std::string id;do{id="D"+std::to_string(molecule.nextAdornmentId++);}while(molecule.adornment(id));return id;
 }
+Molecule bakeObjectAppearance(Molecule value) {
+    const auto byte=[](double raw){return static_cast<int>(std::round(std::clamp(raw,0.0,255.0)));};
+    const auto color=[&](Color& target){if(value.colorOverride)target=value.color;};
+    for(Atom& atom:value.atoms){atom.alpha=byte(atom.alpha*value.alpha/255.0);color(atom.color);}
+    for(Bond& bond:value.bonds){bond.alpha=byte(bond.alpha*value.alpha/255.0);color(bond.color);}
+    for(AtomAdornment& adornment:value.adornments){adornment.alpha=byte(adornment.alpha*value.alpha/255.0);color(adornment.color);}
+    value.alpha=255;value.color={255,255,255};value.colorOverride=false;return value;
+}
 json appendStructureWithRemap(Molecule& destination,const Molecule& source,
                               const Molecule& sourceVisual,const Molecule& destinationVisual,
                               const std::set<std::string>* selectedAtoms=nullptr) {
@@ -262,8 +270,10 @@ json appendStructureWithRemap(Molecule& destination,const Molecule& source,
 void captureObjectState(json& params,const Molecule& value) {
     params["coordinate_space"]="molecule_local_v2";params["snapshot"]=moleculeSnapshotJson(value);
     params["origin_x"]=value.origin.x;params["origin_y"]=value.origin.y;params["anchor_initialized"]=value.anchorInitialized;
+    params["anchor_needs_repair"]=value.anchorNeedsRepair;
     params["scale_x"]=value.scaleX;params["scale_y"]=value.scaleY;params["rotation"]=value.rotation;
     params["alpha"]=value.alpha;params["r"]=value.color.red;params["g"]=value.color.green;params["b"]=value.color.blue;
+    params["color_override"]=value.colorOverride;
     params["layer"]=value.layer;params["visible"]=value.visible;
 }
 }  // namespace
@@ -295,6 +305,7 @@ struct EditorSession::Impl {
     std::vector<Snapshot> redo;
     struct Gesture {
         Project before;
+        std::optional<Molecule> draftBefore;
         Point pressCanvas;
         Point pressModel;
         Point startCanvas;
@@ -309,6 +320,7 @@ struct EditorSession::Impl {
         std::set<std::string> erasedAtoms;
         std::set<std::string> erasedBonds;
         std::string previewText;
+        std::optional<std::string> snapAtomId;
         GesturePreviewKind previewKind = GesturePreviewKind::None;
         double bendLevel = 1.0;
         bool changed = false;
@@ -467,8 +479,24 @@ struct EditorSession::Impl {
         const double radians=transform.rotation*std::numbers::pi/180.0,c=std::cos(radians),s=std::sin(radians);
         const double x=center->x*transform.scaleX,y=center->y*transform.scaleY;
         const Point worldCenter{transform.origin.x+x*c-y*s,transform.origin.y+x*s+y*c};
+        const Point anchorDelta{worldCenter.x-transform.origin.x,worldCenter.y-transform.origin.y};
         translateLocalStructure(*structureDraft,*center);
-        structureDraft->origin={};identity->origin=worldCenter;identity->anchorInitialized=true;
+        structureDraft->origin={};identity->origin={identity->origin.x+anchorDelta.x,identity->origin.y+anchorDelta.y};identity->anchorInitialized=true;identity->anchorNeedsRepair=false;
+        // Position nodes use absolute anchor values.  If an empty object was
+        // positioned before its first structure was drawn, re-centering only
+        // the identity would be overwritten by those nodes and the picture
+        // would jump.  Shift the already-authored values by the same world
+        // delta, preserving the first committed picture exactly.
+        const auto stop=std::find_if(project.nodes.begin(),project.nodes.end(),[&](const ScriptNode& value){return value.id==node.id;});
+        for(auto it=project.nodes.begin();it!=stop;++it){
+            json params=json::parse(it->paramsJson);if(params.value("target","")!=activeMolecule)continue;
+            if(it->type=="molecule_set_position"||it->type=="molecule_lerp_position"){
+                params["x"]=params.value("x",0.0)+anchorDelta.x;params["y"]=params.value("y",0.0)+anchorDelta.y;
+            }else if(it->type=="molecule_set_x"||it->type=="molecule_lerp_x")params["value"]=params.value("value",0.0)+anchorDelta.x;
+            else if(it->type=="molecule_set_y"||it->type=="molecule_lerp_y")params["value"]=params.value("value",0.0)+anchorDelta.y;
+            else continue;
+            it->paramsJson=params.dump();
+        }
     }
     Point localToWorld(Point value) const {
         if(!validStructureContext())return value;const EditTransform transform=editTransform();
@@ -606,8 +634,11 @@ struct EditorSession::Impl {
             value.preview.current = gesture->currentCanvas;
             value.preview.polygon = gesture->lasso;
             value.preview.text = gesture->previewText;
-            const Hit snap = hit(gesture->currentCanvas, gesture->startHit.kind == HitKind::Atom ? std::optional(gesture->startHit.id) : std::nullopt);
-            if (snap.kind == HitKind::Atom) value.preview.snapAtomId = snap.id;
+            if(gesture->snapAtomId)value.preview.snapAtomId=*gesture->snapAtomId;
+            else if(gesture->previewKind==GesturePreviewKind::Bond){
+                const Hit snap = hit(gesture->currentCanvas, gesture->startHit.kind == HitKind::Atom ? std::optional(gesture->startHit.id) : std::nullopt);
+                if (snap.kind == HitKind::Atom) value.preview.snapAtomId = snap.id;
+            }
         }
         return value;
     }
@@ -797,6 +828,7 @@ struct EditorSession::Impl {
             // providing no way to undo back to an empty canvas.
             const auto high = project.nextCreationSerial;
             project = std::move(gesture->before);
+            if(gesture->draftBefore)structureDraft=std::move(gesture->draftBefore);
             project.nextCreationSerial = std::max(project.nextCreationSerial, high);
             gesture.reset();
             return;
@@ -900,7 +932,7 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     if (isStructureWriteTool(impl_->tool) && !impl_->validStructureContext())
         return impl_->result(canvasPoint);
     const Point pressModel = impl_->canvasToEdit(canvasPoint);
-    Impl::Gesture gesture{.before = impl_->project, .pressCanvas = canvasPoint, .pressModel = pressModel,
+    Impl::Gesture gesture{.before = impl_->project, .draftBefore = impl_->structureDraft, .pressCanvas = canvasPoint, .pressModel = pressModel,
                           .startCanvas = canvasPoint, .currentCanvas = canvasPoint,
                           .startModel = pressModel, .startHit = impl_->hit(canvasPoint)};
     const ScriptNode* activeNode=impl_->targetKind==EditTargetKind::ScriptNode?impl_->project.node(impl_->targetId):nullptr;
@@ -1017,6 +1049,33 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
         ScriptNode* directNode=impl_->targetKind==EditTargetKind::ScriptNode?impl_->project.node(impl_->targetId):nullptr;
         if(directNode&&(directNode->type=="molecule_set_x"||directNode->type=="molecule_lerp_x"))delta.y=0.0;
         if(directNode&&(directNode->type=="molecule_set_y"||directNode->type=="molecule_lerp_y"))delta.x=0.0;
+        impl_->gesture->snapAtomId.reset();impl_->gesture->previewText.clear();
+        const ScriptNode* structureNode=impl_->targetKind==EditTargetKind::StructureSnapshot?impl_->project.node(impl_->targetId):nullptr;
+        const auto pivot=impl_->gesture->original.find(impl_->gesture->startHit.id);
+        if(!alt&&structureNode&&structureNode->type=="molecule_gradient_structure"&&
+           impl_->gesture->startHit.kind==HitKind::Atom&&pivot!=impl_->gesture->original.end()){
+            constexpr double snapRadiusPixels=12.0;
+            double nearest=snapRadiusPixels;std::optional<Point> snapped;int snappedDegrees=0;
+            const double bondLength=molecule->referenceBondLength;
+            for(const Atom& stationary:molecule->atoms){
+                if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
+                for(int step=0;step<24;++step){
+                    const double radians=step*std::numbers::pi/12.0;
+                    const Point candidate{stationary.position.x+bondLength*std::cos(radians),
+                                          stationary.position.y+bondLength*std::sin(radians)};
+                    const double screenDistance=distance(canvasPoint,impl_->editToCanvas(candidate));
+                    if(screenDistance<nearest){
+                        nearest=screenDistance;snapped=candidate;snappedDegrees=step*15;
+                        impl_->gesture->snapAtomId=stationary.id;
+                    }
+                }
+            }
+            if(snapped){
+                delta={snapped->x-pivot->second.x,snapped->y-pivot->second.y};
+                impl_->gesture->currentCanvas=impl_->editToCanvas(*snapped);
+                impl_->gesture->previewText="1.00×键长 · "+std::to_string(snappedDegrees)+"°";
+            }
+        }
         for (const auto& [id, position] : impl_->gesture->original) {
             const Point target{position.x + delta.x, position.y + delta.y};
             if (impl_->targetKind == EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
@@ -1226,15 +1285,14 @@ bool EditorSession::adjustArrowCurveBend(int direction) {
         impl_->gesture->bendLevel=std::clamp(impl_->gesture->bendLevel+(direction>0?1.0:-1.0),-5.0,5.0);
         (void)pointerMove(impl_->gesture->currentCanvas,false,false,false);return true;
     }
-    json params=json::parse(node->paramsJson);if(!params.value("initialized",true))return false;
-    const Point p0{params.value("x1",0.0),params.value("y1",0.0)},p3{params.value("x2",160.0),params.value("y2",0.0)};
-    const Point delta{p3.x-p0.x,p3.y-p0.y};const double length=std::hypot(delta.x,delta.y);if(length<=1e-9)return false;
-    const double amount=std::clamp(length*0.18,18.0,70.0)*(direction>0?1.0:-1.0);const Point shift{-delta.y/length*amount,delta.x/length*amount};
-    Project before=impl_->project;params["cx1"]=params.value("cx1",80.0)+shift.x;params["cy1"]=params.value("cy1",80.0)+shift.y;params["cx2"]=params.value("cx2",-80.0)+shift.x;params["cy2"]=params.value("cy2",80.0)+shift.y;node->paramsJson=params.dump();
-    impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+    // The wheel is a bend-direction control only while the initial freehand
+    // curve gesture is still uncommitted.  Once the curve exists, P0/C1/C2/P3
+    // are the authoritative fine-edit controls and the wheel belongs to the
+    // canvas zoom interaction.
+    return false;
 }
 
-void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl_->project.nextCreationSerial;impl_->project = std::move(impl_->gesture->before);impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->gesture.reset(); } }
+void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl_->project.nextCreationSerial;impl_->project = std::move(impl_->gesture->before);if(impl_->gesture->draftBefore)impl_->structureDraft=std::move(impl_->gesture->draftBefore);impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->gesture.reset(); } }
 EditResult EditorSession::selectAll() {
     impl_->selectedAtoms.clear();
     impl_->selectedBonds.clear();
@@ -1375,9 +1433,10 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         Molecule outputState=*identity;outputState.referenceBondLength=targetLocal->second.referenceBondLength;
         outputState.origin=targetLocal->second.origin;outputState.anchorInitialized=targetLocal->second.anchorInitialized;
         outputState.scaleX=targetLocal->second.scaleX;outputState.scaleY=targetLocal->second.scaleY;outputState.rotation=targetLocal->second.rotation;
-        outputState.alpha=targetLocal->second.alpha;outputState.color=targetLocal->second.color;outputState.layer=targetLocal->second.layer;outputState.visible=targetLocal->second.visible;
-        json mapping={{"target",appendStructureWithRemap(outputState,targetLocal->second,targetVisual->second,targetVisual->second)}};
-        if(merging)mapping["source"]=appendStructureWithRemap(outputState,*sourceLocal,*sourceVisual,targetVisual->second);
+        outputState.alpha=merging?255:targetLocal->second.alpha;outputState.color=merging?Color{255,255,255}:targetLocal->second.color;outputState.colorOverride=merging?false:targetLocal->second.colorOverride;outputState.layer=targetLocal->second.layer;outputState.visible=targetLocal->second.visible;
+        const Molecule transferredTarget=merging?bakeObjectAppearance(targetLocal->second):targetLocal->second;
+        json mapping={{"target",appendStructureWithRemap(outputState,transferredTarget,targetVisual->second,targetVisual->second)}};
+        if(merging){const Molecule bakedSource=bakeObjectAppearance(*sourceLocal);mapping["source"]=appendStructureWithRemap(outputState,bakedSource,*sourceVisual,targetVisual->second);}
         for(Atom& atom:outputState.atoms)atom.creationSerial=impl_->project.allocateCreationSerial();
         for(AtomAdornment& value:outputState.adornments)value.creationSerial=impl_->project.allocateCreationSerial();
         identity->nextAtomId=std::max(identity->nextAtomId,outputState.nextAtomId);identity->nextBondId=std::max(identity->nextBondId,outputState.nextBondId);identity->nextAdornmentId=std::max(identity->nextAdornmentId,outputState.nextAdornmentId);
@@ -1419,6 +1478,38 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
     const json requested=paramsJson.empty()||paramsJson=="{}"?json::parse(defaultNodeParamsJson(type)):json::parse(paramsJson);const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,requested,index.value_or(impl_->project.nodes.size()));
     const std::string id=impl_->project.addNode(type,requested.dump(),insertion);
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
+}
+std::vector<std::string> EditorSession::livingMoleculeTargets(
+    std::optional<std::size_t> insertionIndex) const {
+    const std::size_t insertion=std::min(insertionIndex.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
+    std::vector<std::string> result;
+    for(const Molecule& molecule:impl_->project.molecules)
+        if(structureBeforeNode(impl_->project,insertion,molecule.id))result.push_back(molecule.id);
+    return result;
+}
+std::string EditorSession::createMergedGradientStructure(
+    const std::string& target,const std::string& source,int frames,
+    const std::string& easing,std::optional<std::size_t> insertionIndex) {
+    if(target.empty()||source.empty()||target==source)throw std::runtime_error("请选择两个不同且仍然存活的分子");
+    const std::size_t requested=std::min(insertionIndex.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
+    const auto living=livingMoleculeTargets(requested);
+    if(std::find(living.begin(),living.end(),target)==living.end()||std::find(living.begin(),living.end(),source)==living.end())
+        throw std::runtime_error("两个分子必须在插入位置同时存活");
+    Project before=impl_->project;const std::size_t undoSize=impl_->undo.size();const std::string oldActive=impl_->activeMolecule;
+    const EditTargetKind oldKind=impl_->targetKind;const std::string oldTarget=impl_->targetId;const int oldFrame=impl_->previewFrame;const Tool oldTool=impl_->tool;const auto oldDraft=impl_->structureDraft;
+    try{
+        impl_->activeMolecule=target;
+        const std::string merge=addScriptNode("merge_molecules",json({{"target",target},{"source",source}}).dump(),requested);
+        const ScriptNode* mergeNode=impl_->project.node(merge);if(!mergeNode)throw std::runtime_error("无法建立合并对象节点");
+        const std::string output=json::parse(mergeNode->paramsJson).value("output","");if(output.empty())throw std::runtime_error("合并对象没有输出分子");
+        const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& node){return node.id==merge;});
+        const std::size_t gradientIndex=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found))+1;
+        const std::string gradient=addScriptNode("molecule_gradient_structure",json({{"target",output},{"frames",std::max(0,frames)},{"easing",easing}}).dump(),gradientIndex);
+        impl_->undo.resize(undoSize);impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();
+        return gradient;
+    }catch(...){
+        impl_->project=std::move(before);impl_->undo.resize(undoSize);impl_->activeMolecule=oldActive;impl_->targetKind=oldKind;impl_->targetId=oldTarget;impl_->previewFrame=oldFrame;impl_->tool=oldTool;impl_->structureDraft=oldDraft;throw;
+    }
 }
 bool EditorSession::updateScriptNode(const std::string& nodeId,const std::string& paramsJson) {
     ScriptNode* node=impl_->project.node(nodeId);if(!node)return false;const json value=json::parse(paramsJson);
@@ -1501,7 +1592,38 @@ std::string EditorSession::duplicateScriptNode(const std::string& nodeId,std::op
 }
 bool EditorSession::deleteScriptNode(const std::string& nodeId) {
     const auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
-    if(found==impl_->project.nodes.end()||found->type=="scene")return false;const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));Project before=impl_->project;impl_->project.nodes.erase(found);impl_->markGradientNodesForReview(index);
+    if(found==impl_->project.nodes.end()||found->type=="scene")return false;
+    const auto isObjectOperation=[](const ScriptNode& node){
+        if(node.type!="split_molecule"&&node.type!="merge_molecules")return false;
+        try{return json::parse(node.paramsJson).value("operation_version","")=="object_v1";}catch(...){return false;}
+    };
+    std::optional<std::size_t> operationIndex,createIndex;std::string output;
+    const std::size_t selectedIndex=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));
+    if(isObjectOperation(*found)){
+        operationIndex=selectedIndex;output=json::parse(found->paramsJson).value("output","");
+    }else if(found->type=="molecule_create"){
+        output=json::parse(found->paramsJson).value("target","");
+        for(std::size_t i=0;i<impl_->project.nodes.size();++i)if(isObjectOperation(impl_->project.nodes[i])&&json::parse(impl_->project.nodes[i].paramsJson).value("output","")==output){operationIndex=i;break;}
+    }
+    if(operationIndex){
+        for(std::size_t i=0;i<impl_->project.nodes.size();++i){const ScriptNode& node=impl_->project.nodes[i];if(node.type!="molecule_create")continue;
+            if(json::parse(node.paramsJson).value("target","")==output){createIndex=i;break;}}
+        if(!createIndex)return false;
+        // Do not strand a node that consumes the operation output.  The user
+        // must delete those dependants first; the create+operation pair itself
+        // is then removed as one lifecycle transaction.
+        for(std::size_t i=0;i<impl_->project.nodes.size();++i){
+            if(i==*operationIndex||i==*createIndex)continue;
+            const json params=json::parse(impl_->project.nodes[i].paramsJson);
+            for(const char* key:{"target","source","destination"})
+                if(params.value(key,"")==output)return false;
+        }
+        Project before=impl_->project;const std::size_t first=std::min(*operationIndex,*createIndex),second=std::max(*operationIndex,*createIndex);
+        impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(second));
+        impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(first));
+        impl_->markGradientNodesForReview(first);impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+    }
+    const std::size_t index=selectedIndex;Project before=impl_->project;impl_->project.nodes.erase(found);impl_->markGradientNodesForReview(index);
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
 }
 std::string EditorSession::gradientStructureSummary(const std::string& nodeId) const {
@@ -1511,21 +1633,79 @@ std::string EditorSession::gradientStructureSummary(const std::string& nodeId) c
     std::map<std::string,const Atom*> firstAtoms,secondAtoms;for(const Atom& value:start->atoms)if(value.alive)firstAtoms[value.id]=&value;for(const Atom& value:end->atoms)if(value.alive)secondAtoms[value.id]=&value;
     std::map<std::string,const Bond*> firstBonds,secondBonds;for(const Bond& value:start->bonds)if(value.alive)firstBonds[value.id]=&value;for(const Bond& value:end->bonds)if(value.alive)secondBonds[value.id]=&value;
     std::map<std::string,const AtomAdornment*> firstAdornments,secondAdornments;for(const AtomAdornment& value:start->adornments)if(value.alive)firstAdornments[value.id]=&value;for(const AtomAdornment& value:end->adornments)if(value.alive)secondAdornments[value.id]=&value;
-    int addedAtoms=0,addedBonds=0,addedAdornments=0,deleted=0,moved=0,changed=0;
+    int addedAtoms=0,addedBonds=0,addedAdornments=0,deleted=0,moved=0,changed=0,changedBonds=0;
     for(const auto& [id,value]:secondAtoms)if(!firstAtoms.contains(id))++addedAtoms;else{const Atom& first=*firstAtoms.at(id);if(distance(first.position,value->position)>1e-6)++moved;if(first.element!=value->element||first.alias!=value->alias||first.hidden!=value->hidden)++changed;}
     for(const auto& [id,_]:firstAtoms)if(!secondAtoms.contains(id))++deleted;
-    for(const auto& [id,value]:secondBonds)if(!firstBonds.contains(id))++addedBonds;else{const Bond& first=*firstBonds.at(id);if(first.type!=value->type||first.stereo!=value->stereo||first.secondaryLineSide!=value->secondaryLineSide||first.visible!=value->visible)++changed;}
+    for(const auto& [id,value]:secondBonds)if(!firstBonds.contains(id))++addedBonds;else{const Bond& first=*firstBonds.at(id);if(first.type!=value->type||first.stereo!=value->stereo||first.secondaryLineSide!=value->secondaryLineSide||first.visible!=value->visible)++changedBonds;}
     for(const auto& [id,_]:firstBonds)if(!secondBonds.contains(id))++deleted;
     for(const auto& [id,value]:secondAdornments)if(!firstAdornments.contains(id))++addedAdornments;else if(firstAdornments.at(id)->text!=value->text)++changed;
     for(const auto& [id,_]:firstAdornments)if(!secondAdornments.contains(id))++deleted;
     const bool legacySpace=params.value("coordinate_space","")!="molecule_local_v2";
-    return json({{"added_atoms",addedAtoms},{"added_bonds",addedBonds},{"added_adornments",addedAdornments},{"deleted_objects",deleted},{"moved_atoms",moved},{"changed_objects",changed},{"needs_review",params.value("needs_review",false)||legacySpace},{"legacy_coordinate_space",legacySpace}}).dump();
+    return json({{"added_atoms",addedAtoms},{"added_bonds",addedBonds},{"added_adornments",addedAdornments},{"deleted_objects",deleted},{"moved_atoms",moved},{"changed_bonds",changedBonds},{"changed_objects",changed},{"needs_review",params.value("needs_review",false)||legacySpace},{"legacy_coordinate_space",legacySpace}}).dump();
 }
 bool EditorSession::rebuildGradientStructure(const std::string& nodeId) {
     auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});if(found==impl_->project.nodes.end()||found->type!="molecule_gradient_structure")return false;
     const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));json params=json::parse(found->paramsJson);int startFrame=0;const auto start=structureBeforeNode(impl_->project,index,params.value("target",""),&startFrame);if(!start)return false;
     Project before=impl_->project;params["coordinate_space"]="molecule_local_v2";params["start_snapshot"]=moleculeSnapshotJson(*start);params["end_snapshot"]=moleculeSnapshotJson(*start);params["needs_review"]=false;found->paramsJson=params.dump();impl_->structureDraft=*start;impl_->previewFrame=startFrame+params.value("frames",30);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=nodeId;
     impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+}
+bool EditorSession::retargetGradientStructure(const std::string& nodeId,const std::string& moleculeId) {
+    auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
+    if(found==impl_->project.nodes.end()||found->type!="molecule_gradient_structure")return false;
+    const std::size_t index=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));
+    const auto living=livingMoleculeTargets(index);if(std::find(living.begin(),living.end(),moleculeId)==living.end())return false;
+    int startFrame=0;const auto start=structureBeforeNode(impl_->project,index,moleculeId,&startFrame);if(!start)return false;
+    Project before=impl_->project;json params=json::parse(found->paramsJson);params["target"]=moleculeId;params["coordinate_space"]="molecule_local_v2";params["start_snapshot"]=moleculeSnapshotJson(*start);params["end_snapshot"]=moleculeSnapshotJson(*start);params["needs_review"]=false;found->paramsJson=params.dump();
+    impl_->activeMolecule=moleculeId;impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=nodeId;impl_->previewFrame=startFrame+params.value("frames",30);impl_->structureDraft=*start;
+    impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+}
+bool EditorSession::repairMoleculeAnchor(const std::string& moleculeId) {
+    Molecule* identity=impl_->project.molecule(moleculeId);if(!identity||!identity->anchorNeedsRepair)return false;
+    std::optional<Point> center;
+    for(const ScriptNode& node:impl_->project.nodes){
+        if(node.type!="molecule_set_structure")continue;const json params=json::parse(node.paramsJson);
+        if(params.value("target","")!=moleculeId)continue;
+        const auto snapshot=moleculeFromSnapshotJson(params.value("snapshot",json::object()));if(snapshot){center=livingAtomBoundsCenter(*snapshot);if(center)break;}
+    }
+    if(!center)return false;
+    Project before=impl_->project;
+    const auto recenter=[&](json& params,const char* key){
+        const auto value=moleculeFromSnapshotJson(params.value(key,json::object()));if(!value)return;
+        Molecule shifted=*value;translateLocalStructure(shifted,*center);params[key]=moleculeSnapshotJson(shifted);
+    };
+    for(ScriptNode& node:impl_->project.nodes){
+        json params=json::parse(node.paramsJson);if(params.value("target","")!=moleculeId)continue;
+        if(node.type=="molecule_set_structure")recenter(params,"snapshot");
+        else if(node.type=="molecule_gradient_structure"){recenter(params,"start_snapshot");recenter(params,"end_snapshot");}
+        else if(node.type=="molecule_set_position"||node.type=="molecule_lerp_position"){
+            params["x"]=params.value("x",0.0)+center->x;params["y"]=params.value("y",0.0)+center->y;
+        }else if(node.type=="molecule_set_x"||node.type=="molecule_lerp_x")params["value"]=params.value("value",0.0)+center->x;
+        else if(node.type=="molecule_set_y"||node.type=="molecule_lerp_y")params["value"]=params.value("value",0.0)+center->y;
+        else continue;
+        node.paramsJson=params.dump();
+    }
+    const double radians=identity->rotation*std::numbers::pi/180.0,c=std::cos(radians),s=std::sin(radians);
+    const double x=center->x*identity->scaleX,y=center->y*identity->scaleY;
+    identity->origin={identity->origin.x+x*c-y*s,identity->origin.y+x*s+y*c};identity->anchorNeedsRepair=false;identity->anchorInitialized=true;
+    if(impl_->activeMolecule==moleculeId&&impl_->targetKind==EditTargetKind::StructureSnapshot)
+        if(const ScriptNode* node=impl_->project.node(impl_->targetId))impl_->loadStructureDraft(*node);
+    impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+}
+EditResult EditorSession::selectConnectedComponent(const std::string& atomId,bool additive) {
+    Molecule* molecule=impl_->editableMolecule();if(!molecule||!impl_->validStructureContext()||!molecule->atom(atomId))return impl_->result({});
+    // A gradient keeps the component partition from its immutable start
+    // snapshot so drawing a new product bond never makes a later double-click
+    // select the whole product.
+    const Molecule* topology=molecule;std::optional<Molecule> start;
+    if(const ScriptNode* node=impl_->project.node(impl_->targetId);node&&node->type=="molecule_gradient_structure"){
+        const json params=json::parse(node->paramsJson);start=moleculeFromSnapshotJson(params.value("start_snapshot",json::object()));if(start&&start->atom(atomId))topology=&*start;
+    }
+    std::map<std::string,std::vector<std::string>> neighbours;for(const Atom& atom:topology->atoms)if(atom.alive)neighbours[atom.id];
+    for(const Bond& bond:topology->bonds)if(bond.alive&&neighbours.contains(bond.atomA)&&neighbours.contains(bond.atomB)){neighbours[bond.atomA].push_back(bond.atomB);neighbours[bond.atomB].push_back(bond.atomA);}
+    if(!additive){impl_->selectedAtoms.clear();impl_->selectedBonds.clear();}
+    std::set<std::string> visited;std::vector<std::string> pending{atomId};while(!pending.empty()){const std::string id=pending.back();pending.pop_back();if(!visited.insert(id).second)continue;impl_->selectedAtoms.insert(id);for(const std::string& next:neighbours[id])pending.push_back(next);}
+    for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
+    return impl_->result({});
 }
 bool EditorSession::updateScene(const std::string& sceneJson) {
     const json value=json::parse(sceneJson);if(!value.is_object())throw std::runtime_error("Scene must be an object");Scene next=impl_->project.scene;

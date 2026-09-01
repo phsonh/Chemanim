@@ -23,7 +23,6 @@ molecule1.SetScaleY(1)
 molecule1.SetRotation(0)
 molecule1.SetAlpha(255)
 molecule1.SetLayer(0)
-molecule1.SetColor(255, 255, 255)
 molecule1.SetVisible(true)
 
 molecule1:SetStructure({
@@ -60,7 +59,6 @@ molecule2.SetScaleY(1)
 molecule2.SetRotation(0)
 molecule2.SetAlpha(255)
 molecule2.SetLayer(0)
-molecule2.SetColor(255, 255, 255)
 molecule2.SetVisible(true)
 
 molecule2:SetStructure({
@@ -91,7 +89,6 @@ molecule3.SetScaleY(1)
 molecule3.SetRotation(0)
 molecule3.SetAlpha(255)
 molecule3.SetLayer(0)
-molecule3.SetColor(255, 255, 255)
 molecule3.SetVisible(true)
 
 local molecule4 = chem.NewMol {
@@ -110,7 +107,6 @@ molecule4.SetScaleY(1)
 molecule4.SetRotation(0)
 molecule4.SetAlpha(255)
 molecule4.SetLayer(0)
-molecule4.SetColor(255, 255, 255)
 molecule4.SetVisible(true)
 
 molecule4:SetStructure({

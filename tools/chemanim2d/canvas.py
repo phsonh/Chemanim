@@ -429,6 +429,17 @@ class StructureCanvas(QWidget):
                 first=QPointF(start["x"],start["y"]);second=QPointF(current["x"],current["y"])
                 painter.setPen(QPen(QColor(45,145,235,230),2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
                 painter.drawLine(first,second);painter.drawEllipse(second,4,4)
+            snap_id=self._preview.get("snap_atom","")
+            if snap_id and current and self._depiction:
+                target=next((item.get("center") for item in self._depiction.get("atoms",[]) if item.get("id")==snap_id),None)
+                if target:
+                    target_point=QPointF(target["x"],target["y"]);anchor=QPointF(current["x"],current["y"])
+                    painter.setPen(QPen(QColor(35,170,235,235),2,Qt.PenStyle.DashLine))
+                    painter.setBrush(QColor(35,170,235,34));painter.drawEllipse(target_point,11,11)
+                    painter.drawLine(target_point,anchor);painter.drawEllipse(anchor,9,9)
+                    label=self._preview.get("text","")
+                    if label:
+                        painter.setPen(QPen(QColor(35,130,215),1));painter.drawText(anchor+QPointF(12,-10),label)
 
     @staticmethod
     def _mods(event):
@@ -468,6 +479,14 @@ class StructureCanvas(QWidget):
         self.setFocus();self._sync_core_viewport()
         alt,control,shift=self._mods(event)
         self._gesture_active=True;self._consume(self.session.pointer_down(event.position().x(),event.position().y(),alt,control,shift))
+
+    def mouseDoubleClickEvent(self,event:QMouseEvent):
+        if event.button()!=Qt.MouseButton.LeftButton or self.final_effect:return super().mouseDoubleClickEvent(event)
+        self._sync_core_viewport();self.session.cancel_gesture();self._gesture_active=False
+        hit=self.session.hit_test(event.position().x(),event.position().y())
+        if hit.get("kind")=="atom":
+            _,control,shift=self._mods(event);self._consume(self.session.select_connected_component(hit["id"],control or shift));self.request_refresh();event.accept();return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self,event:QMouseEvent):
         if self._panning:

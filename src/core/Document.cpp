@@ -450,9 +450,11 @@ std::string toJson(const Project& project, int indent) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
             {"anchor", {{"x", molecule.origin.x}, {"y", molecule.origin.y}}},
             {"anchor_initialized", molecule.anchorInitialized},
+            {"anchor_needs_repair", molecule.anchorNeedsRepair},
             {"reference_bond_length", molecule.referenceBondLength}, {"next_atom_id", molecule.nextAtomId},
             {"next_bond_id", molecule.nextBondId}, {"next_adornment_id", molecule.nextAdornmentId},
             {"rotation", molecule.rotation}, {"scale_x", molecule.scaleX}, {"scale_y", molecule.scaleY}, {"alpha", molecule.alpha},
+            {"color_override", molecule.colorOverride},
             {"layer", molecule.layer}, {"visible",molecule.visible}, {"retired", molecule.retired}};
         colorToJson(item["color"], molecule.color);
         item["atoms"] = json::array();
@@ -525,7 +527,9 @@ Project fromJson(const std::string& source) {
             // contain animated local snapshots, so silently re-centring them
             // would alter the picture.  Only newly authored files explicitly
             // opt into the one-time initialization path with false.
+            const bool hasAnchorState=raw.contains("anchor_initialized");
             molecule.anchorInitialized = raw.value("anchor_initialized", true);
+            molecule.anchorNeedsRepair = raw.value("anchor_needs_repair", !hasAnchorState);
         }
         molecule.referenceBondLength = raw.value("reference_bond_length", molecule.referenceBondLength);
         molecule.nextAtomId = raw.value("next_atom_id", std::uint64_t{1}); molecule.nextBondId = raw.value("next_bond_id", std::uint64_t{1});
@@ -540,6 +544,7 @@ Project fromJson(const std::string& source) {
         molecule.alpha = raw.value("alpha", 255); molecule.layer = raw.value("layer", 0);
         molecule.visible=raw.value("visible",true); molecule.retired=raw.value("retired",false);
         if (const auto color = raw.find("color"); color != raw.end()) molecule.color = colorFromJson(*color, {255,255,255});
+        molecule.colorOverride=raw.value("color_override",molecule.color.red!=255||molecule.color.green!=255||molecule.color.blue!=255);
         for (const json& value : raw.value("atoms", json::array())) {
             Atom atom; atom.id = value.value("id", ""); atom.element = value.value("element", "C");
             atom.alias = value.value("label", value.value("alias", ""));

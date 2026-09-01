@@ -161,6 +161,8 @@ public:
                                              int start, int duration, double target, Ease ease);
     [[nodiscard]] double globalValue(const std::string& scope, const std::string& property,
                                      int frame) const;
+    [[nodiscard]] bool globalActive(const std::string& scope, const std::string& property,
+                                    int frame) const;
     unsigned long long addStringKey(Object& object, const std::string& property, int frame,
                                     std::string value);
     void addImageTransition(Object& object, int start, int duration,

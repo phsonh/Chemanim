@@ -26,6 +26,7 @@ class NodeInspector(QWidget):
     nodeEdited = pyqtSignal(str)
     editStructureRequested = pyqtSignal(str)
     rebuildRequested = pyqtSignal(str)
+    retargetRequested = pyqtSignal(str)
 
     def __init__(self, session, parent=None):
         super().__init__(parent); self.session = session; self.node_id = ""; self._updating = False; self._applying = False; self._rebuilding = False; self._refresh_pending = False; self.editors = {}
@@ -143,10 +144,11 @@ class NodeInspector(QWidget):
             if summary.get("needs_review"):
                 rebuild=QPushButton("以新起点重建终态");rebuild.clicked.connect(lambda:self.rebuildRequested.emit(self.node_id));self.layout.addRow(rebuild)
             values=[]
-            for key,label in (("added_atoms","新增原子"),("added_bonds","新增键"),("moved_atoms","移动原子"),("deleted_objects","删除对象"),("changed_objects","改变样式")):
+            for key,label in (("added_atoms","新增原子"),("added_bonds","新增键"),("added_adornments","新增标记"),("moved_atoms","移动原子"),("changed_bonds","键型变化"),("deleted_objects","删除对象"),("changed_objects","改变样式")):
                 values.append(f'{label} {summary.get(key,0)} 个')
             text=QLabel("\n".join(values));self.layout.addRow("变化摘要",text)
             edit=QPushButton("编辑终态结构");edit.setEnabled(not summary.get("legacy_coordinate_space"));edit.clicked.connect(lambda:self.editStructureRequested.emit(self.node_id));self.layout.addRow(edit)
+            retarget=QPushButton("更换目标并重建起终态……");retarget.clicked.connect(lambda:self.retargetRequested.emit(self.node_id));self.layout.addRow(retarget)
 
     def sync_values(self):
         if self._applying or self._rebuilding or not self.node_id:return

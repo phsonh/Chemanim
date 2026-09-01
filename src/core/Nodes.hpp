@@ -49,6 +49,10 @@ struct GlobalNodeState {
     double arrowScaleX = 1.0;
     double arrowScaleY = 1.0;
     double arrowWidth = -1.0;
+    bool moleculeAlphaOverride = false;
+    bool moleculeColorOverride = false;
+    bool arrowAlphaOverride = false;
+    bool arrowColorOverride = false;
 };
 
 struct NodeDiagnostic {

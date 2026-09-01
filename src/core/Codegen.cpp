@@ -47,9 +47,9 @@ std::string moleculeDeclaration(const Molecule& molecule) {
     for(const AtomAdornment& adornment:molecule.adornments)out<<"        { id="<<quote(adornment.id)<<", creation_serial="<<adornment.creationSerial<<", atom="<<quote(adornment.atomId)<<", text="<<quote(adornment.text)<<", x="<<adornment.offset.x<<", y="<<adornment.offset.y<<", alpha="<<adornment.alpha<<", color_r="<<adornment.color.red<<", color_g="<<adornment.color.green<<", color_b="<<adornment.color.blue<<", alive="<<(adornment.alive?"true":"false")<<" },\n";
     out<<"    }\n}\n"<<molecule.id<<".SetPos("<<anchor.x<<", "<<anchor.y<<")\n"
        <<molecule.id<<".SetScaleX("<<molecule.scaleX<<")\n"<<molecule.id<<".SetScaleY("<<molecule.scaleY<<")\n"<<molecule.id<<".SetRotation("<<molecule.rotation<<")\n"
-       <<molecule.id<<".SetAlpha("<<molecule.alpha<<")\n"<<molecule.id<<".SetLayer("<<molecule.layer<<")\n"
-       <<molecule.id<<".SetColor("<<molecule.color.red<<", "<<molecule.color.green<<", "<<molecule.color.blue<<")\n"
-       <<molecule.id<<".SetVisible("<<(molecule.visible?"true":"false")<<")";
+       <<molecule.id<<".SetAlpha("<<molecule.alpha<<")\n"<<molecule.id<<".SetLayer("<<molecule.layer<<")\n";
+    if(molecule.colorOverride)out<<molecule.id<<".SetColor("<<molecule.color.red<<", "<<molecule.color.green<<", "<<molecule.color.blue<<")\n";
+    out<<molecule.id<<".SetVisible("<<(molecule.visible?"true":"false")<<")";
     std::string result=out.str();
     while(result.size()>1&&result.back()=='\n'&&result[result.size()-2]=='\n')result.pop_back();
     return result;
@@ -64,9 +64,9 @@ std::string capturedObjectCommands(const json& params) {
        <<output<<".SetScaleY("<<number(params.value("scale_y",1.0))<<")\n"
        <<output<<".SetRotation("<<number(params.value("rotation",0.0))<<")\n"
        <<output<<".SetAlpha("<<params.value("alpha",255)<<")\n"
-       <<output<<".SetLayer("<<params.value("layer",0)<<")\n"
-       <<output<<".SetColor("<<params.value("r",255)<<", "<<params.value("g",255)<<", "<<params.value("b",255)<<")\n"
-       <<output<<".SetVisible("<<(params.value("visible",true)?"true":"false")<<")";
+       <<output<<".SetLayer("<<params.value("layer",0)<<")\n";
+    if(params.value("color_override",false))out<<output<<".SetColor("<<params.value("r",255)<<", "<<params.value("g",255)<<", "<<params.value("b",255)<<")\n";
+    out<<output<<".SetVisible("<<(params.value("visible",true)?"true":"false")<<")";
     return out.str();
 }
 }  // namespace

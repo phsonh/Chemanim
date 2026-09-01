@@ -136,6 +136,12 @@ public:
         std::optional<std::size_t> insertionIndex = std::nullopt);
     [[nodiscard]] std::string addScriptNode(const std::string& type, const std::string& paramsJson,
                                             std::optional<std::size_t> index = std::nullopt);
+    [[nodiscard]] std::vector<std::string> livingMoleculeTargets(
+        std::optional<std::size_t> insertionIndex = std::nullopt) const;
+    [[nodiscard]] std::string createMergedGradientStructure(
+        const std::string& target, const std::string& source, int frames,
+        const std::string& easing,
+        std::optional<std::size_t> insertionIndex = std::nullopt);
     bool updateScriptNode(const std::string& nodeId, const std::string& paramsJson);
     bool setScriptNodeEnabled(const std::string& nodeId, bool enabled);
     bool moveScriptNode(const std::string& nodeId, std::size_t index);
@@ -145,6 +151,11 @@ public:
     bool deleteScriptNode(const std::string& nodeId);
     [[nodiscard]] std::string gradientStructureSummary(const std::string& nodeId) const;
     bool rebuildGradientStructure(const std::string& nodeId);
+    bool retargetGradientStructure(const std::string& nodeId,
+                                   const std::string& moleculeId);
+    bool repairMoleculeAnchor(const std::string& moleculeId);
+    [[nodiscard]] EditResult selectConnectedComponent(const std::string& atomId,
+                                                      bool additive = false);
     bool updateScene(const std::string& sceneJson);
 
     [[nodiscard]] bool canUndo() const;

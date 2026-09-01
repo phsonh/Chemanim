@@ -1,0 +1,511 @@
+{
+  "format": "chemanim-native-2d",
+  "mod": "color_override_acceptance",
+  "molecules": [
+    {
+      "adornments": [],
+      "alpha": 255,
+      "anchor": {
+        "x": 3.552713678800501e-15,
+        "y": 0.0
+      },
+      "anchor_initialized": true,
+      "anchor_needs_repair": false,
+      "atoms": [],
+      "bonds": [],
+      "color": {
+        "b": 255,
+        "g": 255,
+        "r": 255
+      },
+      "color_override": false,
+      "id": "molecule1",
+      "layer": 0,
+      "name": "colored",
+      "next_adornment_id": 1,
+      "next_atom_id": 7,
+      "next_bond_id": 7,
+      "poses": {},
+      "reference_bond_length": 32.0,
+      "retired": false,
+      "rotation": 0.0,
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "source_smiles": "",
+      "visible": true
+    }
+  ],
+  "next_creation_serial": 7,
+  "next_molecule_id": 2,
+  "next_node_id": 23,
+  "next_timeline_id": 1,
+  "nodes": [
+    {
+      "enabled": true,
+      "id": "N1",
+      "params": {},
+      "type": "scene"
+    },
+    {
+      "enabled": true,
+      "id": "N2",
+      "params": {
+        "target": "molecule1"
+      },
+      "type": "molecule_create"
+    },
+    {
+      "enabled": true,
+      "id": "N3",
+      "params": {
+        "coordinate_space": "molecule_local_v2",
+        "snapshot": {
+          "adornments": [],
+          "atoms": [
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 1,
+              "element": "C",
+              "hidden": false,
+              "id": "A1",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 31.999999999999996,
+              "y": 2.368475785867e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 2,
+              "element": "C",
+              "hidden": false,
+              "id": "A2",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 15.999999999999979,
+              "y": -27.712812921102042
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 3,
+              "element": "C",
+              "hidden": false,
+              "id": "A3",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -16.00000000000001,
+              "y": -27.71281292110203
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 4,
+              "element": "C",
+              "hidden": false,
+              "id": "A4",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -31.999999999999996,
+              "y": 6.28734554313853e-15
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 5,
+              "element": "C",
+              "hidden": false,
+              "id": "A5",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": -15.999999999999991,
+              "y": 27.712812921102042
+            },
+            {
+              "alive": true,
+              "alpha": 255,
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "creation_serial": 6,
+              "element": "C",
+              "hidden": false,
+              "id": "A6",
+              "implicit_hydrogens": 1,
+              "isotope": 0,
+              "label": "",
+              "label_side": "right",
+              "number_style": "subscript",
+              "radical_electrons": 0,
+              "x": 16.000000000000004,
+              "y": 27.71281292110203
+            }
+          ],
+          "bonds": [
+            {
+              "a": "A1",
+              "alive": true,
+              "alpha": 255,
+              "b": "A2",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B1",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            },
+            {
+              "a": "A2",
+              "alive": true,
+              "alpha": 255,
+              "b": "A3",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B2",
+              "secondary_line_side": "right",
+              "stereo": "none",
+              "type": "double",
+              "visible": true
+            },
+            {
+              "a": "A3",
+              "alive": true,
+              "alpha": 255,
+              "b": "A4",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B3",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            },
+            {
+              "a": "A4",
+              "alive": true,
+              "alpha": 255,
+              "b": "A5",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B4",
+              "secondary_line_side": "right",
+              "stereo": "none",
+              "type": "double",
+              "visible": true
+            },
+            {
+              "a": "A5",
+              "alive": true,
+              "alpha": 255,
+              "b": "A6",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B5",
+              "secondary_line_side": "center",
+              "stereo": "none",
+              "type": "single",
+              "visible": true
+            },
+            {
+              "a": "A6",
+              "alive": true,
+              "alpha": 255,
+              "b": "A1",
+              "color": {
+                "b": 0,
+                "g": 0,
+                "r": 0
+              },
+              "id": "B6",
+              "secondary_line_side": "right",
+              "stereo": "none",
+              "type": "double",
+              "visible": true
+            }
+          ],
+          "color_override": false,
+          "id": "molecule1",
+          "name": "colored",
+          "next_adornment_id": 1,
+          "next_atom_id": 7,
+          "next_bond_id": 7,
+          "reference_bond_length": 32.0
+        },
+        "target": "molecule1"
+      },
+      "type": "molecule_set_structure"
+    },
+    {
+      "enabled": true,
+      "id": "N4",
+      "params": {
+        "target": "molecule1",
+        "x": -75,
+        "y": 0
+      },
+      "type": "molecule_set_position"
+    },
+    {
+      "enabled": true,
+      "id": "N5",
+      "params": {
+        "target": "molecule1",
+        "value": 1.5
+      },
+      "type": "molecule_set_scale"
+    },
+    {
+      "enabled": true,
+      "id": "N6",
+      "params": {
+        "b": 0,
+        "g": 0,
+        "r": 255,
+        "target": "molecule1"
+      },
+      "type": "molecule_set_color"
+    },
+    {
+      "enabled": true,
+      "id": "N7",
+      "params": {
+        "b": 120,
+        "easing": "linear",
+        "frames": 20,
+        "g": 200,
+        "r": 0,
+        "target": "molecule1"
+      },
+      "type": "molecule_lerp_color"
+    },
+    {
+      "enabled": true,
+      "id": "N8",
+      "params": {
+        "target": "arrow1"
+      },
+      "type": "arrow_new"
+    },
+    {
+      "enabled": true,
+      "id": "N9",
+      "params": {
+        "cx1": 45,
+        "cx2": 75,
+        "cy1": 30,
+        "cy2": 30,
+        "initialized": true,
+        "target": "arrow1",
+        "x1": 20,
+        "x2": 105,
+        "y1": -15,
+        "y2": -15
+      },
+      "type": "arrow_set_curve"
+    },
+    {
+      "enabled": true,
+      "id": "N10",
+      "params": {
+        "target": "arrow1",
+        "value": 1
+      },
+      "type": "arrow_set_progress"
+    },
+    {
+      "enabled": true,
+      "id": "N11",
+      "params": {
+        "b": 40,
+        "g": 210,
+        "r": 0,
+        "target": "arrow1"
+      },
+      "type": "arrow_set_color"
+    },
+    {
+      "enabled": true,
+      "id": "N12",
+      "params": {
+        "b": 220,
+        "easing": "linear",
+        "frames": 20,
+        "g": 40,
+        "r": 80,
+        "target": "arrow1"
+      },
+      "type": "arrow_lerp_color"
+    },
+    {
+      "enabled": true,
+      "id": "N13",
+      "params": {
+        "frames": 20
+      },
+      "type": "wait"
+    },
+    {
+      "enabled": true,
+      "id": "N14",
+      "params": {
+        "target": "molecule1",
+        "value": 0
+      },
+      "type": "molecule_set_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N15",
+      "params": {
+        "target": "arrow1",
+        "value": 0
+      },
+      "type": "arrow_set_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N16",
+      "params": {
+        "target": "arrow1",
+        "value": 9
+      },
+      "type": "arrow_set_width"
+    },
+    {
+      "enabled": true,
+      "id": "N17",
+      "params": {
+        "b": 220,
+        "g": 80,
+        "r": 20
+      },
+      "type": "molecule_global_set_color"
+    },
+    {
+      "enabled": true,
+      "id": "N18",
+      "params": {
+        "value": 180
+      },
+      "type": "molecule_global_set_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N19",
+      "params": {
+        "value": 2
+      },
+      "type": "molecule_global_set_scale"
+    },
+    {
+      "enabled": true,
+      "id": "N20",
+      "params": {
+        "b": 20,
+        "g": 100,
+        "r": 230
+      },
+      "type": "arrow_global_set_color"
+    },
+    {
+      "enabled": true,
+      "id": "N21",
+      "params": {
+        "value": 180
+      },
+      "type": "arrow_global_set_alpha"
+    },
+    {
+      "enabled": true,
+      "id": "N22",
+      "params": {
+        "value": 4
+      },
+      "type": "arrow_global_set_width"
+    }
+  ],
+  "scene": {
+    "background": "FFFFFFFF",
+    "fps": 60,
+    "height": 1080,
+    "logic_height": 540,
+    "logic_width": 960,
+    "title": "native2d",
+    "view_zoom": 2.2,
+    "width": 1920
+  },
+  "style": {
+    "bond_length_pt": 14.4,
+    "double_bond_spacing": 0.18,
+    "font_family": "Arial",
+    "font_file": "C:/Windows/Fonts/arial.ttf",
+    "font_pt": 10.0,
+    "line_width_pt": 0.6,
+    "preset": "acs_document_1996"
+  },
+  "version": 8
+}

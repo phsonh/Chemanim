@@ -7,7 +7,7 @@ import subprocess
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeySequence
-from PyQt6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QInputDialog,
     QPushButton, QSlider, QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
@@ -31,9 +31,36 @@ class SmilesDialog(QDialog):
         layout=QVBoxLayout(self);layout.addLayout(form);layout.addWidget(note);layout.addWidget(buttons);self.resize(600,170)
 
 
+class GradientStructureDialog(QDialog):
+    def __init__(self,targets,active="",parent=None):
+        super().__init__(parent);self.setWindowTitle("创建渐变结构")
+        self.target=QComboBox();self.source=QComboBox();self.frames=QSpinBox();self.frames.setRange(0,100000);self.frames.setValue(30)
+        self.easing=QComboBox()
+        for label,value in (("Linear","linear"),("In Quad","in_quad"),("Out Quad","out_quad"),("In/Out Quad","in_out_quad"),("Smoothstep","smoothstep")):self.easing.addItem(label,value)
+        for stable_id in targets:self.target.addItem(stable_id,stable_id)
+        selected=self.target.findData(active)
+        if selected>=0:self.target.setCurrentIndex(selected)
+        self.merge=QCheckBox("同时并入分子")
+        self.target.currentIndexChanged.connect(self._sync_sources);self.merge.toggled.connect(self._sync_sources)
+        form=QFormLayout();form.addRow("目标分子",self.target);form.addRow("帧数",self.frames);form.addRow("缓动",self.easing);form.addRow(self.merge);form.addRow("并入分子",self.source)
+        note=QLabel("选择并入分子时，将一次建立零帧合并对象和其输出上的普通渐变结构。两项操作共享一次撤销。")
+        note.setWordWrap(True)
+        self.buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject)
+        layout=QVBoxLayout(self);layout.addLayout(form);layout.addWidget(note);layout.addWidget(self.buttons);self._targets=list(targets);self._sync_sources();self.resize(440,230)
+
+    def _sync_sources(self):
+        selected=self.target.currentData();previous=self.source.currentData();self.source.clear()
+        for stable_id in self._targets:
+            if stable_id!=selected:self.source.addItem(stable_id,stable_id)
+        old=self.source.findData(previous)
+        if old>=0:self.source.setCurrentIndex(old)
+        self.source.setEnabled(self.merge.isChecked() and self.source.count()>0)
+        self.merge.setEnabled(self.source.count()>0)
+
+
 class MainWindow(QMainWindow):
     def __init__(self,root:Path):
-        super().__init__();self.root=root;self.path=None;self.dirty=False;self.session=CoreSession();self.session.add_blank_molecule("molecule1");self._context_hit={"kind":"none","id":""};self._playing=False
+        super().__init__();self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose,True);self.root=root;self.path=None;self.dirty=False;self.session=CoreSession();self.session.add_blank_molecule("molecule1");self._context_hit={"kind":"none","id":""};self._playing=False
         QFontDatabase.addApplicationFont("C:/Windows/Fonts/msyh.ttc");font=QFont("Microsoft YaHei UI");font.setPointSizeF(10.5);self.setFont(font)
         self.setWindowTitle("Chemanim");self.resize(1600,980)
         self.setStyleSheet("""
@@ -68,7 +95,7 @@ class MainWindow(QMainWindow):
         self.inspector_panel=QWidget();self.inspector_panel.setMinimumWidth(300);self.inspector_panel.setMaximumWidth(460)
         inspector_layout=QVBoxLayout(self.inspector_panel);inspector_layout.setContentsMargins(8,8,8,8)
         inspector_head=QHBoxLayout();inspector_head.addWidget(QLabel("节点参数"));inspector_head.addStretch();inspector_close=QPushButton("关闭");inspector_close.clicked.connect(self.inspector_panel.hide);inspector_head.addWidget(inspector_close)
-        self.inspector=NodeInspector(self.session,self.inspector_panel);self.inspector.nodeEdited.connect(self._node_parameters_changed);self.inspector.editStructureRequested.connect(lambda node_id:self._activate_node(node_id));self.inspector.rebuildRequested.connect(lambda node_id:self._rebuild_gradient(node_id,self.inspector))
+        self.inspector=NodeInspector(self.session,self.inspector_panel);self.inspector.nodeEdited.connect(self._node_parameters_changed);self.inspector.editStructureRequested.connect(lambda node_id:self._activate_node(node_id));self.inspector.rebuildRequested.connect(lambda node_id:self._rebuild_gradient(node_id,self.inspector));self.inspector.retargetRequested.connect(self._retarget_gradient)
         inspector_layout.addLayout(inspector_head);inspector_layout.addWidget(self.inspector,1);self.inspector_panel.hide()
         split=QSplitter();self.main_splitter=split;split.addWidget(self.node_list);split.addWidget(self.canvas);split.addWidget(self.inspector_panel);split.setSizes([440,1160,0])
         self._build_transport()
@@ -82,13 +109,19 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self):
-        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M")}
+        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M"),"repair_anchor":self._action("重新居中对象锚点并保持画面",self._repair_active_anchor)}
 
     def _build_menu(self):
         file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();[file.addAction(self.actions[k]) for k in ("lua","render")]
         edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"]);edit.addSeparator();edit.addAction(self.actions["duplicate"]);edit.addAction(self.actions["delete"])
         view=self.menuBar().addMenu("视图");[view.addAction(self.actions[k]) for k in ("fit","fit_all","final")]
-        build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"])
+        build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"]);build.addSeparator();build.addAction(self.actions["repair_anchor"])
+
+    def _repair_active_anchor(self):
+        target=self.session.active_molecule
+        if target and self.session.repair_molecule_anchor(target):
+            self.mark_dirty();self.refresh_all(self.node_list.current_id());self.canvas.request_refresh();self.statusBar().showMessage(f"已重新居中 {target} 的对象锚点")
+        else:self.statusBar().showMessage("当前分子不需要锚点修复")
 
     def _build_transport(self):
         self.transport=QWidget();layout=QHBoxLayout(self.transport);layout.setContentsMargins(8,4,8,4)
@@ -231,6 +264,21 @@ class MainWindow(QMainWindow):
         if node_type=="scene":self._scene_dialog();return ""
         if node_type=="molecule_create":
             stable_id=self.session.add_blank_molecule("",index);node_id=next((node["id"] for node in self.session.project().get("nodes",[]) if node["type"]=="molecule_create" and node.get("params",{}).get("target")==stable_id),"");self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);return node_id
+        if node_type=="molecule_gradient_structure" and seed is None and open_editor:
+            targets=list(self.session.living_molecule_targets(index))
+            if not targets:self.statusBar().showMessage("当前插入位置没有仍然存活的分子");return ""
+            dialog=GradientStructureDialog(targets,self.session.active_molecule,self)
+            if dialog.exec()!=QDialog.DialogCode.Accepted:return ""
+            target=dialog.target.currentData();frames=dialog.frames.value();easing=dialog.easing.currentData()
+            try:
+                if dialog.merge.isChecked():
+                    source=dialog.source.currentData()
+                    if not source:return ""
+                    node_id=self.session.create_merged_gradient(target,source,frames,easing,index)
+                else:node_id=self.session.add_node(node_type,json.dumps({"target":target,"frames":frames,"easing":easing},ensure_ascii=False),index)
+            except (RuntimeError,ValueError) as error:
+                self.statusBar().showMessage(str(error));return ""
+            self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);return node_id
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
         params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
@@ -276,6 +324,19 @@ class MainWindow(QMainWindow):
         if self.session.rebuild_gradient(node_id):
             self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id)
             if inspector:inspector.refresh()
+
+    def _retarget_gradient(self,node_id):
+        nodes=self.session.project().get("nodes",[]);index=next((i for i,node in enumerate(nodes) if node["id"]==node_id),-1)
+        if index<0:return
+        targets=list(self.session.living_molecule_targets(index))
+        current=next((node.get("params",{}).get("target","") for node in nodes if node["id"]==node_id),"")
+        if not targets:self.statusBar().showMessage("该节点位置没有仍然存活的分子");return
+        choice,ok=QInputDialog.getItem(self,"更换渐变结构目标","目标分子",targets,max(0,targets.index(current) if current in targets else 0),False)
+        if not ok or choice==current:return
+        answer=QMessageBox.question(self,"重建渐变结构","更换目标会丢弃当前终态编辑，并从新目标重新建立起点和终点。是否继续？")
+        if answer!=QMessageBox.StandardButton.Yes:return
+        if self.session.retarget_gradient(node_id,choice):
+            self.mark_dirty();self.refresh_all(node_id);self._activate_node(node_id);self.inspector.set_node(node_id)
 
     def _context_seed(self,kind,stable_id,node_type):
         project=self.session.evaluated_project(self.frame_spin.value());molecule=next((m for m in project.get("molecules",[]) if m["id"]==self.session.active_molecule),{})

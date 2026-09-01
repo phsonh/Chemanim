@@ -102,6 +102,9 @@ struct Molecule {
     // first non-empty structure state is committed.  Older v8 documents are
     // treated as initialized to preserve their authored animation exactly.
     bool anchorInitialized = false;
+    // Old v8 documents that predate anchor_initialized are preserved exactly
+    // on load and explicitly diagnosed instead of being silently re-centred.
+    bool anchorNeedsRepair = false;
     double referenceBondLength = 32.0;
     std::uint64_t nextAtomId = 1;
     std::uint64_t nextBondId = 1;
@@ -117,6 +120,9 @@ struct Molecule {
     double scaleY = 1.0;
     int alpha = 255;
     Color color{255, 255, 255};
+    // Object color nodes are whole-object overrides, not multiplicative tints.
+    // When false, per-atom/bond/adornment colors remain authoritative.
+    bool colorOverride = false;
     int layer = 0;
     bool visible = true;
     bool retired = false;

@@ -226,6 +226,9 @@ struct NumberTrack {
         // start onward, so old tails can never reappear.
         segments.push_back({start,frames,from,target,easing});
     }
+    bool activeAt(int frame) const {
+        return std::any_of(segments.begin(),segments.end(),[&](const NumberSegment& value){return value.start<=frame;});
+    }
 };
 Easing easingOf(const json& params) {
     const std::string value=params.value("easing","linear");
@@ -283,7 +286,30 @@ Molecule blendMoleculeStructures(const Molecule& start,const Molecule& end,doubl
     std::set<std::string> bondIds;for(const auto& [id,_]:startBonds)bondIds.insert(id);for(const auto& [id,_]:endBonds)bondIds.insert(id);
     for(const std::string& id:bondIds){
         const Bond* first=startBonds.contains(id)?startBonds.at(id):nullptr;const Bond* second=endBonds.contains(id)?endBonds.at(id):nullptr;
-        if(first&&second){Bond current=*second;current.alpha=byte(first->alpha,second->alpha);current.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};if(bondVisual(*first,*second))result.bonds.push_back(std::move(current));else{current.alpha=static_cast<int>(std::round(second->alpha*t));result.bonds.push_back(std::move(current));Bond ghost=*first;ghost.id="__gradient_old_bond__"+id;ghost.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.bonds.push_back(std::move(ghost));}}
+        if(first&&second){
+            const bool singleDoubleCrossfade=first->atomA==second->atomA&&first->atomB==second->atomB&&
+                first->stereo==BondStereo::None&&second->stereo==BondStereo::None&&first->visible&&second->visible&&
+                ((first->type==BondType::Double&&second->type==BondType::Single)||
+                 (first->type==BondType::Single&&second->type==BondType::Double));
+            if(singleDoubleCrossfade){
+                // Keep the shared primary stroke fully present.  Overlaying a
+                // fading double-bond glyph contributes only its extra
+                // secondary stroke visually, avoiding a mid-frame dip of the
+                // whole bond.
+                Bond common=first->type==BondType::Single?*first:*second;
+                common.alpha=byte(first->alpha,second->alpha);
+                common.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};
+                result.bonds.push_back(std::move(common));
+                Bond extra=first->type==BondType::Double?*first:*second;
+                extra.id="__gradient_secondary_bond__"+id;
+                extra.alpha=static_cast<int>(std::round(extra.alpha*(first->type==BondType::Double?(1.0-t):t)));
+                result.bonds.push_back(std::move(extra));
+            }else{
+                Bond current=*second;current.alpha=byte(first->alpha,second->alpha);current.color={byte(first->color.red,second->color.red),byte(first->color.green,second->color.green),byte(first->color.blue,second->color.blue)};
+                if(bondVisual(*first,*second))result.bonds.push_back(std::move(current));
+                else{current.alpha=static_cast<int>(std::round(second->alpha*t));result.bonds.push_back(std::move(current));Bond ghost=*first;ghost.id="__gradient_old_bond__"+id;ghost.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.bonds.push_back(std::move(ghost));}
+            }
+        }
         else if(second){Bond current=*second;current.alpha=static_cast<int>(std::round(second->alpha*t));result.bonds.push_back(std::move(current));}
         else if(first){Bond current=*first;current.alpha=static_cast<int>(std::round(first->alpha*(1.0-t)));result.bonds.push_back(std::move(current));}
     }
@@ -370,9 +396,9 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
             output.atoms=loaded->atoms;output.bonds=loaded->bonds;output.adornments=loaded->adornments;output.poses=loaded->poses;
             output.referenceBondLength=loaded->referenceBondLength;output.nextAtomId=std::max(output.nextAtomId,loaded->nextAtomId);
             output.nextBondId=std::max(output.nextBondId,loaded->nextBondId);output.nextAdornmentId=std::max(output.nextAdornmentId,loaded->nextAdornmentId);
-            output.origin={params.value("origin_x",0.0),params.value("origin_y",0.0)};output.anchorInitialized=params.value("anchor_initialized",true);
+            output.origin={params.value("origin_x",0.0),params.value("origin_y",0.0)};output.anchorInitialized=params.value("anchor_initialized",true);output.anchorNeedsRepair=params.value("anchor_needs_repair",false);
             output.scaleX=params.value("scale_x",1.0);output.scaleY=params.value("scale_y",1.0);output.rotation=params.value("rotation",0.0);
-            output.alpha=params.value("alpha",255);output.color={params.value("r",255),params.value("g",255),params.value("b",255)};
+            output.alpha=params.value("alpha",255);output.color={params.value("r",255),params.value("g",255),params.value("b",255)};output.colorOverride=params.value("color_override",output.color.red!=255||output.color.green!=255||output.color.blue!=255);
             output.layer=params.value("layer",0);output.visible=params.value("visible",true);output.retired=false;return true;
         }catch(...){return false;}
     };
@@ -403,6 +429,7 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
         if(node.type=="molecule_create"){
             if(!molecule){diagnostic(node,"新建分子节点引用了不存在的分子 "+target);continue;}
             if(++createCounts[target]>1)diagnostic(node,"旧文件包含重复的新建分子节点；该节点按兼容语义保留");
+            if(molecule->anchorNeedsRepair)result.diagnostics.push_back({node.id,"warning","旧 v8 对象锚点需要检查；可执行“重新居中并保持画面不变”"});
             liveTargets.insert(target);if(frame>=timing.startFrame){molecule->visible=true;molecule->retired=false;}
         }
         else if((meta.targetKind=="molecule"||meta.targetKind=="arrow")&&target.empty()) {diagnostic(node,"节点缺少目标");continue;}
@@ -539,6 +566,11 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
     const auto trackAt=[&](const char* key,double fallback){const auto found=tracks.find(key);return found==tracks.end()?fallback:found->second.at(frame);};
     result.globals.moleculeAlpha=trackAt("global:molecule:alpha",255);result.globals.moleculeRed=trackAt("global:molecule:r",255);result.globals.moleculeGreen=trackAt("global:molecule:g",255);result.globals.moleculeBlue=trackAt("global:molecule:b",255);result.globals.moleculeScaleX=trackAt("global:molecule:scale_x",1);result.globals.moleculeScaleY=trackAt("global:molecule:scale_y",1);
     result.globals.arrowAlpha=trackAt("global:arrow:alpha",255);result.globals.arrowRed=trackAt("global:arrow:r",255);result.globals.arrowGreen=trackAt("global:arrow:g",255);result.globals.arrowBlue=trackAt("global:arrow:b",255);result.globals.arrowScaleX=trackAt("global:arrow:scale_x",1);result.globals.arrowScaleY=trackAt("global:arrow:scale_y",1);result.globals.arrowWidth=trackAt("global:arrow:width_override",-1);
+    const auto active=[&](const char* key){const auto found=tracks.find(key);return found!=tracks.end()&&found->second.activeAt(frame);};
+    result.globals.moleculeAlphaOverride=active("global:molecule:alpha");
+    result.globals.moleculeColorOverride=active("global:molecule:r")||active("global:molecule:g")||active("global:molecule:b");
+    result.globals.arrowAlphaOverride=active("global:arrow:alpha");
+    result.globals.arrowColorOverride=active("global:arrow:r")||active("global:arrow:g")||active("global:arrow:b");
     const auto byte=[](double value){return static_cast<int>(std::round(std::clamp(value,0.0,255.0)));};
     for(auto& [id,molecule]:result.molecules){
         for(Atom& atom:molecule.atoms){const std::string p=id+":atom:"+atom.id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())atom.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())atom.position.y=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())atom.alpha=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:r");it!=tracks.end())atom.color.red=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:g");it!=tracks.end())atom.color.green=static_cast<int>(std::round(it->second.at(frame)));if(auto it=tracks.find(p+"color:b");it!=tracks.end())atom.color.blue=static_cast<int>(std::round(it->second.at(frame)));}
@@ -558,15 +590,16 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
                 if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=byte(it->second.at(frame));
                 if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=byte(it->second.at(frame));
                 if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=byte(it->second.at(frame));
+                molecule.colorOverride=molecule.colorOverride||active((id+":color:r").c_str())||active((id+":color:g").c_str())||active((id+":color:b").c_str());
             }else{
                 molecule.scaleX=1.0;molecule.scaleY=1.0;molecule.rotation=0.0;
-                molecule.alpha=255;molecule.color={255,255,255};molecule.layer=0;
+                molecule.alpha=255;molecule.color={255,255,255};molecule.colorOverride=false;molecule.layer=0;
             }
             continue;
         }
-        const double localScaleX=tracks.contains(id+":scale_x")?tracks[id+":scale_x"].at(frame):molecule.scaleX;const double localScaleY=tracks.contains(id+":scale_y")?tracks[id+":scale_y"].at(frame):molecule.scaleY;const double scaleX=localScaleX*result.globals.moleculeScaleX,scaleY=localScaleY*result.globals.moleculeScaleY;const double rotation=tracks.contains(id+":rotation")?tracks[id+":rotation"].at(frame):molecule.rotation;const Point baseOrigin=molecule.origin;const double desiredX=tracks.contains(id+":anchor:x")?tracks[id+":anchor:x"].at(frame):baseOrigin.x;const double desiredY=tracks.contains(id+":anchor:y")?tracks[id+":anchor:y"].at(frame):baseOrigin.y;const double radians=rotation*3.14159265358979323846/180.0,c=std::cos(radians),s=std::sin(radians);for(Atom& atom:molecule.atoms)if(atom.alive){const double x=atom.position.x*scaleX,y=atom.position.y*scaleY;atom.position={desiredX+x*c-y*s,desiredY+x*s+y*c};}molecule.origin={desiredX,desiredY};molecule.scaleX=scaleX;molecule.scaleY=scaleY;molecule.rotation=rotation;if(auto it=tracks.find(id+":alpha");it!=tracks.end())molecule.alpha=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=byte(it->second.at(frame));molecule.alpha=byte(molecule.alpha*result.globals.moleculeAlpha/255.0);molecule.color.red=byte(molecule.color.red*result.globals.moleculeRed/255.0);molecule.color.green=byte(molecule.color.green*result.globals.moleculeGreen/255.0);molecule.color.blue=byte(molecule.color.blue*result.globals.moleculeBlue/255.0);
+        const double localScaleX=tracks.contains(id+":scale_x")?tracks[id+":scale_x"].at(frame):molecule.scaleX;const double localScaleY=tracks.contains(id+":scale_y")?tracks[id+":scale_y"].at(frame):molecule.scaleY;const double scaleX=localScaleX*result.globals.moleculeScaleX,scaleY=localScaleY*result.globals.moleculeScaleY;const double rotation=tracks.contains(id+":rotation")?tracks[id+":rotation"].at(frame):molecule.rotation;const Point baseOrigin=molecule.origin;const double desiredX=tracks.contains(id+":anchor:x")?tracks[id+":anchor:x"].at(frame):baseOrigin.x;const double desiredY=tracks.contains(id+":anchor:y")?tracks[id+":anchor:y"].at(frame):baseOrigin.y;const double radians=rotation*3.14159265358979323846/180.0,c=std::cos(radians),s=std::sin(radians);for(Atom& atom:molecule.atoms)if(atom.alive){const double x=atom.position.x*scaleX,y=atom.position.y*scaleY;atom.position={desiredX+x*c-y*s,desiredY+x*s+y*c};}molecule.origin={desiredX,desiredY};molecule.scaleX=scaleX;molecule.scaleY=scaleY;molecule.rotation=rotation;if(auto it=tracks.find(id+":alpha");it!=tracks.end())molecule.alpha=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:r");it!=tracks.end())molecule.color.red=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:g");it!=tracks.end())molecule.color.green=byte(it->second.at(frame));if(auto it=tracks.find(id+":color:b");it!=tracks.end())molecule.color.blue=byte(it->second.at(frame));molecule.colorOverride=molecule.colorOverride||active((id+":color:r").c_str())||active((id+":color:g").c_str())||active((id+":color:b").c_str());if(result.globals.moleculeAlphaOverride)molecule.alpha=byte(result.globals.moleculeAlpha);if(result.globals.moleculeColorOverride){molecule.color={byte(result.globals.moleculeRed),byte(result.globals.moleculeGreen),byte(result.globals.moleculeBlue)};molecule.colorOverride=true;}
     }
-    for(auto& [id,arrow]:result.arrows){const std::string p="arrow:"+id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())arrow.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())arrow.position.y=it->second.at(frame);if(auto it=tracks.find(p+"progress");it!=tracks.end())arrow.progress=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())arrow.alpha=it->second.at(frame);if(auto it=tracks.find(p+"r");it!=tracks.end())arrow.red=it->second.at(frame);if(auto it=tracks.find(p+"g");it!=tracks.end())arrow.green=it->second.at(frame);if(auto it=tracks.find(p+"b");it!=tracks.end())arrow.blue=it->second.at(frame);if(auto it=tracks.find(p+"width");it!=tracks.end())arrow.width=it->second.at(frame);const double sx=(tracks.contains(p+"scale_x")?tracks[p+"scale_x"].at(frame):arrow.scaleX)*result.globals.arrowScaleX;const double sy=(tracks.contains(p+"scale_y")?tracks[p+"scale_y"].at(frame):arrow.scaleY)*result.globals.arrowScaleY;const Point origin=arrow.start;const auto scaled=[&](Point value){return Point{origin.x+(value.x-origin.x)*sx,origin.y+(value.y-origin.y)*sy};};arrow.control1=scaled(arrow.control1);arrow.control2=scaled(arrow.control2);arrow.end=scaled(arrow.end);arrow.scaleX=sx;arrow.scaleY=sy;arrow.alpha=std::clamp(arrow.alpha*result.globals.arrowAlpha/255.0,0.0,255.0);arrow.red=std::clamp(arrow.red*result.globals.arrowRed/255.0,0.0,255.0);arrow.green=std::clamp(arrow.green*result.globals.arrowGreen/255.0,0.0,255.0);arrow.blue=std::clamp(arrow.blue*result.globals.arrowBlue/255.0,0.0,255.0);if(result.globals.arrowWidth>=0)arrow.width=result.globals.arrowWidth;}
+    for(auto& [id,arrow]:result.arrows){const std::string p="arrow:"+id+":";if(auto it=tracks.find(p+"x");it!=tracks.end())arrow.position.x=it->second.at(frame);if(auto it=tracks.find(p+"y");it!=tracks.end())arrow.position.y=it->second.at(frame);if(auto it=tracks.find(p+"progress");it!=tracks.end())arrow.progress=it->second.at(frame);if(auto it=tracks.find(p+"alpha");it!=tracks.end())arrow.alpha=it->second.at(frame);if(auto it=tracks.find(p+"r");it!=tracks.end())arrow.red=it->second.at(frame);if(auto it=tracks.find(p+"g");it!=tracks.end())arrow.green=it->second.at(frame);if(auto it=tracks.find(p+"b");it!=tracks.end())arrow.blue=it->second.at(frame);if(auto it=tracks.find(p+"width");it!=tracks.end())arrow.width=it->second.at(frame);const double sx=(tracks.contains(p+"scale_x")?tracks[p+"scale_x"].at(frame):arrow.scaleX)*result.globals.arrowScaleX;const double sy=(tracks.contains(p+"scale_y")?tracks[p+"scale_y"].at(frame):arrow.scaleY)*result.globals.arrowScaleY;const Point origin=arrow.start;const auto scaled=[&](Point value){return Point{origin.x+(value.x-origin.x)*sx,origin.y+(value.y-origin.y)*sy};};arrow.control1=scaled(arrow.control1);arrow.control2=scaled(arrow.control2);arrow.end=scaled(arrow.end);arrow.scaleX=sx;arrow.scaleY=sy;if(result.globals.arrowAlphaOverride)arrow.alpha=result.globals.arrowAlpha;if(result.globals.arrowColorOverride){arrow.red=result.globals.arrowRed;arrow.green=result.globals.arrowGreen;arrow.blue=result.globals.arrowBlue;}if(result.globals.arrowWidth>=0)arrow.width=result.globals.arrowWidth;}
     return result;
 }
 

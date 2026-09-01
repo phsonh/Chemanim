@@ -5,17 +5,17 @@ from pathlib import Path
 import subprocess
 import sys
 
-from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog,
+                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog, QDialogButtonBox,
                              QPushButton, QToolButton)
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
 
-from chemanim2d.app import MainWindow
+from chemanim2d.app import MainWindow, GradientStructureDialog
 from chemanim2d.node_inspector import NodeInspector
 from chemanim2d.periodic_table import PeriodicTableDialog
 
@@ -643,6 +643,59 @@ def test_all_parameter_widget_classes_use_real_events_without_rebuilding(tmp_pat
     value.close()
 
 
+def test_gradient_creation_dialog_uses_core_living_targets_and_selected_molecule():
+    value=window();first=value.session.import_smiles("first","c1ccccc1");second=value.session.import_smiles("second","O=[N+]=O")
+    last=value.session.project()["nodes"][-1]["id"];value.refresh_all(last);value._node_selected(last)
+    observed=[]
+    def accept_dialog():
+        dialog=next(widget for widget in QApplication.topLevelWidgets() if isinstance(widget,GradientStructureDialog) and widget.isVisible())
+        observed.extend(dialog.target.itemData(index) for index in range(dialog.target.count()))
+        index=dialog.target.findData(first);assert index>=0
+        dialog.target.setFocus();dialog.target.setCurrentIndex(index)
+        QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Ok),Qt.MouseButton.LeftButton)
+    QTimer.singleShot(0,accept_dialog)
+    node_id=value._add_node("molecule_gradient_structure")
+    node=next(item for item in value.session.project()["nodes"] if item["id"]==node_id)
+    assert first in observed and second in observed
+    assert node["params"]["target"]==first and node["params"]["start_snapshot"]["id"]==first
+    assert value.session.active_molecule==first
+    value.close()
+
+
+def test_gradient_creation_dialog_can_atomically_merge_two_living_molecules():
+    value=window();first=value.session.import_smiles("first","c1ccccc1");second=value.session.import_smiles("second","O=[N+]=O")
+    last=value.session.project()["nodes"][-1]["id"];value.refresh_all(last);value._node_selected(last)
+    def accept_dialog():
+        dialog=next(widget for widget in QApplication.topLevelWidgets() if isinstance(widget,GradientStructureDialog) and widget.isVisible())
+        dialog.target.setCurrentIndex(dialog.target.findData(first));dialog.merge.setChecked(True)
+        dialog.source.setCurrentIndex(dialog.source.findData(second))
+        QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Ok),Qt.MouseButton.LeftButton)
+    before=len(value.session.project()["nodes"]);QTimer.singleShot(0,accept_dialog);gradient=value._add_node("molecule_gradient_structure")
+    created=value.session.project()["nodes"][before:]
+    assert [item["type"] for item in created]==["molecule_create","merge_molecules","molecule_gradient_structure"]
+    assert created[-1]["id"]==gradient and value.session.edit_target_id==gradient and value.session.can_edit_structure
+    value.undo();assert len(value.session.project()["nodes"])==before
+    value.close()
+
+
+def test_real_double_click_selects_start_component_and_drag_shows_chemical_snap():
+    value=window();ring=value.session.import_smiles("ring","c1ccccc1");nitro=value.session.import_smiles("nitro","O=[N+]=O")
+    value.session.add_node("molecule_set_position",json.dumps({"target":nitro,"x":120.0,"y":0.0}))
+    gradient=value.session.create_merged_gradient(ring,nitro,30,"linear");value.refresh_all(gradient);value._node_selected(gradient);value._set_tool("move");value.canvas._sync_core_viewport()
+    project=value.session.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==value.session.active_molecule)
+    source_ids=set(merge["params"]["id_map"]["source"]["atoms"].values());target_ids=set(merge["params"]["id_map"]["target"]["atoms"].values())
+    end=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    nitrogen=next(atom["id"] for atom in end["atoms"] if atom["id"] in source_ids and (atom.get("label") or atom.get("element"))=="N")
+    points={item["id"]:item["center"] for item in value.session.depict(False)["atoms"]};pivot=QPoint(round(points[nitrogen]["x"]),round(points[nitrogen]["y"]));stationary_id=next(iter(target_ids));stationary=points[stationary_id]
+    QTest.mouseDClick(value.canvas,Qt.MouseButton.LeftButton,pos=pivot);QApplication.processEvents();assert set(value.canvas._selected_atoms)==source_ids
+    destination=QPoint(round(stationary["x"]+32),round(stationary["y"]))
+    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=pivot);QTest.mouseMove(value.canvas,destination,80);QApplication.processEvents()
+    assert value.canvas._preview.get("snap_atom") in target_ids and value.canvas._preview.get("text","").startswith("1.00×")
+    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=destination);QApplication.processEvents()
+    assert value.session.gradient_summary(gradient)["moved_atoms"]==len(source_ids)
+    value.close()
+
+
 def test_parameter_panel_native_crash_probe_exits_cleanly():
     run=subprocess.run([sys.executable,"-X","faulthandler","-u",str(ROOT/"tools"/"probe_parameter_panel.py")],cwd=ROOT,capture_output=True,text=True,timeout=30)
     assert run.returncode==0,(run.returncode,run.stdout,run.stderr)
@@ -655,16 +708,22 @@ def test_arrow_curve_real_ui_free_drag_then_all_four_handles_remain_editable():
     params=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
     assert params["initialized"] is False and value.session.direct_controls()==[]
     start=QPoint(canvas.width()//2-130,canvas.height()//2+55);end=QPoint(canvas.width()//2+150,canvas.height()//2-75)
-    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,100);QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,100)
+    before_bend=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"].copy()
+    wheel=QWheelEvent(QPointF(end),QPointF(canvas.mapToGlobal(end)),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False)
+    canvas.wheelEvent(wheel);QApplication.processEvents()
+    during_bend=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"].copy()
+    assert (during_bend["cx1"],during_bend["cy1"],during_bend["cx2"],during_bend["cy2"])!=(before_bend["cx1"],before_bend["cy1"],before_bend["cx2"],before_bend["cy2"])
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
     params=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
     assert params["initialized"] is True
     controls={item["id"]:item["position"] for item in value.session.direct_controls()};assert set(controls)=={"p0","c1","c2","p3"}
     assert abs(params["x1"]-canvas.screen_to_world(QPointF(start)).x())<1.0
     assert abs(params["y1"]-canvas.screen_to_world(QPointF(start)).y())<1.0
+    original=dict(params);scale_before=canvas.view_scale
     wheel=QWheelEvent(QPointF(end),QPointF(canvas.mapToGlobal(end)),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False)
-    canvas.wheelEvent(wheel);QApplication.processEvents();bent=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
-    assert (bent["cx1"],bent["cy1"],bent["cx2"],bent["cy2"])!=(params["cx1"],params["cy1"],params["cx2"],params["cy2"])
-    original=dict(bent)
+    canvas.wheelEvent(wheel);QApplication.processEvents();after_wheel=next(item for item in value.session.project()["nodes"] if item["id"]==curve)["params"]
+    assert after_wheel==original and canvas.view_scale>scale_before
     for key,delta in (("p0",QPoint(12,8)),("c1",QPoint(-10,14)),("c2",QPoint(15,-11)),("p3",QPoint(-8,-13))):
         controls={item["id"]:item["position"] for item in value.session.direct_controls()};world=controls[key]
         screen=canvas.world_to_screen(QPointF(world["x"],world["y"]));a=QPoint(round(screen.x()),round(screen.y()));b=a+delta
