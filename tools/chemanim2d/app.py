@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
             candidates=[item for item in project.get("molecules",[]) if item.get("id")!=params.get("target")]
             if not candidates:
                 self.statusBar().showMessage("合并分子需要另一个分子");return ""
-            labels=[item.get("name") or f"分子 {index+1}" for index,item in enumerate(candidates)]
+            labels=[molecule_name(project,item.get("id","")) for item in candidates]
             if len(candidates)==1:params["source"]=candidates[0]["id"]
             else:
                 label,ok=QInputDialog.getItem(self,"合并分子","并入分子",labels,0,False)

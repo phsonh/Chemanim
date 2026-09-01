@@ -88,22 +88,22 @@ class NodeList(QWidget):
         if node_type=="wait":return f'等待 {_number(params.get("frames",30))} 帧'
         target=cls._target_name(project,definition,params.get("target",""));scope=definition.get("scope","")
         if node_type in LEGACY_STRUCTURE_TYPES:return f'旧版结构节点 · {target}' if target else "旧版结构节点"
-        if node_type=="molecule_create":return f"新建{target}"
-        if node_type=="arrow_new":return f"新建{target}"
-        if node_type=="split_molecule":return f'分裂{target}，生成同位置的{molecule_name(project,params.get("output",""))}'
-        if node_type=="merge_molecules" and params.get("operation_version")=="object_v1":return f'合并{target}与{molecule_name(project,params.get("source",""))}，生成{molecule_name(project,params.get("output",""))}'
+        if node_type=="molecule_create":return f"新建 {target}"
+        if node_type=="arrow_new":return f"新建 {target}"
+        if node_type=="split_molecule":return f'分裂 {target}，生成同位置的 {molecule_name(project,params.get("output",""))}'
+        if node_type=="merge_molecules" and params.get("operation_version")=="object_v1":return f'合并 {target} 与 {molecule_name(project,params.get("source",""))}，生成 {molecule_name(project,params.get("output",""))}'
         if scope=="object":return f"{label} {target}".strip()
         value=cls._parameter_value(definition,params);action=definition.get("tool_label") or definition.get("group") or label
         if definition.get("target_kind")=="molecule" and action.startswith("分子"):action=action[2:]
         if definition.get("target_kind")=="arrow" and action.startswith("箭头"):action=action[2:]
         if scope=="transform":
             frames=_number(params.get("frames",30));easing=EASING_NAMES.get(params.get("easing","linear"),params.get("easing","linear"))
-            if node_type=="molecule_gradient_structure":return f"{frames} 帧内将{target}结构渐变为终态，{easing}"
-            if node_type=="molecule_merge_gradient_structure":return f'{frames} 帧内将{target}与{molecule_name(project,params.get("source",""))}合并并变换结构，{easing}'
-            if node_type=="molecule_split_gradient_structure":return f'{frames} 帧内将{target}分裂为自身与{molecule_name(project,params.get("destination",""))}，{easing}'
+            if node_type=="molecule_gradient_structure":return f"{frames} 帧内将 {target} 结构渐变为终态，{easing}"
+            if node_type=="molecule_merge_gradient_structure":return f'{frames} 帧内将 {target} 与 {molecule_name(project,params.get("source",""))} 合并并变换结构，{easing}'
+            if node_type=="molecule_split_gradient_structure":return f'{frames} 帧内将 {target} 分裂为自身与 {molecule_name(project,params.get("destination",""))}，{easing}'
             destination=f"变为 {value}" if value else "变为目标状态"
-            return f"{frames} 帧内将{target}{action}{destination}，{easing}"
-        if scope=="set":return f"设定{target}{action}"+(f"为 {value}" if value else "")
+            return f"{frames} 帧内将 {target} {action}{destination}，{easing}"
+        if scope=="set":return f"设定 {target} {action}"+(f"为 {value}" if value else "")
         if scope=="global":return label+(f"为 {value}" if value else "")
         return f"{label} {target}".strip()
 

@@ -255,7 +255,7 @@ std::string Project::duplicateMolecule(const std::string& sourceId,
     }
     Molecule copy = sourceCopy;
     copy.id = id;
-    copy.name = sourceCopy.name.empty() ? id : sourceCopy.name + " 副本";
+    copy.name = sourceCopy.name.empty() || sourceCopy.name == sourceId ? id : sourceCopy.name + " copy";
     std::map<std::string, std::string> atomIds, bondIds, adornmentIds;
     for (Atom& atom : copy.atoms) {
         const std::string old = atom.id;

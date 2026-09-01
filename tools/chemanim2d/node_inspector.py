@@ -16,11 +16,10 @@ OBJECT_OPERATION_TYPES = {"merge_molecules", "split_molecule"}
 
 
 def molecule_name(project, stable_id):
-    molecule = next((item for item in project.get("molecules", []) if item["id"] == stable_id), None)
-    name = (molecule or {}).get("name", "")
-    if name and name != stable_id: return name
-    suffix = stable_id.removeprefix("molecule")
-    return f"分子 {suffix}" if suffix.isdigit() else (name or "分子")
+    # Object references are intentionally stable and language-neutral.  A
+    # molecule's descriptive name remains document metadata, but every editor
+    # target consistently uses its ordered identity (molecule1, molecule2...).
+    return stable_id or "molecule"
 
 
 class NodeInspector(QWidget):
@@ -58,7 +57,7 @@ class NodeInspector(QWidget):
         current = next((item for item in project.get("nodes", []) if item["id"] == self.node_id), None)
         if kind == "molecule":
             if current and current["type"] == "molecule_create":
-                return [(item["name"], item["id"]) for item in project.get("molecules", [])]
+                return [(molecule_name(project,item["id"]), item["id"]) for item in project.get("molecules", [])]
             alive = []
             for node in project.get("nodes", []):
                 if node["id"] == self.node_id: break
@@ -66,7 +65,7 @@ class NodeInspector(QWidget):
                 if node["type"] == "molecule_create" and value not in alive: alive.append(value)
                 elif node["type"] == "molecule_delete" and value in alive: alive.remove(value)
             by_id = {item["id"]: item for item in project.get("molecules", [])}
-            return [(by_id[value]["name"], value) for value in alive if value in by_id]
+            return [(molecule_name(project,value), value) for value in alive if value in by_id]
         molecule = next((item for item in project.get("molecules", []) if item["id"] == target), None)
         if kind == "atom": return [(f'{item.get("label") or "C"} · {item["id"]}', item["id"]) for item in (molecule or {}).get("atoms", []) if item.get("alive",True)]
         if kind == "bond": return [(f'{item["a"]}—{item["b"]} · {item["id"]}', item["id"]) for item in (molecule or {}).get("bonds", []) if item.get("alive",True)]

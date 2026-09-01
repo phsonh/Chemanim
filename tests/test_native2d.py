@@ -882,6 +882,7 @@ def test_split_and_merge_are_atomic_disconnected_object_operations():
     before=core.project();split=core.add_node("split_molecule","{}")
     split_params=next(node for node in core.project()["nodes"] if node["id"]==split)["params"]
     copy_id=split_params["output"];assert copy_id!=source and core.active_molecule==copy_id
+    assert next(value for value in core.project()["molecules"] if value["id"]==copy_id)["name"]==copy_id
     scene=core.evaluated_project(0);original=next(m for m in scene["molecules"] if m["id"]==source);copied=next(m for m in scene["molecules"] if m["id"]==copy_id)
     assert copied["anchor"]==original["anchor"] and copied["scale_x"]==original["scale_x"] and copied["alpha"]==original["alpha"]
     assert len(copied["atoms"])==len(original["atoms"])==2
@@ -892,6 +893,7 @@ def test_split_and_merge_are_atomic_disconnected_object_operations():
     merge=core.add_node("merge_molecules",json.dumps({"source":source}))
     merge_params=next(node for node in core.project()["nodes"] if node["id"]==merge)["params"]
     merged_id=merge_params["output"];assert merge_params["target"]==copy_id and merged_id not in (source,copy_id)
+    assert next(value for value in core.project()["molecules"] if value["id"]==merged_id)["name"]==merged_id
     final=core.evaluated_project(0);merged=next(m for m in final["molecules"] if m["id"]==merged_id)
     assert len([a for a in merged["atoms"] if a.get("alive",True)])==4
     assert not merged["bonds"] or len(merged["bonds"])==2  # two disconnected ethane components
@@ -922,6 +924,19 @@ def test_explicit_merge_source_clamps_insertion_after_both_inputs_without_substi
     operation_index=next(index for index,node in enumerate(project["nodes"]) if node["id"]==operation)
     source_structure=next(index for index,node in enumerate(project["nodes"]) if node["type"]=="molecule_set_structure" and node["params"]["target"]==source)
     assert operation_index>source_structure and not core.diagnostics(0)
+
+
+def test_structure_nodes_honor_explicit_target_and_recover_from_stale_active_molecule():
+    core=CoreSession();first=core.import_smiles("分子 1","CC");second=core.import_smiles("分子 2","O")
+    core.set_active_molecule(first)
+    explicit=core.add_node("molecule_gradient_structure",json.dumps({"target":second,"frames":12,"easing":"linear"}))
+    assert next(node for node in core.project()["nodes"] if node["id"]==explicit)["params"]["target"]==second
+    assert core.active_molecule==second
+
+    core.set_active_molecule(first);core.add_node("molecule_delete",json.dumps({"target":first}))
+    recovered=core.add_node("molecule_gradient_structure",json.dumps({"target":first,"frames":8,"easing":"linear"}))
+    params=next(node for node in core.project()["nodes"] if node["id"]==recovered)["params"]
+    assert params["target"]==second and core.active_molecule==second
 
 
 def test_global_arrow_width_is_an_absolute_override_not_a_multiplier():

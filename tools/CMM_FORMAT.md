@@ -10,7 +10,7 @@
   "scene": {},
   "style": {},
   "molecules": [
-    {"id": "molecule1", "name": "分子 1", "anchor": {"x": 0, "y": 0}, "anchor_initialized": false,
+    {"id": "molecule1", "name": "molecule1", "anchor": {"x": 0, "y": 0}, "anchor_initialized": false,
      "atoms": [], "bonds": [], "adornments": []}
   ],
   "nodes": [

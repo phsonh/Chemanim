@@ -158,8 +158,8 @@ def test_node_list_is_one_natural_language_column():
     value._add_node("wait",{"frames":120},False);value.node_list.refresh()
     texts=[value.node_list.tree.topLevelItem(index).text(0) for index in range(value.node_list.tree.topLevelItemCount())]
     assert value.node_list.tree.columnCount()==1 and value.node_list.tree.isHeaderHidden()
-    assert "设定分子 1透明度为 255" in texts
-    assert "30 帧内将分子 1坐标变为 (0, 0)，线性" in texts
+    assert "设定 molecule1 透明度为 255" in texts
+    assert "30 帧内将 molecule1 坐标变为 (0, 0)，线性" in texts
     assert "等待 120 帧" in texts
     value.close()
 
@@ -297,7 +297,7 @@ def test_object_split_merge_have_human_readable_locked_targets_and_no_internal_i
     created=next(item for item in value.session.project()["nodes"] if item["id"]==node)
     assert created["params"]["target"]==first and created["params"]["source"]==second and created["params"]["output"]
     item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node)
-    assert item.text(0).startswith("合并主分子与并入分子，生成")
+    assert item.text(0)==f'合并 {first} 与 {second}，生成 {created["params"]["output"]}'
     value._edit_node_dialog(node);QApplication.processEvents()
     assert value.inspector.title.text().startswith("合并分子")
     assert set(value.inspector.editors)=={"target","source","output"}
@@ -320,7 +320,7 @@ def test_real_object_toolbar_split_merge_and_pair_move_do_not_crash_or_swallow_n
     assert value.session.active_molecule==split_output
 
     def choose_partner(*args,**kwargs):
-        items=list(args[3]);choice=next(item for item in items if "氯离子" in item);return choice,True
+        items=list(args[3]);choice=next(item for item in items if item==partner);return choice,True
     monkeypatch.setattr(QInputDialog,"getItem",staticmethod(choose_partner))
     panel.set_mode("脚本");panel.set_category("分子");panel.set_script_scope("对象");QApplication.processEvents()
     merge_button=next(button for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()=="合并分子")
@@ -337,16 +337,25 @@ def test_real_object_toolbar_split_merge_and_pair_move_do_not_crash_or_swallow_n
     assert set(moved)==set(before_ids) and len(moved)==len(before_ids)
     assert moved.index(create_id)+1==moved.index(merge_id)
     assert value.node_list.current_id()==merge_id and value.session.active_molecule==output
+
+    # A retired cached active target must never produce the false "no living
+    # molecule" error while the newly merged output is visibly alive.
+    value.session.set_active_molecule(split_output)
+    gradient_id=value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()
+    gradient=next(node for node in value.session.project()["nodes"] if node["id"]==gradient_id)
+    assert gradient["type"]=="molecule_gradient_structure" and gradient["params"]["target"]==output
+    assert value.session.active_molecule==output and "没有仍然存活" not in value.statusBar().currentMessage()
     value.close()
 
 
 def test_gradient_inspector_and_tree_hide_internal_ids_and_legacy_fields():
     value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
     node=value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()
-    item=value.node_list.tree.currentItem();assert item.text(0)=="30 帧内将苯结构渐变为终态，线性" and "N" not in item.text(0)
+    target=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]["target"]
+    item=value.node_list.tree.currentItem();assert item.text(0)==f"30 帧内将 {target} 结构渐变为终态，线性" and "N" not in item.text(0)
     inspector=NodeInspector(value.session);inspector.set_node(node)
     visible=" ".join(label.text() for label in inspector.findChildren(__import__('PyQt6.QtWidgets',fromlist=['QLabel']).QLabel))
-    assert "目标分子" not in visible or "苯" in visible
+    assert "目标分子" not in visible or target in visible
     assert not any(text in visible for text in ("原子 ID","键 ID","标记 ID",node))
     snapshots=next(item for item in value.session.project()["nodes"] if item["id"]==node)["params"]
     inspector.editors["frames"][0].setValue(42);inspector.apply()

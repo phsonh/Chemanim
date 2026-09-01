@@ -193,6 +193,14 @@ std::optional<Molecule> structureBeforeNode(const Project& project,std::size_t i
     if(startFrame)*startFrame=cursor;const EvaluatedScene scene=evaluateStructureNodes(prefix,cursor);const auto found=scene.molecules.find(target);
     if(found==scene.molecules.end()||found->second.retired||!found->second.visible)return std::nullopt;return found->second;
 }
+std::optional<std::string> resolveLivingMoleculeTarget(const Project& project,std::size_t insertion,
+                                                       const std::string& requested,const std::string& active) {
+    const auto living=[&](const std::string& id){return !id.empty()&&structureBeforeNode(project,insertion,id).has_value();};
+    if(living(requested))return requested;
+    if(requested!=active&&living(active))return active;
+    for(auto found=project.molecules.rbegin();found!=project.molecules.rend();++found)if(living(found->id))return found->id;
+    return std::nullopt;
+}
 bool isMultiStructureTransform(const std::string& type) {
     return type=="molecule_merge_gradient_structure"||type=="molecule_split_gradient_structure";
 }
@@ -1316,19 +1324,21 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
     if(type=="molecule_create")throw std::runtime_error("Use the atomic new-molecule command");
     Project before=impl_->project;
     if(type=="molecule_set_structure"){
-        if(impl_->activeMolecule.empty())throw std::runtime_error("设定分子结构需要当前活动分子");
-        const json targetParams={{"target",impl_->activeMolecule}};const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,targetParams,index.value_or(impl_->project.nodes.size()));int startFrame=0;
-        const auto start=structureBeforeNode(impl_->project,insertion,impl_->activeMolecule,&startFrame);if(!start)throw std::runtime_error("当前节点位置没有仍然存活的活动分子");
-        json params={{"target",impl_->activeMolecule},{"coordinate_space","molecule_local_v2"},{"snapshot",moleculeSnapshotJson(*start)}};
-        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame;impl_->structureDraft=*start;
+        const json requested=paramsJson.empty()?json::object():json::parse(paramsJson);const std::size_t requestedInsertion=std::min(index.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
+        const auto target=resolveLivingMoleculeTarget(impl_->project,requestedInsertion,requested.value("target",""),impl_->activeMolecule);if(!target)throw std::runtime_error("当前节点位置没有仍然存活的分子");
+        const json targetParams={{"target",*target}};const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,targetParams,requestedInsertion);int startFrame=0;
+        const auto start=structureBeforeNode(impl_->project,insertion,*target,&startFrame);if(!start)throw std::runtime_error("当前节点位置没有仍然存活的分子");
+        json params={{"target",*target},{"coordinate_space","molecule_local_v2"},{"snapshot",moleculeSnapshotJson(*start)}};
+        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->activeMolecule=*target;impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame;impl_->structureDraft=*start;
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
     }
     if(type=="molecule_gradient_structure"){
-        if(impl_->activeMolecule.empty())throw std::runtime_error("渐变结构需要当前活动分子");
-        const json targetParams={{"target",impl_->activeMolecule}};const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,targetParams,index.value_or(impl_->project.nodes.size()));int startFrame=0;
-        const auto start=structureBeforeNode(impl_->project,insertion,impl_->activeMolecule,&startFrame);if(!start)throw std::runtime_error("当前节点位置没有仍然存活的活动分子");
-        json requested=json::parse(paramsJson);json params={{"target",impl_->activeMolecule},{"frames",std::max(0,requested.value("frames",30))},{"easing",requested.value("easing","linear")},{"coordinate_space","molecule_local_v2"},{"start_snapshot",moleculeSnapshotJson(*start)},{"end_snapshot",moleculeSnapshotJson(*start)},{"needs_review",false}};
-        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame+params["frames"].get<int>();impl_->structureDraft=*start;
+        const json requested=paramsJson.empty()?json::object():json::parse(paramsJson);const std::size_t requestedInsertion=std::min(index.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
+        const auto target=resolveLivingMoleculeTarget(impl_->project,requestedInsertion,requested.value("target",""),impl_->activeMolecule);if(!target)throw std::runtime_error("当前节点位置没有仍然存活的分子");
+        const json targetParams={{"target",*target}};const std::size_t insertion=safeObjectInsertionIndex(impl_->project,type,targetParams,requestedInsertion);int startFrame=0;
+        const auto start=structureBeforeNode(impl_->project,insertion,*target,&startFrame);if(!start)throw std::runtime_error("当前节点位置没有仍然存活的分子");
+        json params={{"target",*target},{"frames",std::max(0,requested.value("frames",30))},{"easing",requested.value("easing","linear")},{"coordinate_space","molecule_local_v2"},{"start_snapshot",moleculeSnapshotJson(*start)},{"end_snapshot",moleculeSnapshotJson(*start)},{"needs_review",false}};
+        const std::string id=impl_->project.addNode(type,params.dump(),insertion);impl_->activeMolecule=*target;impl_->targetKind=EditTargetKind::StructureSnapshot;impl_->targetId=id;impl_->previewFrame=startFrame+params["frames"].get<int>();impl_->structureDraft=*start;
         impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return id;
     }
     if(type=="split_molecule"||type=="merge_molecules"){
@@ -1360,8 +1370,7 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         if(targetLocal==local.molecules.end()||targetVisual==visual.molecules.end())throw std::runtime_error("无法取得原分子的对象状态");
         const Molecule* sourceLocal=nullptr;const Molecule* sourceVisual=nullptr;
         if(merging){const auto localFound=local.molecules.find(source),visualFound=visual.molecules.find(source);if(localFound==local.molecules.end()||visualFound==visual.molecules.end())throw std::runtime_error("无法取得并入分子的对象状态");sourceLocal=&localFound->second;sourceVisual=&visualFound->second;}
-        const std::string outputName=merging?"合并分子":(targetLocal->second.name.empty()?"分出分子":targetLocal->second.name+" 分体");
-        const std::string output=impl_->project.addBlankMolecule(outputName,insertion);++insertion;
+        const std::string output=impl_->project.addBlankMolecule("",insertion);++insertion;
         Molecule* identity=impl_->project.molecule(output);if(!identity)throw std::runtime_error("无法创建对象操作的输出分子");
         Molecule outputState=*identity;outputState.referenceBondLength=targetLocal->second.referenceBondLength;
         outputState.origin=targetLocal->second.origin;outputState.anchorInitialized=targetLocal->second.anchorInitialized;
@@ -1385,7 +1394,7 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         if(merging&&secondary.empty())throw std::runtime_error("合并结构变换需要另一个仍然存活的分子");
         if(!merging&&!validSecondary(secondary)){
             json primaryOnly={{"target",impl_->activeMolecule}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",primaryOnly,insertion);
-            secondary=impl_->project.addBlankMolecule("分出分子",insertion);++insertion;
+            secondary=impl_->project.addBlankMolecule("",insertion);++insertion;
         }
         json lifecycle={{"target",impl_->activeMolecule},{secondaryKey,secondary}};insertion=safeObjectInsertionIndex(impl_->project,type,lifecycle,insertion);
         int startFrame=0;const auto primaryStart=structureBeforeNode(impl_->project,insertion,impl_->activeMolecule,&startFrame);const auto secondaryStart=structureBeforeNode(impl_->project,insertion,secondary);
