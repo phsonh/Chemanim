@@ -148,8 +148,9 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const float canvasScaleY = renderHeight / engine_.scene.logicHeight;
     const float scaleX = static_cast<float>(number(table,"scale_x",1)*engine_.globalValue("molecule","scale_x",currentFrame_));
     const float scaleY = static_cast<float>(number(table,"scale_y",1)*engine_.globalValue("molecule","scale_y",currentFrame_));
-    const float rasterScale = static_cast<float>(engine_.scene.viewZoom * supersample_) *
-                              std::max(std::abs(scaleX), std::abs(scaleY));
+    const float expectedX = static_cast<float>(engine_.scene.viewZoom) * std::abs(scaleX) * canvasScaleX;
+    const float expectedY = static_cast<float>(engine_.scene.viewZoom) * std::abs(scaleY) * canvasScaleY;
+    const float rasterScale = std::max(0.001f,std::max(expectedX, expectedY));
     SvgCacheEntry& cache = moleculeSvgs_[object.id];
     if (!cache.hasViewport) {
         core::Molecule extent=*evaluatedMolecule;if(const auto finalMolecule=engine_.moleculeAt(object.id,engine_.maxScheduledFrame());finalMolecule)extent.atoms.insert(extent.atoms.end(),finalMolecule->atoms.begin(),finalMolecule->atoms.end());
@@ -228,8 +229,6 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const double offsetX=localX*std::cos(radians)-localY*std::sin(radians),offsetY=localX*std::sin(radians)+localY*std::cos(radians);
     const float x = renderWidth * 0.5f + static_cast<float>(number(table, "x", 0)+offsetX) * canvasScaleX;
     const float y = renderHeight * 0.5f - static_cast<float>(number(table, "y", 0)+offsetY) * canvasScaleY;
-    const float expectedX = static_cast<float>(engine_.scene.viewZoom * supersample_) * std::abs(scaleX);
-    const float expectedY = static_cast<float>(engine_.scene.viewZoom * supersample_) * std::abs(scaleY);
     const float naturalWidth = cache.texture.width / rasterScale;
     const float naturalHeight = cache.texture.height / rasterScale;
     Rectangle source{0, 0, static_cast<float>(cache.texture.width), static_cast<float>(cache.texture.height)};
@@ -334,7 +333,8 @@ void Renderer::drawArrow(int table) {
     Vector2 p1 = screenPoint("cx1", "cy1", 100, 0);
     Vector2 p2 = screenPoint("cx2", "cy2", 200, 0);
     Vector2 p3 = screenPoint("x2", "y2", 300, 0);
-    const float thickness = static_cast<float>(std::max(0.1,number(table,"thickness",3)*engine_.globalValue("arrow","width",currentFrame_))) * strokeScale;
+    const double widthOverride=engine_.globalValue("arrow","width_override",currentFrame_);
+    const float thickness = static_cast<float>(std::max(0.1,widthOverride>=0?widthOverride:number(table,"thickness",3))) * strokeScale;
     const float headLength = thickness * (20.0f / 3.0f);
     const float headWidth = thickness * 5.0f;
     const float progress = static_cast<float>(std::clamp(number(table, "progress", 0), 0.0, 1.0));

@@ -219,7 +219,7 @@ public:
                 const double centerX=composite.width*.5+(anchor.x+offsetX)*canvasScaleX;
                 const double centerY=composite.height*.5-(anchor.y+offsetY)*canvasScaleY;
                 outerTransform="translate("+std::to_string(centerX)+" "+std::to_string(centerY)+") rotate("+
-                    std::to_string(molecule.rotation)+") scale("+std::to_string(scene.viewZoom*objectScaleX)+" "+std::to_string(scene.viewZoom*objectScaleY)+") translate("+
+                    std::to_string(molecule.rotation)+") scale("+std::to_string(scene.viewZoom*objectScaleX*canvasScaleX)+" "+std::to_string(scene.viewZoom*objectScaleY*canvasScaleY)+") translate("+
                     std::to_string(-depictionViewport.width*.5)+" "+std::to_string(-depictionViewport.height*.5)+")";
             }
             const core::DepictionResult depiction=depiction_.depict(depictedMolecule,session_.project().style,depictionViewport);

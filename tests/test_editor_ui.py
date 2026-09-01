@@ -9,7 +9,7 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar,
+                             QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog,
                              QPushButton, QToolButton)
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -205,6 +205,21 @@ def test_element_toolbar_passes_the_selected_symbol_and_relabels_in_place():
     value.close()
 
 
+def test_real_blank_canvas_click_can_create_text_group_and_element(monkeypatch):
+    value=window();enable_structure(value);panel=value.mode_panel;panel.set_mode("绘制");QApplication.processEvents()
+    monkeypatch.setattr(QInputDialog,"getText",staticmethod(lambda *args,**kwargs:("OH",True)))
+    text=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("drawKind")=="atom_text")
+    text.click();first=QPoint(value.canvas.width()//2-45,value.canvas.height()//2)
+    QTest.mouseClick(value.canvas,Qt.MouseButton.LeftButton,pos=first);QApplication.processEvents()
+    assert len(active_structure(value)["atoms"])==1 and active_structure(value)["atoms"][0]["label"]=="OH"
+    oxygen=next(button for button in panel.tertiary.findChildren(QToolButton) if button.property("elementKind")=="O")
+    oxygen.click();second=QPoint(value.canvas.width()//2+45,value.canvas.height()//2)
+    QTest.mouseClick(value.canvas,Qt.MouseButton.LeftButton,pos=second);QApplication.processEvents()
+    atoms=active_structure(value)["atoms"]
+    assert len(atoms)==2 and atoms[-1]["label"]=="O"
+    value.close()
+
+
 def test_periodic_table_uses_complete_32_column_long_form_layout():
     application();dialog=PeriodicTableDialog()
     assert len(dialog.buttons)==118
@@ -231,8 +246,8 @@ def test_element_toolbar_tracks_only_ten_most_recent_elements():
 
 def test_script_tools_are_text_only_and_molecule_arrow_use_scope_tabs():
     value=window();value.mode_panel.set_mode("脚本");value.mode_panel.set_category("分子")
-    assert [value.mode_panel.scope_tabs.tabText(i) for i in range(value.mode_panel.scope_tabs.count())]==["对象","全局","设定","变换"]
-    for scope in ("对象","全局","设定","变换"):
+    assert [value.mode_panel.scope_tabs.tabText(i) for i in range(value.mode_panel.scope_tabs.count())]==["对象","设定","变换","全局"]
+    for scope in ("对象","设定","变换","全局"):
         value.mode_panel.set_script_scope(scope);QApplication.processEvents()
         buttons=[button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]
         assert buttons and all(button.icon().isNull() for button in buttons)
@@ -243,7 +258,7 @@ def test_script_tools_are_text_only_and_molecule_arrow_use_scope_tabs():
 def test_primary_node_toolbar_is_registry_driven_and_has_exact_object_commands():
     value=window();value.mode_panel.set_mode("脚本");value.mode_panel.set_category("分子")
     value.mode_panel.set_script_scope("对象");QApplication.processEvents()
-    assert [button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["新建分子","删除分子","合并分子"]
+    assert [button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["新建分子","删除分子","合并分子","分裂分子"]
     value.mode_panel.set_category("箭头");value.mode_panel.set_script_scope("对象");QApplication.processEvents()
     assert [button.text() for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["新建箭头","删除箭头"]
     value.close()
@@ -261,7 +276,7 @@ def test_primary_node_toolbar_uses_four_visible_rows_and_direct_action_buttons()
         return [button.text() for button in buttons]
     assert visible_sections("全局")==["颜色","缩放"] and actions("颜色")==["透明度","颜色"]
     assert visible_sections("设定")==["结构","位置","缩放","旋转","颜色","排列"] and actions("位置")==["坐标","横坐标","纵坐标"]
-    assert visible_sections("变换")==["结构","位置","缩放","旋转","颜色"] and actions("结构")==["渐变结构","合并分子并变换结构","分裂分子并变换结构"]
+    assert visible_sections("变换")==["结构","位置","缩放","旋转","颜色"] and actions("结构")==["渐变结构"]
     assert panel.secondary_row.isVisible() and panel.scope_row.isVisible() and panel.section_row.isVisible() and panel.scroll.isVisible()
     panel.set_category("箭头")
     assert visible_sections("设定")==["曲线","绘制","缩放","颜色","线条"]
@@ -269,18 +284,59 @@ def test_primary_node_toolbar_uses_four_visible_rows_and_direct_action_buttons()
     value.close()
 
 
-def test_multi_molecule_structure_transforms_have_human_readable_locked_targets_and_no_internal_ids():
+def test_general_toolbar_has_no_redundant_scope_or_section_rows():
+    value=window();panel=value.mode_panel;panel.set_mode("脚本");panel.set_category("通用");QApplication.processEvents()
+    assert not panel.scope_row.isVisible() and not panel.section_row.isVisible()
+    assert [button.text() for button in panel.tertiary.findChildren(QToolButton) if button.isVisible()]==["场景设置","等待"]
+    value.close()
+
+
+def test_object_split_merge_have_human_readable_locked_targets_and_no_internal_ids():
     value=window();first=value.session.import_smiles("主分子","CC");second=value.session.import_smiles("并入分子","O");last=value.session.project()["nodes"][-1]["id"];value.refresh_all(last);value.session.set_active_molecule(first)
-    node=value._add_node("molecule_merge_gradient_structure",{"source":second,"frames":24,"easing":"linear"},False);QApplication.processEvents()
+    node=value._add_node("merge_molecules",{"source":second},False);QApplication.processEvents()
     created=next(item for item in value.session.project()["nodes"] if item["id"]==node)
-    assert created["params"]["target"]==first and created["params"]["source"]==second
+    assert created["params"]["target"]==first and created["params"]["source"]==second and created["params"]["output"]
     item=next(value.node_list.tree.topLevelItem(index) for index in range(value.node_list.tree.topLevelItemCount()) if value.node_list.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node)
-    assert item.text(0)=="24 帧内将主分子与并入分子合并并变换结构，线性"
+    assert item.text(0).startswith("合并主分子与并入分子，生成")
     value._edit_node_dialog(node);QApplication.processEvents()
-    assert value.inspector.title.text()=="合并分子并变换结构 · 主分子"
-    assert set(value.inspector.editors)=={"target","source","frames","easing"}
-    assert value.inspector.editors["target"][0].isReadOnly() and value.inspector.editors["source"][0].isReadOnly()
+    assert value.inspector.title.text().startswith("合并分子")
+    assert set(value.inspector.editors)=={"target","source","output"}
+    assert all(value.inspector.editors[key][0].isReadOnly() for key in ("target","source","output"))
     assert not any("ID" in label.text() for label in value.inspector.findChildren(QLabel))
+    value.close()
+
+
+def test_real_object_toolbar_split_merge_and_pair_move_do_not_crash_or_swallow_nodes(monkeypatch):
+    value=window();primary=value.session.import_smiles("叔丁基溴","CC(C)(C)Br");partner=value.session.import_smiles("氯离子","[Cl-]")
+    project=value.session.project();primary_structure=next(node["id"] for node in project["nodes"] if node["type"]=="molecule_set_structure" and node["params"]["target"]==primary)
+    value.refresh_all(primary_structure);value._node_selected(primary_structure);QApplication.processEvents()
+    panel=value.mode_panel;panel.set_mode("脚本");panel.set_category("分子");panel.set_script_scope("对象");QApplication.processEvents()
+
+    split_button=next(button for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()=="分裂分子")
+    QTest.mouseClick(split_button,Qt.MouseButton.LeftButton);QApplication.processEvents()
+    split_id=value.node_list.current_id();split=next(node for node in value.session.project()["nodes"] if node["id"]==split_id)
+    assert split["type"]=="split_molecule" and split["params"]["target"]==primary
+    split_output=split["params"]["output"]
+    assert value.session.active_molecule==split_output
+
+    def choose_partner(*args,**kwargs):
+        items=list(args[3]);choice=next(item for item in items if "氯离子" in item);return choice,True
+    monkeypatch.setattr(QInputDialog,"getItem",staticmethod(choose_partner))
+    panel.set_mode("脚本");panel.set_category("分子");panel.set_script_scope("对象");QApplication.processEvents()
+    merge_button=next(button for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()=="合并分子")
+    QTest.mouseClick(merge_button,Qt.MouseButton.LeftButton);QApplication.processEvents()
+    merge_id=value.node_list.current_id();merge=next(node for node in value.session.project()["nodes"] if node["id"]==merge_id)
+    assert merge["type"]=="merge_molecules" and merge["params"]["target"]==split_output and merge["params"]["source"]==partner
+
+    before_ids=[node["id"] for node in value.session.project()["nodes"]]
+    output=merge["params"]["output"]
+    create_id=next(node["id"] for node in value.session.project()["nodes"] if node["type"]=="molecule_create" and node["params"]["target"]==output)
+    up=next(button for button in value.node_list.findChildren(QPushButton) if button.text()=="上移")
+    QTest.mouseClick(up,Qt.MouseButton.LeftButton);QApplication.processEvents()
+    moved=[node["id"] for node in value.session.project()["nodes"]]
+    assert set(moved)==set(before_ids) and len(moved)==len(before_ids)
+    assert moved.index(create_id)+1==moved.index(merge_id)
+    assert value.node_list.current_id()==merge_id and value.session.active_molecule==output
     value.close()
 
 

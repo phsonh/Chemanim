@@ -33,6 +33,14 @@ double numberField(lua_State* state, int table, const char* key, double fallback
     return result;
 }
 
+bool booleanField(lua_State* state,int table,const char* key,bool fallback) {
+    table=lua_absindex(state,table);lua_getfield(state,table,key);
+    bool result=fallback;
+    if(lua_isboolean(state,-1))result=lua_toboolean(state,-1)!=0;
+    else if(lua_isnumber(state,-1))result=lua_tonumber(state,-1)!=0.0;
+    lua_pop(state,1);return result;
+}
+
 std::string stringField(lua_State* state, int table, const char* key, std::string fallback) {
     table = lua_absindex(state, table);
     lua_getfield(state, table, key);
@@ -192,8 +200,8 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         atom.isotope = static_cast<int>(numberField(state_, -1, "isotope", 0));
         atom.radicalElectrons = static_cast<int>(numberField(state_, -1, "radical_electrons", 0));
         atom.implicitHydrogens = static_cast<int>(numberField(state_, -1, "implicit_hydrogens", 0));
-        atom.hidden = numberField(state_, -1, "hidden", 0) != 0;
-        atom.alive = numberField(state_, -1, "alive", 1) != 0;
+        atom.hidden = booleanField(state_, -1, "hidden", false);
+        atom.alive = booleanField(state_, -1, "alive", true);
         atom.alpha = static_cast<int>(numberField(state_, -1, "alpha", 255));
         atom.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
         atom.position.x = numberField(state_, -1, "x", 0);
@@ -229,8 +237,8 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
         bond.type = order > 2.5 ? core::BondType::Triple : order > 1.5 ? core::BondType::Double : core::BondType::Single;
         bond.secondaryLineSide = core::secondaryLineSideFromString(stringField(state_, -1, "secondary_line_side", "center"));
         bond.stereo = core::bondStereoFromString(stringField(state_, -1, "stereo", "none"));
-        bond.visible = numberField(state_, -1, "visible", 1) != 0;
-        bond.alive = numberField(state_, -1, "alive", 1) != 0;
+        bond.visible = booleanField(state_, -1, "visible", true);
+        bond.alive = booleanField(state_, -1, "alive", true);
         bond.alpha = static_cast<int>(numberField(state_, -1, "alpha", 255));
         bond.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
         if (bond.id.empty() || bond.atomA.empty() || bond.atomB.empty()) {
@@ -249,7 +257,7 @@ void LuaRuntime::readMolecule(Object& object, int tableIndex) {
             core::AtomAdornment value;value.id=stringField(state_,-1,"id","");value.creationSerial=static_cast<std::uint64_t>(numberField(state_,-1,"creation_serial",atomCount+i));
             value.atomId=stringField(state_,-1,"atom","");value.text=stringField(state_,-1,"text","⊕");
             value.offset={numberField(state_,-1,"x",0),numberField(state_,-1,"y",0)};
-            value.alpha=static_cast<int>(numberField(state_,-1,"alpha",255));value.alive=numberField(state_,-1,"alive",1)!=0;
+            value.alpha=static_cast<int>(numberField(state_,-1,"alpha",255));value.alive=booleanField(state_,-1,"alive",true);
             value.color={static_cast<int>(numberField(state_,-1,"color_r",0)),static_cast<int>(numberField(state_,-1,"color_g",0)),static_cast<int>(numberField(state_,-1,"color_b",0))};
             molecule->adornments.push_back(std::move(value));}lua_pop(state_,1);}
     }

@@ -48,7 +48,7 @@ struct GlobalNodeState {
     double arrowBlue = 255.0;
     double arrowScaleX = 1.0;
     double arrowScaleY = 1.0;
-    double arrowWidth = 1.0;
+    double arrowWidth = -1.0;
 };
 
 struct NodeDiagnostic {

@@ -847,7 +847,9 @@ void EditorSession::editPose(const std::string& moleculeId,const std::string& po
 }
 void EditorSession::editScriptNode(const std::string& nodeId) {
     const ScriptNode* node=impl_->project.node(nodeId); if(!node) throw std::runtime_error("Unknown script node: "+nodeId);
-    const json params=json::parse(node->paramsJson); const std::string moleculeId=params.value("target","");
+    const json params=json::parse(node->paramsJson);
+    const bool objectOutput=(node->type=="split_molecule"||node->type=="merge_molecules")&&params.value("operation_version","")=="object_v1";
+    const std::string moleculeId=params.value(objectOutput?"output":"target","");
     if(impl_->project.molecule(moleculeId)) impl_->activeMolecule=moleculeId;
     const auto timings=compileNodeTimings(impl_->project);
     const auto found=std::find_if(timings.begin(),timings.end(),[&](const NodeTiming& value){return value.id==nodeId;});
@@ -907,7 +909,7 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
         gesture.previewKind=GesturePreviewKind::Adornment;
         gesture.previewText=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
     }
-    else if (impl_->tool==Tool::AtomText && gesture.startHit.kind==HitKind::Atom) {
+    else if (impl_->tool==Tool::AtomText) {
         gesture.previewKind=GesturePreviewKind::Text;
     }
     else if (impl_->tool==Tool::SelectLasso) gesture.previewKind=gesture.startHit.kind!=HitKind::None?GesturePreviewKind::Move:GesturePreviewKind::Lasso;
@@ -1170,9 +1172,16 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         if (impl_->gesture->startHit.kind == HitKind::Atom) {
             request = "atom_text|" + impl_->gesture->startHit.id + "|" +
                 (impl_->textSide() == AtomLabelSide::Left ? "left" : "right");
+        } else {
+            const std::string atomId=molecule->addAtom(impl_->gesture->startModel,"C",impl_->project.allocateCreationSerial());
+            if(!atomId.empty()){
+                impl_->gesture->changed=true;
+                request="atom_text|"+atomId+"|right";
+            }
         }
+        const bool changed=impl_->gesture->changed;
         impl_->commit();
-        EditResult result = impl_->result(canvasPoint); result.message = std::move(request); return result;
+        EditResult result = impl_->result(canvasPoint);result.changed=changed;result.message=std::move(request);return result;
     } else if (impl_->tool == Tool::AtomLabel) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) {
             Atom* atom=molecule->atom(impl_->gesture->startHit.id);
@@ -1328,10 +1337,22 @@ std::string EditorSession::addScriptNode(const std::string& type,const std::stri
         std::size_t insertion=std::min(index.value_or(impl_->project.nodes.size()),impl_->project.nodes.size());
         json targetParams={{"target",target}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",targetParams,insertion);
         std::string source=requested.value("source","");
-        const auto validAt=[&](const std::string& id){return !id.empty()&&id!=target&&structureBeforeNode(impl_->project,insertion,id).has_value();};
-        if(merging&&!validAt(source))for(auto found=impl_->project.molecules.rbegin();found!=impl_->project.molecules.rend();++found)if(validAt(found->id)){source=found->id;break;}
+        const bool sourceWasExplicit=merging&&!source.empty();
+        if(sourceWasExplicit){
+            if(source==target)throw std::runtime_error("主分子和并入分子不能是同一个对象");
+            json sourceParams={{"target",source}};
+            insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",sourceParams,insertion);
+        }
+        const auto populatedAt=[&](const std::string& id,std::size_t at){const auto state=structureBeforeNode(impl_->project,at,id);return state&&std::any_of(state->atoms.begin(),state->atoms.end(),[](const Atom& atom){return atom.alive;});};
+        const auto advanceToPopulatedState=[&](const std::string& id){while(insertion<impl_->project.nodes.size()&&!populatedAt(id,insertion))++insertion;};
+        advanceToPopulatedState(target);
+        if(!populatedAt(target,insertion))throw std::runtime_error("原分子在当前节点位置没有可分裂或合并的结构");
+        if(sourceWasExplicit)advanceToPopulatedState(source);
+        const auto validAt=[&](const std::string& id){return !id.empty()&&id!=target&&populatedAt(id,insertion);};
+        if(sourceWasExplicit&&!validAt(source))throw std::runtime_error("并入分子在当前节点位置尚未创建或已经结束生命周期");
+        if(merging&&!sourceWasExplicit)for(auto found=impl_->project.molecules.rbegin();found!=impl_->project.molecules.rend();++found)if(validAt(found->id)){source=found->id;break;}
         if(merging&&!validAt(source))throw std::runtime_error("合并分子需要另一个在当前节点处仍然存活的分子");
-        if(merging){json sourceParams={{"target",source}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",sourceParams,insertion);}
+        if(merging&&!sourceWasExplicit){json sourceParams={{"target",source}};insertion=safeObjectInsertionIndex(impl_->project,"molecule_gradient_structure",sourceParams,insertion);}
         int startFrame=0;const auto targetStructure=structureBeforeNode(impl_->project,insertion,target,&startFrame);
         if(!targetStructure)throw std::runtime_error("原分子在当前节点位置尚未创建、已经删除或没有有效状态");
         const EvaluatedScene local=localObjectSceneBeforeNode(impl_->project,insertion,startFrame),visual=sceneBeforeNode(impl_->project,insertion,startFrame);
@@ -1416,6 +1437,33 @@ bool EditorSession::setScriptNodeEnabled(const std::string& nodeId,bool enabled)
 bool EditorSession::moveScriptNode(const std::string& nodeId,std::size_t index) {
     auto found=std::find_if(impl_->project.nodes.begin(),impl_->project.nodes.end(),[&](const ScriptNode& value){return value.id==nodeId;});
     if(found==impl_->project.nodes.end()||found->type=="scene")return false;const std::size_t old=static_cast<std::size_t>(std::distance(impl_->project.nodes.begin(),found));
+    const auto isObjectOperation=[](const ScriptNode& node){
+        if(node.type!="split_molecule"&&node.type!="merge_molecules")return false;
+        try{return json::parse(node.paramsJson).value("operation_version","")=="object_v1";}catch(...){return false;}
+    };
+    std::optional<std::size_t> operationIndex,createIndex;
+    if(isObjectOperation(*found)){
+        operationIndex=old;const std::string output=json::parse(found->paramsJson).value("output","");
+        for(std::size_t candidate=0;candidate<impl_->project.nodes.size();++candidate){const ScriptNode& node=impl_->project.nodes[candidate];
+            if(node.type=="molecule_create"&&json::parse(node.paramsJson).value("target","")==output){createIndex=candidate;break;}}
+    }else if(found->type=="molecule_create"){
+        const std::string target=json::parse(found->paramsJson).value("target","");
+        for(std::size_t candidate=0;candidate<impl_->project.nodes.size();++candidate){const ScriptNode& node=impl_->project.nodes[candidate];if(!isObjectOperation(node))continue;
+            if(json::parse(node.paramsJson).value("output","")==target){createIndex=old;operationIndex=candidate;break;}}
+    }
+    if(operationIndex&&createIndex){
+        if(*operationIndex<*createIndex)return false;
+        Project before=impl_->project;const std::size_t violationsBefore=objectLifecycleOrderViolations(before.nodes);
+        ScriptNode operation=impl_->project.nodes[*operationIndex],creation=impl_->project.nodes[*createIndex];
+        impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(*operationIndex));
+        impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(*createIndex));
+        std::size_t desired=old==*operationIndex?(index>0?index-1:0):index;
+        desired=std::max<std::size_t>(1,std::min(desired,impl_->project.nodes.size()));
+        impl_->project.nodes.insert(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(desired),std::move(creation));
+        impl_->project.nodes.insert(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(desired+1),std::move(operation));
+        if(objectLifecycleOrderViolations(impl_->project.nodes)>violationsBefore){impl_->project=std::move(before);return false;}
+        impl_->markGradientNodesForReview();impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+    }
     if(!impl_->project.nodes.empty()&&impl_->project.nodes.front().type=="scene")index=std::max<std::size_t>(1,index);
     index=std::min(index,impl_->project.nodes.size()-1);if(old==index)return false;Project before=impl_->project;const std::size_t violationsBefore=objectLifecycleOrderViolations(impl_->project.nodes);ScriptNode value=std::move(*found);
     impl_->project.nodes.erase(impl_->project.nodes.begin()+static_cast<std::ptrdiff_t>(old));

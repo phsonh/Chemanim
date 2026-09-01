@@ -98,7 +98,7 @@ class ModeToolPanel(QWidget):
             self.section_tabs.blockSignals(True);self.section_tabs.setCurrentIndex(names.index(section));self.section_tabs.blockSignals(False)
         self._build_tertiary()
 
-    SCOPE_NAMES=(("对象","object"),("全局","global"),("设定","set"),("变换","transform"))
+    SCOPE_NAMES=(("对象","object"),("设定","set"),("变换","transform"),("全局","global"))
 
     def set_script_scope(self,scope):
         names=[name for name,_ in self.SCOPE_NAMES]
@@ -190,6 +190,11 @@ class ModeToolPanel(QWidget):
             self.scope_tabs.setCurrentIndex(names.index(self.script_scope));self.scope_tabs.blockSignals(False)
         if self.mode=="脚本":
             definitions=[item for item in self.session.node_registry() if item["category"]==self.category and item.get("exposure")=="primary"]
+            if self.category=="通用":
+                self.scope_row.setVisible(False);self.section_row.setVisible(False)
+                definitions.sort(key=lambda item:(item.get("order",0),item.get("label","")))
+                for item in definitions:self._tool(item["type"],item.get("tool_label",item["label"]),self.nodeRequested,show_icon=False)
+                self.tertiary_layout.addStretch();self.set_structure_enabled(self._structure_enabled);return
             scope_key=dict(self.SCOPE_NAMES)[self.script_scope]
             definitions=[item for item in definitions if item.get("scope")==scope_key]
             definitions.sort(key=lambda item:(item.get("order",0),item.get("label","")))

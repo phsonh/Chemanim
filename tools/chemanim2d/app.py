@@ -234,13 +234,26 @@ class MainWindow(QMainWindow):
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
         params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
+        if node_type=="merge_molecules" and not params.get("source"):
+            candidates=[item for item in project.get("molecules",[]) if item.get("id")!=params.get("target")]
+            if not candidates:
+                self.statusBar().showMessage("合并分子需要另一个分子");return ""
+            labels=[item.get("name") or f"分子 {index+1}" for index,item in enumerate(candidates)]
+            if len(candidates)==1:params["source"]=candidates[0]["id"]
+            else:
+                label,ok=QInputDialog.getItem(self,"合并分子","并入分子",labels,0,False)
+                if not ok:return ""
+                params["source"]=candidates[labels.index(label)]["id"]
         if node_type.startswith("atom_") and self.canvas.selected_atoms and not params.get("atom"):params["atom"]=self.canvas.selected_atoms[-1]
         if node_type.startswith("bond_") and self.canvas.selected_bonds and not params.get("bond"):params["bond"]=self.canvas.selected_bonds[-1]
         if node_type=="arrow_new":
             used=[int(m.group(1)) for item in project["nodes"] if item["type"]=="arrow_new" for m in [re.fullmatch(r"arrow(\d+)",item.get("params",{}).get("target",""))] if m];params["target"]=f"arrow{max(used,default=0)+1}"
         elif node_type.startswith("arrow_") and not params.get("target"):params["target"]=self._latest_arrow(index)
         if node_type=="arrow_set_curve":params["initialized"]=False
-        node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index);self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
+        try:node_id=self.session.add_node(node_type,json.dumps(params,ensure_ascii=False),index)
+        except (RuntimeError,ValueError) as error:
+            self.statusBar().showMessage(str(error));return ""
+        self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id)
         if node_type in STRUCTURE_TRANSFORM_TYPES:open_editor=False
         if open_editor:self._edit_node_dialog(node_id)
         return node_id

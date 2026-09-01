@@ -177,14 +177,14 @@ unsigned long long Engine::addNumericTween(Object& object, const std::string& pr
 unsigned long long Engine::addGlobalNumericTween(const std::string& scope,const std::string& property,
                                                   int start,int duration,double target,Ease ease) {
     const std::string key=scope+":"+property;auto [it,inserted]=globalTracks_.try_emplace(key);
-    NumericTrack& track=it->second;if(inserted)track.base=(property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
+    NumericTrack& track=it->second;if(inserted)track.base=property=="width_override"?-1.0:(property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
     const double from=track.valueAt(start);for(auto& segment:track.segments){const int effectiveEnd=std::min(segment.end,segment.cancelledAt);if(segment.start<=start&&start<effectiveEnd){segment.cancelledAt=start;segment.cancelledValue=from;}}
     const unsigned long long order=nextOrder_++;track.segments.push_back({start,start+std::max(0,duration),from,target,ease,order});return order;
 }
 
 double Engine::globalValue(const std::string& scope,const std::string& property,int frame) const {
     const auto found=globalTracks_.find(scope+":"+property);if(found!=globalTracks_.end())return found->second.valueAt(frame);
-    return (property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
+    return property=="width_override"?-1.0:(property=="alpha"||property=="r"||property=="g"||property=="b")?255.0:1.0;
 }
 
 unsigned long long Engine::addStringKey(Object& object, const std::string& property, int frame,
