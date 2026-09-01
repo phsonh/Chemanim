@@ -156,7 +156,7 @@ Object& LuaRuntime::createObjectTable(const std::string& kind, int propertiesInd
         setDefaultNumber(table, "x2", 0); setDefaultNumber(table, "y2", 0);
         setDefaultNumber(table, "cx1", 0); setDefaultNumber(table, "cy1", 0);
         setDefaultNumber(table, "cx2", 0); setDefaultNumber(table, "cy2", 0);
-        setDefaultNumber(table, "thickness", 3);
+        setDefaultNumber(table, "thickness", 1.5);
         setDefaultNumber(table, "progress", 0);
     }
 

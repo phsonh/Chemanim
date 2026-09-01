@@ -27,7 +27,7 @@ struct ArrowState {
     Point end;
     double progress = 0.0;
     double alpha = 255.0;
-    double width = 3.0;
+    double width = 1.5;
     double scaleX = 1.0;
     double scaleY = 1.0;
     double red = 25.0;

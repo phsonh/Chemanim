@@ -348,6 +348,61 @@ def test_real_object_toolbar_split_merge_and_pair_move_do_not_crash_or_swallow_n
     value.close()
 
 
+def test_manual_merge_then_real_gradient_button_opens_endpoint_without_hanging():
+    """Exercise the user's manual merge -> public gradient toolbar path."""
+    value=window();ring=value.session.import_smiles("benzene","c1ccccc1")
+    acylium=value.session.import_smiles("acylium","CC#[O+]")
+    value.session.set_active_molecule(ring)
+    merge=value._add_node("merge_molecules",{"source":acylium},False);QApplication.processEvents()
+    operation=next(node for node in value.session.project()["nodes"] if node["id"]==merge)
+    output=operation["params"]["output"]
+    assert value.session.active_molecule==output
+
+    def accept_dialog():
+        dialog=next((widget for widget in QApplication.topLevelWidgets() if isinstance(widget,GradientStructureDialog) and widget.isVisible()),None)
+        if dialog is None:
+            QTimer.singleShot(10,accept_dialog);return
+        assert dialog.target.currentData()==output
+        dialog.accept()
+    QTimer.singleShot(10,accept_dialog)
+    panel=value.mode_panel;panel.set_mode("脚本");panel.set_category("分子");panel.set_script_scope("变换");panel.set_script_section("结构");QApplication.processEvents()
+    button=next(button for button in panel.tertiary.findChildren(QToolButton) if button.isVisible() and button.text()=="渐变结构")
+    QTest.mouseClick(button,Qt.MouseButton.LeftButton);QTest.qWait(100);QApplication.processEvents()
+    gradient_id=value.node_list.current_id();gradient=next(node for node in value.session.project()["nodes"] if node["id"]==gradient_id)
+    assert gradient["type"]=="molecule_gradient_structure" and gradient["params"]["target"]==output
+    assert value.session.can_edit_structure and value.session.edit_target_id==gradient_id
+    assert not value.canvas.grab().toImage().isNull()
+    value.close()
+
+
+def test_global_colors_before_object_creation_reach_real_canvas_and_gradient_draft():
+    value=window()
+    value.session.add_node("arrow_global_set_color",json.dumps({"r":255,"g":0,"b":0}),1)
+    value.session.add_node("molecule_global_set_color",json.dumps({"r":0,"g":0,"b":255}),2)
+    molecule=value.session.import_smiles("benzene","c1ccccc1")
+    value.session.add_node("molecule_set_position",json.dumps({"target":molecule,"x":-55,"y":0}))
+    value.session.add_node("arrow_new",json.dumps({"target":"arrow1"}))
+    value.session.add_node("arrow_set_curve",json.dumps({"target":"arrow1","x1":20,"y1":-25,"cx1":45,"cy1":25,"cx2":75,"cy2":25,"x2":105,"y2":-25,"initialized":True}))
+    last=value.session.add_node("arrow_set_progress",json.dumps({"target":"arrow1","value":1.0}))
+    value.refresh_all(last);value._node_selected(last);value.canvas.fit_all();QTest.qWait(80);QApplication.processEvents()
+    molecule_state=value.session.evaluated_molecules(0)[molecule];arrow_state=value.session.evaluated_arrows(0)["arrow1"]
+    assert (molecule_state["r"],molecule_state["g"],molecule_state["b"])==(0,0,255)
+    assert (arrow_state["r"],arrow_state["g"],arrow_state["b"])==(255,0,0)
+
+    image=value.canvas.grab().toImage().convertToFormat(QImage.Format.Format_RGBA8888);red=blue=0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color=image.pixelColor(x,y)
+            red+=color.red()>170 and color.green()<90 and color.blue()<90
+            blue+=color.blue()>170 and color.red()<90 and color.green()<90
+    assert red>20 and blue>20
+
+    value.session.set_active_molecule(molecule)
+    value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()
+    assert "rgb(0,0,255)" in value.session.depict(False)["svg"]
+    value.close()
+
+
 def test_gradient_inspector_and_tree_hide_internal_ids_and_legacy_fields():
     value=window();value.session.import_smiles("苯","c1ccccc1");value.refresh_all();value._select_default_authoring_node()
     node=value._add_node("molecule_gradient_structure",open_editor=False);QApplication.processEvents()

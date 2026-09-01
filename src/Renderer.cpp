@@ -351,7 +351,7 @@ void Renderer::drawArrow(int table) {
     Vector2 p2 = screenPoint("cx2", "cy2", 200, 0);
     Vector2 p3 = screenPoint("x2", "y2", 300, 0);
     const double widthOverride=engine_.globalValue("arrow","width_override",currentFrame_);
-    const float thickness = static_cast<float>(std::max(0.1,widthOverride>=0?widthOverride:number(table,"thickness",3))) * strokeScale;
+    const float thickness = static_cast<float>(std::max(0.1,widthOverride>=0?widthOverride:number(table,"thickness",1.5))) * strokeScale;
     const float headLength = thickness * (20.0f / 3.0f);
     const float headWidth = thickness * 5.0f;
     const float progress = static_cast<float>(std::clamp(number(table, "progress", 0), 0.0, 1.0));

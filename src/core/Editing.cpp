@@ -451,7 +451,13 @@ struct EditorSession::Impl {
                 const double c=std::cos(radians),s=std::sin(radians);
                 for(Atom& atom:result.atoms){const double x=atom.position.x*visual.scaleX,y=atom.position.y*visual.scaleY;atom.position={visual.origin.x+x*c-y*s,visual.origin.y+x*s+y*c};}
                 result.origin=visual.origin;result.scaleX=visual.scaleX;result.scaleY=visual.scaleY;result.rotation=visual.rotation;
-                result.alpha=visual.alpha;result.color=visual.color;result.layer=visual.layer;
+                result.alpha=visual.alpha;result.color=visual.color;
+                // The editable structure draft owns only structure data.  Its
+                // object colour (including a scene-global override) comes
+                // from the evaluated visual state.  Copy the override bit as
+                // well as the channels; otherwise Depiction correctly treats
+                // the copied RGB as a neutral tint and renders black bonds.
+                result.colorOverride=visual.colorOverride;result.layer=visual.layer;
             }
         }
         if (gesture && targetKind != EditTargetKind::BaseStructure && targetKind != EditTargetKind::StructureSnapshot && targetKind != EditTargetKind::TimelinePreview) {

@@ -89,7 +89,7 @@ const json& registry() {
         definition("arrow_lerp_alpha", "变换箭头透明度", "箭头", "颜色", {field("target","箭头","arrow",""),field("value","目标 Alpha","alpha",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("arrow_set_color", "设定箭头颜色", "箭头", "颜色", {field("target","箭头","arrow",""),field("r","R","byte",25),field("g","G","byte",25),field("b","B","byte",25)}),
         definition("arrow_lerp_color", "变换箭头颜色", "箭头", "颜色", {field("target","箭头","arrow",""),field("r","目标 R","byte",25),field("g","目标 G","byte",25),field("b","目标 B","byte",25),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_set_width", "设定箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","线宽","float",3)}),
+        definition("arrow_set_width", "设定箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","线宽","float",1.5)}),
 
         definition("molecule_set_x", "设定分子横坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","X","float",0)}),
         definition("molecule_set_y", "设定分子纵坐标", "分子", "位置", {field("target","分子","molecule",""),field("value","Y","float",0)}),
@@ -118,13 +118,13 @@ const json& registry() {
         definition("arrow_lerp_scale", "变换箭头缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("arrow_lerp_scale_x", "变换箭头横向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标横向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("arrow_lerp_scale_y", "变换箭头纵向缩放", "箭头", "缩放", {field("target","箭头","arrow",""),field("value","目标纵向缩放","float",1),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("arrow_lerp_width", "变换箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","目标线宽","float",3),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("arrow_lerp_width", "变换箭头线宽", "箭头", "线条", {field("target","箭头","arrow",""),field("value","目标线宽","float",1.5),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
         definition("arrow_global_set_alpha", "设定全局箭头透明度", "箭头", "颜色", {field("value","Alpha","alpha",255)}),
         definition("arrow_global_set_color", "设定全局箭头颜色", "箭头", "颜色", {field("r","R","byte",255),field("g","G","byte",255),field("b","B","byte",255)}),
         definition("arrow_global_set_scale", "设定全局箭头缩放", "箭头", "缩放", {field("value","缩放","float",1)}),
         definition("arrow_global_set_scale_x", "设定全局箭头横向缩放", "箭头", "缩放", {field("value","横向缩放","float",1)}),
         definition("arrow_global_set_scale_y", "设定全局箭头纵向缩放", "箭头", "缩放", {field("value","纵向缩放","float",1)}),
-        definition("arrow_global_set_width", "设定全局箭头线宽", "箭头", "线条", {field("value","线宽","float",3)})
+        definition("arrow_global_set_width", "设定全局箭头线宽", "箭头", "线条", {field("value","线宽","float",1.5)})
     });
     return value;
 }
@@ -526,7 +526,7 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
         else if(node.type=="arrow_global_set_scale"){add("global:arrow:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);add("global:arrow:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);}
         else if(node.type=="arrow_global_set_scale_x")add("global:arrow:scale_x",1,timing.startFrame,0,p.value("value",1.0),easing);
         else if(node.type=="arrow_global_set_scale_y")add("global:arrow:scale_y",1,timing.startFrame,0,p.value("value",1.0),easing);
-        else if(node.type=="arrow_global_set_width")add("global:arrow:width_override",-1,timing.startFrame,0,p.value("value",3.0),easing);
+        else if(node.type=="arrow_global_set_width")add("global:arrow:width_override",-1,timing.startFrame,0,p.value("value",1.5),easing);
         else if(node.type=="molecule_set_layer"&&molecule&&frame>=timing.startFrame)molecule->layer=p.value("value",0);
         else if(node.type=="molecule_set_visible"&&molecule&&frame>=timing.startFrame)molecule->visible=p.value("value",true);
         else if((node.type=="atom_set_xy"||node.type=="atom_lerp_xy")&&molecule){if(const Atom* atom=molecule->atom(p.value("atom",""))){const std::string prefix=target+":atom:"+atom->id;add(prefix+":x",atom->position.x,timing.startFrame,duration,p.value("x",atom->position.x),easing);add(prefix+":y",atom->position.y,timing.startFrame,duration,p.value("y",atom->position.y),easing);}}
@@ -561,7 +561,7 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
         else if(node.type=="arrow_set_scale"||node.type=="arrow_lerp_scale"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_x",a.scaleX,timing.startFrame,duration,p.value("value",1.0),easing);add("arrow:"+target+":scale_y",a.scaleY,timing.startFrame,duration,p.value("value",1.0),easing);}
         else if(node.type=="arrow_set_scale_x"||node.type=="arrow_lerp_scale_x"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_x",a.scaleX,timing.startFrame,duration,p.value("value",1.0),easing);}
         else if(node.type=="arrow_set_scale_y"||node.type=="arrow_lerp_scale_y"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":scale_y",a.scaleY,timing.startFrame,duration,p.value("value",1.0),easing);}
-        else if(node.type=="arrow_set_width"||node.type=="arrow_lerp_width"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":width",a.width,timing.startFrame,duration,p.value("value",3.0),easing);}
+        else if(node.type=="arrow_set_width"||node.type=="arrow_lerp_width"){ArrowState& a=result.arrows[target];a.id=target;add("arrow:"+target+":width",a.width,timing.startFrame,duration,p.value("value",1.5),easing);}
     }
     const auto trackAt=[&](const char* key,double fallback){const auto found=tracks.find(key);return found==tracks.end()?fallback:found->second.at(frame);};
     result.globals.moleculeAlpha=trackAt("global:molecule:alpha",255);result.globals.moleculeRed=trackAt("global:molecule:r",255);result.globals.moleculeGreen=trackAt("global:molecule:g",255);result.globals.moleculeBlue=trackAt("global:molecule:b",255);result.globals.moleculeScaleX=trackAt("global:molecule:scale_x",1);result.globals.moleculeScaleY=trackAt("global:molecule:scale_y",1);

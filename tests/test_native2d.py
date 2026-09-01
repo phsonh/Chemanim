@@ -1129,6 +1129,15 @@ def test_local_and_global_color_nodes_render_and_global_visuals_override_except_
     assert (arrow["alpha"],arrow["r"],arrow["g"],arrow["b"],arrow["width"])==(170.0,20.0,80.0,160.0,4.0)
 
 
+def test_default_arrow_width_matches_structure_stroke_and_codegen():
+    core=CoreSession();core.add_node("arrow_new",json.dumps({"target":"arrow1"}))
+    assert core.evaluated_arrows(0)["arrow1"]["width"]==1.5
+    definitions={item["type"]:item for item in core.node_registry()}
+    for node_type in ("arrow_set_width","arrow_lerp_width","arrow_global_set_width"):
+        field=next(item for item in definitions[node_type]["fields"] if item["key"]=="value")
+        assert field["default"]==1.5
+
+
 def test_global_override_order_delete_undo_redo_and_reload_are_deterministic():
     core=CoreSession();target=core.add_blank_molecule("global-order")
     first=core.add_node("molecule_global_set_scale_x",json.dumps({"value":2}))
