@@ -12,7 +12,7 @@ from .core import CoreSession
 class StructureCanvas(QWidget):
     """Artboard plus editor overlays; pan/zoom are workspace-only state."""
 
-    selectionChanged = pyqtSignal(list, list)
+    selectionChanged = pyqtSignal(list, list, list)
     transactionCommitted = pyqtSignal()
     hoverChanged = pyqtSignal(dict)
     zoomChanged = pyqtSignal(float)
@@ -33,7 +33,7 @@ class StructureCanvas(QWidget):
         self.final_effect = False
         self.preview_frame = 0
         self._depiction = self._svg = self._raster = self._onion_raster = None
-        self._selected_atoms, self._selected_bonds = [], []
+        self._selected_atoms, self._selected_bonds, self._selected_adornments = [], [], []
         self._hover = {"kind": "none", "id": ""}
         self._preview = {"active": False, "kind": "none"}
         self._panning = False
@@ -166,6 +166,10 @@ class StructureCanvas(QWidget):
     @property
     def selected_bonds(self):
         return list(self._selected_bonds)
+
+    @property
+    def selected_adornments(self):
+        return list(self._selected_adornments)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -374,6 +378,7 @@ class StructureCanvas(QWidget):
         if self._depiction:
             points = {item["id"]:item["center"] for item in self._depiction.get("atoms",[])}
             bonds={item["id"]:item for item in self._depiction.get("bonds",[])}
+            adornments={item["id"]:item["center"] for item in self._depiction.get("adornments",[])}
             # ChemDraw-style blue feedback follows the pointer.  Creation
             # tools do not leave their result selected; moving away therefore
             # removes the highlight immediately.
@@ -385,6 +390,11 @@ class StructureCanvas(QWidget):
                 painter.drawEllipse(QPointF(point["x"],point["y"]),10,10)
             elif hover_kind=="bond" and hover_id in bonds:
                 self._draw_bond_highlight(painter,bonds[hover_id])
+            elif hover_kind=="adornment" and hover_id in adornments:
+                point=adornments[hover_id]
+                painter.setPen(QPen(QColor(42,145,235),2))
+                painter.setBrush(QColor(42,145,235,38))
+                painter.drawEllipse(QPointF(point["x"],point["y"]),11,11)
             painter.setPen(QPen(QColor(42,145,235),2))
             painter.setBrush(QColor(42,145,235,38))
             for atom_id in self._selected_atoms:
@@ -394,6 +404,10 @@ class StructureCanvas(QWidget):
             for bond_id in self._selected_bonds:
                 if bond_id in bonds:
                     self._draw_bond_highlight(painter,bonds[bond_id])
+            for adornment_id in self._selected_adornments:
+                if adornment_id in adornments:
+                    point=adornments[adornment_id]
+                    painter.drawEllipse(QPointF(point["x"],point["y"]),11,11)
         if self._preview.get("active"):
             kind=self._preview.get("kind","none")
             start,current=self._preview.get("start"),self._preview.get("current")
@@ -449,9 +463,10 @@ class StructureCanvas(QWidget):
     def _consume(self,result):
         self._selected_atoms=list(result["selected_atoms"])
         self._selected_bonds=list(result["selected_bonds"])
+        self._selected_adornments=list(result["selected_adornments"])
         self._hover=dict(result["hover"])
         self._preview=result["preview"]
-        self.selectionChanged.emit(self._selected_atoms,self._selected_bonds)
+        self.selectionChanged.emit(self._selected_atoms,self._selected_bonds,self._selected_adornments)
         self.hoverChanged.emit(result["hover"])
         self.update()
 
@@ -495,7 +510,7 @@ class StructureCanvas(QWidget):
         self._sync_core_viewport()
         alt,control,shift=self._mods(event)
         result=self.session.pointer_move(event.position().x(),event.position().y(),alt,control,shift);self._consume(result)
-        if not self._gesture_active and self.session.can_direct_manipulate and result["hover"]["kind"] in ("atom","bond","molecule"):self.setCursor(Qt.CursorShape.SizeAllCursor)
+        if not self._gesture_active and self.session.can_direct_manipulate and result["hover"]["kind"] in ("atom","bond","adornment","molecule"):self.setCursor(Qt.CursorShape.SizeAllCursor)
         elif not self._gesture_active and result["hover"]["kind"]=="control":self.setCursor(Qt.CursorShape.CrossCursor)
         elif not self._panning:self.unsetCursor()
         if self._gesture_active:self.manipulationChanged.emit()
@@ -549,7 +564,7 @@ class StructureCanvas(QWidget):
             self.fit_all() if event.modifiers()&Qt.KeyboardModifier.ShiftModifier else self.fit_artboard();return
         if event.key() in (Qt.Key.Key_Delete,Qt.Key.Key_Backspace):
             if self.session.delete_selection():
-                self._selected_atoms.clear();self._selected_bonds.clear();self.selectionChanged.emit([],[])
+                self._selected_atoms.clear();self._selected_bonds.clear();self._selected_adornments.clear();self.selectionChanged.emit([],[],[])
                 self.request_refresh();self.transactionCommitted.emit()
             return
         if event.key()==Qt.Key.Key_Escape:

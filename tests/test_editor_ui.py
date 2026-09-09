@@ -554,6 +554,26 @@ def test_canvas_control_a_selects_all_alive_structure():
     value.close()
 
 
+def test_canvas_real_events_select_highlight_and_delete_formal_charge():
+    value=window();enable_structure(value);canvas=value.canvas;canvas._sync_core_viewport()
+    center=QPoint(canvas.width()//2,canvas.height()//2)
+    value._set_tool("atom_label");QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
+    atom=active_structure(value)["atoms"][0]
+    atom_center=next(item["center"] for item in value.session.depict(False)["atoms"] if item["id"]==atom["id"])
+    value._set_tool("charge_positive");QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(atom_center["x"]),round(atom_center["y"])));QApplication.processEvents()
+    charge=next(item for item in active_structure(value)["adornments"] if item["alive"])
+    charge_center=next(item["center"] for item in value.session.depict(False)["adornments"] if item["id"]==charge["id"])
+
+    value._set_tool("select_rectangle")
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(charge_center["x"]),round(charge_center["y"])));QApplication.processEvents()
+    assert canvas.selected_adornments==[charge["id"]]
+    canvas.setFocus();QTest.keyClick(canvas,Qt.Key.Key_Delete);QApplication.processEvents()
+    assert not next(item for item in active_structure(value)["adornments"] if item["id"]==charge["id"])["alive"]
+    QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    assert next(item for item in active_structure(value)["adornments"] if item["id"]==charge["id"])["alive"]
+    value.close()
+
+
 def test_canvas_control_drag_rect_selects_without_leaving_current_draw_tool():
     value=window();enable_structure(value);canvas=value.canvas;canvas._sync_core_viewport();value._set_tool("ring5")
     center=QPoint(canvas.width()//2,canvas.height()//2);QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()

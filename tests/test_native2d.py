@@ -718,6 +718,85 @@ def test_formal_charge_uses_one_fixed_twenty_unit_radius():
     assert math.isclose(math.hypot(dragged["x"],dragged["y"]),20,rel_tol=1e-9)
 
 
+def test_formal_charge_is_a_complete_selectable_deletable_structure_object():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
+    gesture(core,"charge_positive",canvas_point(core,atom["id"]));charge=adornments(core)[0]
+    center=core.depict(False)["adornments"][0]["center"]
+
+    core.set_tool("select_rectangle")
+    selected=core.pointer_down(center["x"],center["y"])
+    selected=core.pointer_up(center["x"],center["y"])
+    assert selected["selected_adornments"]==[charge["id"]]
+    assert core.delete_selection()
+    assert not next(item for item in adornments(core) if item["id"]==charge["id"])["alive"]
+    assert core.undo()
+    assert next(item for item in adornments(core) if item["id"]==charge["id"])["alive"]
+    assert core.redo()
+    assert not next(item for item in adornments(core) if item["id"]==charge["id"])["alive"]
+    assert core.undo()
+    center=next(item["center"] for item in core.depict(False)["adornments"] if item["id"]==charge["id"])
+    before=next(item for item in adornments(core) if item["id"]==charge["id"])
+    core.set_tool("move");core.pointer_down(center["x"],center["y"]);core.pointer_move(center["x"]+10,center["y"])
+    assert core.pointer_up(center["x"]+10,center["y"])["changed"]
+    moved=next(item for item in adornments(core) if item["id"]==charge["id"])
+    assert math.isclose(moved["x"],before["x"]+10,abs_tol=1e-9)
+    center=next(item["center"] for item in core.depict(False)["adornments"] if item["id"]==charge["id"])
+    core.set_tool("charge_negative");core.pointer_down(center["x"],center["y"])
+    assert core.pointer_up(center["x"],center["y"])["changed"]
+    assert next(item for item in adornments(core) if item["id"]==charge["id"])["text"]=="⊖"
+
+
+def test_eraser_ctrl_a_rectangle_and_lasso_include_formal_charges():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
+    gesture(core,"charge_positive",canvas_point(core,atom["id"]));charge=adornments(core)[0]
+    center=core.depict(False)["adornments"][0]["center"]
+    selected=core.select_all();assert selected["selected_adornments"]==[charge["id"]]
+
+    core.set_tool("select_rectangle")
+    core.pointer_down(center["x"]-12,center["y"]-12)
+    rectangle=core.pointer_up(center["x"]+12,center["y"]+12)
+    assert rectangle["selected_adornments"]==[charge["id"]]
+
+    core.set_tool("select_lasso")
+    polygon=[(center["x"]-12,center["y"]-12),(center["x"]+12,center["y"]-12),
+             (center["x"]+12,center["y"]+12),(center["x"]-12,center["y"]+12)]
+    core.pointer_down(*polygon[0])
+    for point in polygon[1:]:core.pointer_move(*point)
+    lasso=core.pointer_up(*polygon[-1])
+    assert lasso["selected_adornments"]==[charge["id"]]
+
+    core.set_tool("eraser");core.pointer_down(center["x"],center["y"])
+    assert core.pointer_up(center["x"],center["y"])["changed"]
+    assert not next(item for item in adornments(core) if item["id"]==charge["id"])["alive"]
+
+
+def test_gradient_charge_addition_and_deletion_crossfade_without_exposing_ids():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
+    gesture(core,"charge_positive",canvas_point(core,atom["id"]));existing=adornments(core)[0]
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":core.active_molecule,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient)
+    center=core.depict(False)["adornments"][0]["center"]
+    core.set_tool("select_rectangle");core.pointer_down(center["x"],center["y"]);core.pointer_up(center["x"],center["y"])
+    assert core.delete_selection()
+    gesture(core,"charge_negative",canvas_point(core,atom["id"]));added=next(item for item in adornments(core) if item["alive"])
+
+    middle=next(item for item in core.evaluated_project(15)["molecules"] if item["id"]==core.active_molecule)
+    old_mid=next(item for item in middle["adornments"] if item["id"]==existing["id"])
+    new_mid=next(item for item in middle["adornments"] if item["id"]==added["id"])
+    assert 120<=old_mid["alpha"]<=135 and 120<=new_mid["alpha"]<=135
+    end=next(item for item in core.evaluated_project(30)["molecules"] if item["id"]==core.active_molecule)
+    assert not any(item["id"]==existing["id"] and item["alive"] for item in end["adornments"])
+    assert next(item for item in end["adornments"] if item["id"]==added["id"])["alpha"]==255
+    summary=core.gradient_summary(gradient)
+    assert summary["added_adornments"]==1 and summary["deleted_objects"]==1
+    saved=core.json();restored=CoreSession();restored.replace_json(saved)
+    restored_middle=next(item for item in restored.evaluated_project(15)["molecules"] if item["id"]==core.active_molecule)
+    assert next(item for item in restored_middle["adornments"] if item["id"]==existing["id"])["alpha"]==old_mid["alpha"]
+    assert next(item for item in restored_middle["adornments"] if item["id"]==added["id"])["alpha"]==new_mid["alpha"]
+    assert "LerpStructure" in restored.generate_lua()
+    assert restored.depict_at(15,True)["rgba"]
+
+
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
     core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=structure(core)
     left,right=molecule["atoms"][0],molecule["atoms"][1]

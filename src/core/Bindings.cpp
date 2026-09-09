@@ -36,7 +36,7 @@ py::dict hit(const core::Hit& value) {
 
 py::dict editResult(const core::EditResult& value) {
     py::dict result; result["changed"] = value.changed; result["message"] = value.message;
-    result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds;
+    result["hover"] = hit(value.hover); result["selected_atoms"] = value.selectedAtoms; result["selected_bonds"] = value.selectedBonds; result["selected_adornments"] = value.selectedAdornments;
     static constexpr const char* previewNames[]={"none","rectangle","lasso","bond","ring","adornment","text","move","pan","arrow_curve"};
     py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
@@ -148,6 +148,7 @@ public:
         py::dict transform; transform["origin"] = point(depiction.modelOrigin); transform["pixels_per_unit"] = depiction.modelScale; result["transform"] = transform;
         py::list atoms; for (const auto& atom : depiction.atoms) { py::dict item; item["id"] = atom.id; item["center"] = point(atom.center); item["bounds"] = py::make_tuple(atom.labelBounds.left,atom.labelBounds.top,atom.labelBounds.right,atom.labelBounds.bottom); atoms.append(item); } result["atoms"] = atoms;
         py::list bonds; for (const auto& bond : depiction.bonds) { py::dict item; item["id"] = bond.id; item["first"] = point(bond.first); item["second"] = point(bond.second); item["type"] = core::toString(bond.type); item["secondary_line_side"] = core::toString(bond.secondaryLineSide); item["stereo"] = core::toString(bond.stereo); item["line_spacing"] = bond.lineSpacing; item["first_extensions"] = py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension); item["second_extensions"] = py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension); py::list polygon; for (auto value : bond.hitPolygon) polygon.append(point(value)); item["hit_polygon"] = polygon; bonds.append(item); } result["bonds"] = bonds;
+        py::list adornments;for(const auto& adornment:depiction.adornments){py::dict item;item["id"]=adornment.id;item["atom"]=adornment.atomId;item["center"]=point(adornment.center);adornments.append(item);}result["adornments"]=adornments;
         if (finalEffect) { const auto raster = depiction_.rasterize(depiction); result["rgba"] = py::bytes(reinterpret_cast<const char*>(raster.rgba.data()), raster.rgba.size()); } else result["rgba"] = py::none();
         return result;
     }
@@ -243,12 +244,13 @@ public:
                     if(finalEffect)composite.svg.append("</g>\n");
                 }
             }
-            if(id==session_.activeMoleculeId()){composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;}
+            if(id==session_.activeMoleculeId()){composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.adornments=depiction.adornments;composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;}
         }
         composite.svg+="</svg>";
         py::dict result; result["width"] = composite.width; result["height"] = composite.height; result["svg"] = composite.svg;
         py::list atoms; for (const auto& atom : composite.atoms) { py::dict item; item["id"] = atom.id; item["center"] = point(atom.center); atoms.append(item); } result["atoms"] = atoms;
         py::list bonds;for(const auto& bond:composite.bonds){py::dict item;item["id"]=bond.id;item["first"]=point(bond.first);item["second"]=point(bond.second);item["type"]=core::toString(bond.type);item["secondary_line_side"]=core::toString(bond.secondaryLineSide);item["stereo"]=core::toString(bond.stereo);item["line_spacing"]=bond.lineSpacing;item["first_extensions"]=py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension);item["second_extensions"]=py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension);bonds.append(item);}result["bonds"]=bonds;
+        py::list adornments;for(const auto& adornment:composite.adornments){py::dict item;item["id"]=adornment.id;item["atom"]=adornment.atomId;item["center"]=point(adornment.center);adornments.append(item);}result["adornments"]=adornments;
         if (finalEffect) { const auto raster = depiction_.rasterize(composite); result["rgba"] = py::bytes(reinterpret_cast<const char*>(raster.rgba.data()), raster.rgba.size()); } else result["rgba"] = py::none();
         return result;
     }

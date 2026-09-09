@@ -148,6 +148,7 @@ struct Molecule {
                                            Point offset, std::uint64_t creationSerial = 0);
     bool removeAtom(const std::string& stableId);
     bool removeBond(const std::string& stableId);
+    bool removeAdornment(const std::string& stableId);
     void validateIds() const;
 };
 

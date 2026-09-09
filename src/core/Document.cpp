@@ -183,6 +183,12 @@ bool Molecule::removeBond(const std::string& stableId) {
     value->alive = false;
     return true;
 }
+bool Molecule::removeAdornment(const std::string& stableId) {
+    AtomAdornment* value = adornment(stableId);
+    if (!value || !value->alive) return false;
+    value->alive = false;
+    return true;
+}
 void Molecule::validateIds() const {
     std::set<std::string> atomIds;
     for (const Atom& value : atoms) {

@@ -220,7 +220,7 @@ class MainWindow(QMainWindow):
         node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
         current=self.node_list.current_id()
         if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
-    def _selection(self,atoms,bonds):pass
+    def _selection(self,atoms,bonds,adornments):pass
     def _sync_inspector_values(self):
         if self.inspector_panel.isVisible():self.inspector.sync_values()
     def _delete_focused(self):

@@ -30,6 +30,12 @@ struct BondGeometry {
     double secondPositiveExtension = 0.0;
 };
 
+struct AdornmentGeometry {
+    std::string id;
+    std::string atomId;
+    Point center;
+};
+
 struct DepictionResult {
     int width = 0;
     int height = 0;
@@ -39,6 +45,7 @@ struct DepictionResult {
     Rect viewBox;
     std::vector<AtomGeometry> atoms;
     std::vector<BondGeometry> bonds;
+    std::vector<AdornmentGeometry> adornments;
 };
 
 struct RasterResult {

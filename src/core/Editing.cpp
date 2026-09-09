@@ -295,6 +295,7 @@ struct EditorSession::Impl {
     Viewport viewport;
     std::set<std::string> selectedAtoms;
     std::set<std::string> selectedBonds;
+    std::set<std::string> selectedAdornments;
     EditTargetKind targetKind = EditTargetKind::TimelinePreview;
     std::string targetId;
     int previewFrame = 0;
@@ -319,6 +320,7 @@ struct EditorSession::Impl {
         std::map<std::string, Point> originalAdornments;
         std::set<std::string> erasedAtoms;
         std::set<std::string> erasedBonds;
+        std::set<std::string> erasedAdornments;
         std::string previewText;
         std::optional<std::string> snapAtomId;
         GesturePreviewKind previewKind = GesturePreviewKind::None;
@@ -438,7 +440,7 @@ struct EditorSession::Impl {
             if(!project.nodes.empty()){targetKind=EditTargetKind::ScriptNode;targetId=project.nodes.front().id;}
             else{targetKind=EditTargetKind::TimelinePreview;targetId.clear();}
             tool=Tool::SelectRectangle;structureDraft.reset();
-            gesture.reset();selectedAtoms.clear();selectedBonds.clear();
+            gesture.reset();selectedAtoms.clear();selectedBonds.clear();selectedAdornments.clear();
         }
     }
 
@@ -633,6 +635,7 @@ struct EditorSession::Impl {
         value.hover = hit(canvasPoint);
         value.selectedAtoms.assign(selectedAtoms.begin(), selectedAtoms.end());
         value.selectedBonds.assign(selectedBonds.begin(), selectedBonds.end());
+        value.selectedAdornments.assign(selectedAdornments.begin(), selectedAdornments.end());
         if (gesture) {
             value.preview.active = true;
             value.preview.kind = gesture->previewKind;
@@ -855,7 +858,7 @@ EditorSession& EditorSession::operator=(EditorSession&&) noexcept = default;
 Project& EditorSession::project() { return impl_->project; }
 const Project& EditorSession::project() const { return impl_->project; }
 void EditorSession::replaceProject(Project project) { impl_ = std::make_unique<Impl>(); impl_->project = std::move(project); impl_->project.ensureDefaultNodes(); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
-void EditorSession::setActiveMolecule(const std::string& stableId) { if (!impl_->project.molecule(stableId)) throw std::runtime_error("Unknown molecule: " + stableId); impl_->activeMolecule = stableId; impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
+void EditorSession::setActiveMolecule(const std::string& stableId) { if (!impl_->project.molecule(stableId)) throw std::runtime_error("Unknown molecule: " + stableId); impl_->activeMolecule = stableId; impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); impl_->selectedAdornments.clear(); }
 std::string EditorSession::activeMoleculeId() const { return impl_->activeMolecule; }
 void EditorSession::setTool(Tool tool) {
     impl_->tool = tool;
@@ -863,6 +866,7 @@ void EditorSession::setTool(Tool tool) {
     if (tool != Tool::SelectRectangle && tool != Tool::SelectLasso && tool != Tool::Move) {
         impl_->selectedAtoms.clear();
         impl_->selectedBonds.clear();
+        impl_->selectedAdornments.clear();
     }
 }
 Tool EditorSession::tool() const { return impl_->tool; }
@@ -971,9 +975,6 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     }
     if (impl_->tool == Tool::SelectLasso) gesture.lasso.push_back(canvasPoint);
     if(gesture.startHit.kind==HitKind::Control){gesture.previewKind=GesturePreviewKind::Move;gesture.original[gesture.startHit.id]=impl_->viewport.canvasToModel(canvasPoint);}
-    if(gesture.startHit.kind==HitKind::Adornment&&(impl_->tool==Tool::SelectRectangle||impl_->tool==Tool::SelectLasso||impl_->tool==Tool::Move)){
-        const Molecule shown=impl_->displayed();if(const AtomAdornment* value=shown.adornment(gesture.startHit.id))gesture.originalAdornments[value->id]=value->offset;
-    }
     if (impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) {
         if (gesture.startHit.kind == HitKind::Atom) {
             if (control) {
@@ -981,15 +982,20 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
             } else if (shift) {
                 impl_->selectedAtoms.insert(gesture.startHit.id);
             } else if (!impl_->selectedAtoms.contains(gesture.startHit.id)) {
-                impl_->selectedAtoms = {gesture.startHit.id}; impl_->selectedBonds.clear();
+                impl_->selectedAtoms = {gesture.startHit.id}; impl_->selectedBonds.clear(); impl_->selectedAdornments.clear();
             }
             if (impl_->targetKind != EditTargetKind::TimelinePreview) { const Molecule shown=impl_->validStructureContext()?*impl_->editableMolecule():impl_->displayed(); for (const std::string& id : impl_->selectedAtoms) if (const Atom* atom = shown.atom(id)) gesture.original[id] = atom->position; }
         } else if(gesture.startHit.kind==HitKind::Bond){
             if(control){if(impl_->selectedBonds.contains(gesture.startHit.id))impl_->selectedBonds.erase(gesture.startHit.id);else impl_->selectedBonds.insert(gesture.startHit.id);}
             else if(shift)impl_->selectedBonds.insert(gesture.startHit.id);
-            else if(!impl_->selectedBonds.contains(gesture.startHit.id)){impl_->selectedAtoms.clear();impl_->selectedBonds={gesture.startHit.id};}
+            else if(!impl_->selectedBonds.contains(gesture.startHit.id)){impl_->selectedAtoms.clear();impl_->selectedBonds={gesture.startHit.id};impl_->selectedAdornments.clear();}
             if(impl_->targetKind!=EditTargetKind::TimelinePreview){const Molecule shown=impl_->validStructureContext()?*impl_->editableMolecule():impl_->displayed();for(const std::string& id:impl_->selectedAtoms)if(const Atom* atom=shown.atom(id))gesture.original[id]=atom->position;for(const std::string& id:impl_->selectedBonds)if(const Bond* bond=shown.bond(id))for(const std::string* atomId:{&bond->atomA,&bond->atomB})if(const Atom* atom=shown.atom(*atomId))gesture.original[atom->id]=atom->position;}
-        } else if (!control && !shift) { impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
+        } else if(gesture.startHit.kind==HitKind::Adornment){
+            if(control){if(impl_->selectedAdornments.contains(gesture.startHit.id))impl_->selectedAdornments.erase(gesture.startHit.id);else impl_->selectedAdornments.insert(gesture.startHit.id);}
+            else if(shift)impl_->selectedAdornments.insert(gesture.startHit.id);
+            else if(!impl_->selectedAdornments.contains(gesture.startHit.id)){impl_->selectedAtoms.clear();impl_->selectedBonds.clear();impl_->selectedAdornments={gesture.startHit.id};}
+            if(impl_->targetKind!=EditTargetKind::TimelinePreview){const Molecule shown=impl_->validStructureContext()?*impl_->editableMolecule():impl_->displayed();for(const std::string& id:impl_->selectedAdornments)if(const AtomAdornment* value=shown.adornment(id))gesture.originalAdornments[id]=value->offset;}
+        } else if (!control && !shift) { impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); impl_->selectedAdornments.clear(); }
     }
     if(impl_->targetKind==EditTargetKind::ScriptNode){
         gesture.original.clear();gesture.originalAdornments.clear();const ScriptNode* node=impl_->project.node(impl_->targetId);const json params=node?json::parse(node->paramsJson):json::object();
@@ -1016,6 +1022,8 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
             impl_->gesture->changed |= molecule->removeAtom(hit.id);
         else if (hit.kind == HitKind::Bond && impl_->gesture->erasedBonds.insert(hit.id).second)
             impl_->gesture->changed |= molecule->removeBond(hit.id);
+        else if (hit.kind == HitKind::Adornment && impl_->gesture->erasedAdornments.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeAdornment(hit.id);
     }
     return impl_->result(canvasPoint);
 }
@@ -1121,6 +1129,8 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             impl_->gesture->changed |= molecule->removeAtom(hit.id);
         else if (hit.kind == HitKind::Bond && impl_->gesture->erasedBonds.insert(hit.id).second)
             impl_->gesture->changed |= molecule->removeBond(hit.id);
+        else if (hit.kind == HitKind::Adornment && impl_->gesture->erasedAdornments.insert(hit.id).second)
+            impl_->gesture->changed |= molecule->removeAdornment(hit.id);
     }
     return impl_->result(canvasPoint);
 }
@@ -1169,10 +1179,12 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         if (!control) impl_->selectedAtoms.clear();
         for (const Atom& atom : molecule->atoms) if (atom.alive && Rect{left, top, right, bottom}.contains(impl_->editToCanvas(atom.position))) impl_->selectedAtoms.insert(atom.id);
         if(!control)impl_->selectedBonds.clear();for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
+        if(!control)impl_->selectedAdornments.clear();for(const AtomAdornment& adornment:molecule->adornments)if(adornment.alive){const Atom* owner=molecule->atom(adornment.atomId);if(owner&&owner->alive&&Rect{left,top,right,bottom}.contains(impl_->editToCanvas({owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y})))impl_->selectedAdornments.insert(adornment.id);}
     } else if (impl_->tool == Tool::SelectLasso && impl_->gesture->original.empty() && impl_->gesture->originalAdornments.empty() && impl_->gesture->lasso.size() >= 3) {
         if (!control) impl_->selectedAtoms.clear();
         for (const Atom& atom : molecule->atoms) if (atom.alive && pointInPolygon(impl_->editToCanvas(atom.position), impl_->gesture->lasso)) impl_->selectedAtoms.insert(atom.id);
         if(!control)impl_->selectedBonds.clear();for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
+        if(!control)impl_->selectedAdornments.clear();for(const AtomAdornment& adornment:molecule->adornments)if(adornment.alive){const Atom* owner=molecule->atom(adornment.atomId);if(owner&&owner->alive&&pointInPolygon(impl_->editToCanvas({owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y}),impl_->gesture->lasso))impl_->selectedAdornments.insert(adornment.id);}
     } else if (isBondTool(impl_->tool)) {
         const auto [type, stereo] = bondStyle(impl_->tool);
         if (impl_->gesture->startHit.kind == HitKind::Bond && distance(impl_->gesture->startCanvas, canvasPoint) < 5.0) {
@@ -1277,6 +1289,11 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
                 {endpoint.x-owner->position.x,endpoint.y-owner->position.y},
                 impl_->project.allocateCreationSerial());
             impl_->gesture->changed = !id.empty();
+        } else if(impl_->gesture->startHit.kind==HitKind::Adornment) {
+            if(AtomAdornment* value=molecule->adornment(impl_->gesture->startHit.id)){
+                const std::string text=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
+                if(value->text!=text){value->text=text;impl_->gesture->changed=true;}
+            }
         }
     }
     const bool changed = impl_->gesture->changed;
@@ -1302,10 +1319,13 @@ void EditorSession::cancelGesture() { if (impl_->gesture) { const auto high=impl
 EditResult EditorSession::selectAll() {
     impl_->selectedAtoms.clear();
     impl_->selectedBonds.clear();
+    impl_->selectedAdornments.clear();
     if (const Molecule* molecule=impl_->editableMolecule()) {
         for (const Atom& atom:molecule->atoms) if (atom.alive) impl_->selectedAtoms.insert(atom.id);
         for (const Bond& bond:molecule->bonds) if (bond.alive&&bond.visible)
             impl_->selectedBonds.insert(bond.id);
+        for (const AtomAdornment& adornment:molecule->adornments) if (adornment.alive)
+            impl_->selectedAdornments.insert(adornment.id);
     }
     return impl_->result({-1e9,-1e9});
 }
@@ -1314,8 +1334,9 @@ bool EditorSession::deleteSelection() {
     Molecule* molecule = impl_->editableMolecule(); if (!molecule) return false;
     Project before = impl_->project; bool changed = false;
     for (const std::string& id : impl_->selectedBonds) changed |= molecule->removeBond(id);
+    for (const std::string& id : impl_->selectedAdornments) changed |= molecule->removeAdornment(id);
     for (const std::string& id : impl_->selectedAtoms) changed |= molecule->removeAtom(id);
-    if (changed) { impl_->flushStructureDraft();impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); }
+    if (changed) { impl_->flushStructureDraft();impl_->undo.push_back({std::move(before), impl_->project, Impl::SnapshotDomain::Structure}); impl_->redo.clear(); impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); impl_->selectedAdornments.clear(); }
     return changed;
 }
 bool EditorSession::setAtomPosition(const std::string& atomId, Point position) {
@@ -1708,9 +1729,10 @@ EditResult EditorSession::selectConnectedComponent(const std::string& atomId,boo
     }
     std::map<std::string,std::vector<std::string>> neighbours;for(const Atom& atom:topology->atoms)if(atom.alive)neighbours[atom.id];
     for(const Bond& bond:topology->bonds)if(bond.alive&&neighbours.contains(bond.atomA)&&neighbours.contains(bond.atomB)){neighbours[bond.atomA].push_back(bond.atomB);neighbours[bond.atomB].push_back(bond.atomA);}
-    if(!additive){impl_->selectedAtoms.clear();impl_->selectedBonds.clear();}
+    if(!additive){impl_->selectedAtoms.clear();impl_->selectedBonds.clear();impl_->selectedAdornments.clear();}
     std::set<std::string> visited;std::vector<std::string> pending{atomId};while(!pending.empty()){const std::string id=pending.back();pending.pop_back();if(!visited.insert(id).second)continue;impl_->selectedAtoms.insert(id);for(const std::string& next:neighbours[id])pending.push_back(next);}
     for(const Bond& bond:molecule->bonds)if(bond.alive&&impl_->selectedAtoms.contains(bond.atomA)&&impl_->selectedAtoms.contains(bond.atomB))impl_->selectedBonds.insert(bond.id);
+    for(const AtomAdornment& adornment:molecule->adornments)if(adornment.alive&&impl_->selectedAtoms.contains(adornment.atomId))impl_->selectedAdornments.insert(adornment.id);
     return impl_->result({});
 }
 bool EditorSession::updateScene(const std::string& sceneJson) {

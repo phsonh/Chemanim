@@ -72,6 +72,7 @@ struct EditResult {
     GesturePreview preview;
     std::vector<std::string> selectedAtoms;
     std::vector<std::string> selectedBonds;
+    std::vector<std::string> selectedAdornments;
 };
 
 struct DirectControl {

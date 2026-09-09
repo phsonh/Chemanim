@@ -526,6 +526,15 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
                                     extension(modelB,false,-1.0),extension(modelB,false,1.0)});
         }
     }
+    result.adornments.reserve(molecule.adornments.size());
+    for(const AtomAdornment& adornment:molecule.adornments){
+        const Atom* owner=molecule.atom(adornment.atomId);
+        if(!adornment.alive||!owner||!owner->alive)continue;
+        const auto raw=drawer.getDrawCoords(RDGeom::Point2D(
+            owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y));
+        result.adornments.push_back({adornment.id,adornment.atomId,
+            {(raw.x-viewLeft)*uniformScale,(raw.y-viewTop)*uniformScale}});
+    }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     unsigned labelIndex=0;
     for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
