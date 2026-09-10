@@ -232,18 +232,11 @@ std::optional<RingSnapDirection> ringSnapDirection(const Molecule& molecule,
     }
     return best;
 }
-struct RingVertexConstraint {
-    std::string neighbour;
-    std::vector<Point> candidates;
-    int size = 0;
+struct RingCycle {
+    std::vector<std::string> atoms;
 };
-std::optional<RingVertexConstraint> ringVertexConstraint(
-    const Molecule& molecule, const std::string& pivotId,
-    const std::set<std::string>& movingAtoms) {
-    // A normal click selects only the atom being dragged.  In that path the
-    // selected-only ring detector cannot see the rest of the ring, so locate
-    // the shortest cycle containing the moving vertex in the complete graph.
-    if (movingAtoms.size() != 1 || !movingAtoms.contains(pivotId)) return std::nullopt;
+std::optional<RingCycle> shortestRingContaining(
+    const Molecule& molecule, const std::string& pivotId) {
     const Atom* pivot = molecule.atom(pivotId);
     if (!pivot || !pivot->alive) return std::nullopt;
     std::map<std::string, std::set<std::string>> graph;
@@ -257,37 +250,89 @@ std::optional<RingVertexConstraint> ringVertexConstraint(
     const auto found = graph.find(pivotId);
     if (found == graph.end() || found->second.size() < 2) return std::nullopt;
     const std::vector<std::string> neighbours(found->second.begin(), found->second.end());
-    std::optional<RingVertexConstraint> best;
+    std::optional<RingCycle> best;
     for (std::size_t firstIndex = 0; firstIndex < neighbours.size(); ++firstIndex) {
         for (std::size_t secondIndex = firstIndex + 1; secondIndex < neighbours.size(); ++secondIndex) {
             const std::string& first = neighbours[firstIndex];
             const std::string& second = neighbours[secondIndex];
-            std::queue<std::pair<std::string, int>> pending;
-            pending.push({first, 0});
+            std::queue<std::string> pending;
+            pending.push(first);
             std::set<std::string> visited{pivotId, first};
-            int pathEdges = -1;
+            std::map<std::string, std::string> parent;
+            bool reached = false;
             while (!pending.empty()) {
-                const auto [id, depth] = pending.front();
+                const std::string id = pending.front();
                 pending.pop();
                 if (id == second) {
-                    pathEdges = depth;
+                    reached = true;
                     break;
                 }
                 for (const std::string& next : graph[id])
-                    if (visited.insert(next).second) pending.push({next, depth + 1});
+                    if (visited.insert(next).second) {
+                        parent[next] = id;
+                        pending.push(next);
+                    }
             }
-            if (pathEdges < 1) continue;
-            const int ringSize = pathEdges + 2;
-            const Atom* firstAtom = molecule.atom(first);
-            const Atom* secondAtom = molecule.atom(second);
-            if (!firstAtom || !secondAtom) continue;
-            std::vector<Point> candidates = circleIntersections(
-                firstAtom->position, molecule.referenceBondLength,
-                secondAtom->position, molecule.referenceBondLength);
-            if (candidates.empty()) continue;
-            RingVertexConstraint candidate{first, std::move(candidates), ringSize};
-            if (!best || candidate.size < best->size) best = std::move(candidate);
+            if (!reached) continue;
+            std::vector<std::string> path;
+            for (std::string id = second;; id = parent.at(id)) {
+                path.push_back(id);
+                if (id == first) break;
+            }
+            std::reverse(path.begin(), path.end());
+            std::vector<std::string> cycle{pivotId};
+            cycle.insert(cycle.end(), path.begin(), path.end());
+            if (!best || cycle.size() < best->atoms.size()) best = RingCycle{std::move(cycle)};
         }
+    }
+    return best;
+}
+struct RegularRingFit {
+    std::map<std::string, Point> positions;
+    double error = 0.0;
+};
+std::optional<RegularRingFit> regularRingAtPivot(
+    const Molecule& molecule, const RingCycle& cycle, Point pivotTarget) {
+    const std::size_t count = cycle.atoms.size();
+    if (count < 3 || molecule.referenceBondLength <= 1e-9) return std::nullopt;
+    const Atom* pivot = molecule.atom(cycle.atoms.front());
+    if (!pivot || !pivot->alive) return std::nullopt;
+    const double step = 2.0 * std::numbers::pi / static_cast<double>(count);
+    const double radius = molecule.referenceBondLength / (2.0 * std::sin(std::numbers::pi / static_cast<double>(count)));
+    std::optional<RegularRingFit> best;
+    // Search both cyclic orientations.  For each one, solve the least-squares
+    // rotation around the user-controlled pivot.  This makes every side and
+    // every interior angle exact; it does not merely constrain the two bonds
+    // incident to the dragged atom.
+    for (const double direction : {1.0, -1.0}) {
+        std::vector<Point> offsets(count);
+        double dot = 0.0, cross = 0.0;
+        for (std::size_t index = 1; index < count; ++index) {
+            const double angle = direction * step * static_cast<double>(index);
+            offsets[index] = {radius * (std::cos(angle) - 1.0), radius * std::sin(angle)};
+            const Atom* atom = molecule.atom(cycle.atoms[index]);
+            if (!atom || !atom->alive) return std::nullopt;
+            const Point observed{atom->position.x - pivot->position.x,
+                                 atom->position.y - pivot->position.y};
+            dot += offsets[index].x * observed.x + offsets[index].y * observed.y;
+            cross += offsets[index].x * observed.y - offsets[index].y * observed.x;
+        }
+        const double rotation = std::atan2(cross, dot);
+        const double c = std::cos(rotation), s = std::sin(rotation);
+        RegularRingFit fit;
+        for (std::size_t index = 0; index < count; ++index) {
+            const Point offset{offsets[index].x * c - offsets[index].y * s,
+                               offsets[index].x * s + offsets[index].y * c};
+            const Point target{pivotTarget.x + offset.x, pivotTarget.y + offset.y};
+            fit.positions[cycle.atoms[index]] = target;
+            const Atom* atom = molecule.atom(cycle.atoms[index]);
+            const Point translatedOriginal{atom->position.x + pivotTarget.x - pivot->position.x,
+                                           atom->position.y + pivotTarget.y - pivot->position.y};
+            const double dx = target.x - translatedOriginal.x;
+            const double dy = target.y - translatedOriginal.y;
+            fit.error += dx * dx + dy * dy;
+        }
+        if (!best || fit.error < best->error) best = std::move(fit);
     }
     return best;
 }
@@ -1190,6 +1235,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
         Point delta{current.x - impl_->gesture->pressModel.x, current.y - impl_->gesture->pressModel.y};
         std::optional<Point> rigidCenter;
         double rigidAngle = 0.0;
+        std::optional<RegularRingFit> regularRingFit;
         ScriptNode* directNode=impl_->targetKind==EditTargetKind::ScriptNode?impl_->project.node(impl_->targetId):nullptr;
         if(directNode&&(directNode->type=="molecule_set_x"||directNode->type=="molecule_lerp_x"))delta.y=0.0;
         if(directNode&&(directNode->type=="molecule_set_y"||directNode->type=="molecule_lerp_y"))delta.x=0.0;
@@ -1217,24 +1263,21 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             const double maximumBondPixels=bondLength*std::max(std::abs(transform.scaleX),std::abs(transform.scaleY))*impl_->viewport.pixelsPerUnit;
             const double ringSnapRadiusPixels=std::max(snapRadiusPixels,maximumBondPixels*.35);
             double nearest=ringSnapRadiusPixels;std::optional<Point> snapped;std::string snapText;
-            const auto movingRing=ringSnapDirection(*molecule,impl_->gesture->startHit.id,impl_->selectedAtoms,true);
-            // When the user drags one vertex of an existing ring, constrain it
-            // against both ring neighbours.  The two-circle intersection is
-            // the exact regular-ring vertex; a 15-degree lattice cannot
-            // represent pentagons, heptagons or nonagons exactly.
-            if (const auto vertexRing = ringVertexConstraint(
-                    *molecule, impl_->gesture->startHit.id, impl_->selectedAtoms)) {
-                for (const Point candidate : vertexRing->candidates) {
-                    const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
-                    if (screenDistance < nearest) {
-                        nearest = screenDistance;
-                        snapped = candidate;
-                        impl_->gesture->snapAtomId = vertexRing->neighbour;
-                        snapText = std::to_string(vertexRing->size) +
-                                   "元环 · 顶点吸附 · 1.00×键长";
-                    }
-                }
-            }
+            // Geometry must be calculated from the immutable gesture start.
+            // Earlier pointer moves may already have changed the private end
+            // snapshot, and feeding that partial result back into the snap
+            // solver makes the ring drift and visibly deform.
+            const Molecule& gestureMolecule=impl_->gesture->draftBefore
+                ? *impl_->gesture->draftBefore : *molecule;
+            const auto movingRing=ringSnapDirection(gestureMolecule,impl_->gesture->startHit.id,impl_->selectedAtoms,true);
+            const auto cycle=shortestRingContaining(gestureMolecule,impl_->gesture->startHit.id);
+            const bool singleRingVertex=cycle&&impl_->selectedAtoms.size()==1&&
+                impl_->selectedAtoms.contains(impl_->gesture->startHit.id);
+            const bool selectedWholeRing=cycle&&std::all_of(cycle->atoms.begin(),cycle->atoms.end(),
+                [&](const std::string& id){return impl_->selectedAtoms.contains(id);});
+            const auto belongsToDraggedRing=[&](const std::string& id){
+                return cycle&&std::find(cycle->atoms.begin(),cycle->atoms.end(),id)!=cycle->atoms.end();
+            };
             // Once the user has drawn the first cross-component bond, use it
             // as a fixed docking pivot.  The second atom is placed at the
             // intersection of (a) its rigid distance from that pivot and
@@ -1247,7 +1290,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             };
             std::optional<DockAnchor> dockAnchor;
             if (movingRing) {
-                for (const Bond& bond : molecule->bonds) {
+                for (const Bond& bond : gestureMolecule.bonds) {
                     if (!bond.alive) continue;
                     const bool aMoving = impl_->selectedAtoms.contains(bond.atomA);
                     const bool bMoving = impl_->selectedAtoms.contains(bond.atomB);
@@ -1256,7 +1299,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                     const std::string& stationaryId = aMoving ? bond.atomB : bond.atomA;
                     if (movingId == impl_->gesture->startHit.id) continue;
                     const auto movingPosition = impl_->gesture->original.find(movingId);
-                    const Atom* stationaryAtom = molecule->atom(stationaryId);
+                    const Atom* stationaryAtom = gestureMolecule.atom(stationaryId);
                     if (movingPosition != impl_->gesture->original.end() &&
                         stationaryAtom && stationaryAtom->alive) {
                         dockAnchor = DockAnchor{movingPosition->second, stationaryId};
@@ -1267,7 +1310,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             if (!snapped && dockAnchor) {
                 const double pivotRadius = distance(dockAnchor->moving, pivot->second);
                 if (pivotRadius > 1e-9) {
-                    for (const Atom& stationary : molecule->atoms) {
+                    for (const Atom& stationary : gestureMolecule.atoms) {
                         if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id) ||
                             stationary.id == dockAnchor->stationaryId)
                             continue;
@@ -1295,8 +1338,9 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             // bisector.  They deliberately take precedence over the global
             // 15-degree lattice whenever the pointer is close enough.
             if (!snapped) {
-                for (const Atom& stationary : molecule->atoms) {
-                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id)) continue;
+                for (const Atom& stationary : gestureMolecule.atoms) {
+                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id) ||
+                        (singleRingVertex&&belongsToDraggedRing(stationary.id))) continue;
                     const auto considerRing = [&](Point candidate, int ringSize) {
                         const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
                         if (screenDistance < nearest) {
@@ -1313,7 +1357,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                     if (distance(canvasPoint, candidateToCanvas(stationary.position)) <=
                         maximumBondPixels + snapRadiusPixels) {
                         if (const auto stationaryRing = ringSnapDirection(
-                                *molecule, stationary.id, impl_->selectedAtoms, false))
+                                gestureMolecule, stationary.id, impl_->selectedAtoms, false))
                             considerRing({stationary.position.x + bondLength * stationaryRing->outward.x,
                                           stationary.position.y + bondLength * stationaryRing->outward.y},
                                          stationaryRing->size);
@@ -1324,8 +1368,9 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             // close enough to express the user's intent.
             if (!snapped) {
                 nearest = snapRadiusPixels;
-                for (const Atom& stationary : molecule->atoms) {
-                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id)) continue;
+                for (const Atom& stationary : gestureMolecule.atoms) {
+                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id) ||
+                        (singleRingVertex&&belongsToDraggedRing(stationary.id))) continue;
                     for (int step = 0; step < 24; ++step) {
                         const double angleRadians = step * std::numbers::pi / 12.0;
                         const Point candidate{stationary.position.x + bondLength * std::cos(angleRadians),
@@ -1340,10 +1385,24 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                     }
                 }
             }
+            // A ring vertex is the user's orientation/placement handle.  If
+            // no external atom captured it, follow the cursor directly; in
+            // either case project the *complete* cycle onto an exact regular
+            // polygon.  This is the distinction between a pair of correct
+            // bond lengths and a genuinely symmetric 4/5/7/9-member ring.
+            if(singleRingVertex&&!snapped){
+                snapped=current;
+                snapText=std::to_string(cycle->atoms.size())+"元环 · 正多边形吸附";
+            }
             if(snapped){
                 delta={snapped->x-pivot->second.x,snapped->y-pivot->second.y};
                 impl_->gesture->currentCanvas=candidateToCanvas(*snapped);
                 impl_->gesture->previewText=snapText;
+                if(cycle&&(singleRingVertex||(selectedWholeRing&&!rigidCenter))){
+                    regularRingFit=regularRingAtPivot(gestureMolecule,*cycle,*snapped);
+                    if(regularRingFit)impl_->gesture->previewText=
+                        std::to_string(cycle->atoms.size())+"元环 · 正多边形吸附 · 1.00×键长";
+                }
             }
         }
         for (const auto& [id, position] : impl_->gesture->original) {
@@ -1357,7 +1416,10 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             if (impl_->targetKind == EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
             else impl_->gesture->targetPositions[id] = target;
         }
-        impl_->gesture->changed = std::hypot(delta.x, delta.y) > 1e-9;
+        if(regularRingFit&&(impl_->targetKind==EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot))
+            for(const auto& [id,target]:regularRingFit->positions)if(Atom* atom=molecule->atom(id))atom->position=target;
+        impl_->gesture->changed = std::hypot(delta.x, delta.y) > 1e-9 ||
+            (regularRingFit&&regularRingFit->error>1e-12);
         if(impl_->gesture->changed&&directNode&&(directNode->type=="molecule_set_position"||directNode->type=="molecule_lerp_position"||directNode->type=="molecule_set_x"||directNode->type=="molecule_lerp_x"||directNode->type=="molecule_set_y"||directNode->type=="molecule_lerp_y")){
             json params=json::parse(directNode->paramsJson);const Molecule beforeShown=evaluateMolecule(impl_->gesture->before,impl_->activeMolecule,impl_->previewFrame);const Point origin=beforeShown.origin;
             if(directNode->type=="molecule_set_x"||directNode->type=="molecule_lerp_x")params["value"]=origin.x+delta.x;
