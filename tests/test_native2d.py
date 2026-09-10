@@ -766,6 +766,46 @@ def test_multitoken_atom_label_keeps_bonded_element_on_atom_site():
     left_box=difference.getbbox();assert left_box and left_box[2]<=center["x"]+2 and left_box[0]<center["x"]-5
 
 
+def test_chemdraw_style_nh_uses_clear_vertical_sector_for_secondary_and_tertiary_nitrogen():
+    core=session();gesture(core,"ring6",(480,270))
+    nitrogen=min(atoms(core),key=lambda atom:atom["y"])
+    point=canvas_point(core,nitrogen["id"])
+
+    core.set_tool("atom_text");core.pointer_down(*point)
+    request=core.pointer_up(*point)["message"]
+    assert request==f'atom_text|{nitrogen["id"]}|bottom'
+    core.set_atom_label(nitrogen["id"],"N","bottom","subscript")
+    base=core.depict(True);center=next(item["center"] for item in base["atoms"] if item["id"]==nitrogen["id"])
+    core.set_atom_label(nitrogen["id"],"NH","bottom","subscript")
+    secondary=core.depict(True)
+    difference=ImageChops.difference(
+        Image.frombytes("RGBA",(base["width"],base["height"]),base["rgba"]),
+        Image.frombytes("RGBA",(secondary["width"],secondary["height"]),secondary["rgba"]))
+    hydrogen_box=difference.getbbox()
+    assert hydrogen_box and hydrogen_box[1]>center["y"]
+
+    # A third bond occupies the lower sector. The same NH label now follows
+    # ChemDraw and places H above the atom, between the two ring bonds.
+    gesture(core,"single_bond",point)
+    point=canvas_point(core,nitrogen["id"])
+    core.set_tool("atom_text");core.pointer_down(*point)
+    request=core.pointer_up(*point)["message"]
+    assert request==f'atom_text|{nitrogen["id"]}|top'
+    core.set_atom_label(nitrogen["id"],"N","top","subscript")
+    base=core.depict(True);center=next(item["center"] for item in base["atoms"] if item["id"]==nitrogen["id"])
+    core.set_atom_label(nitrogen["id"],"NH","top","subscript")
+    tertiary=core.depict(True)
+    difference=ImageChops.difference(
+        Image.frombytes("RGBA",(base["width"],base["height"]),base["rgba"]),
+        Image.frombytes("RGBA",(tertiary["width"],tertiary["height"]),tertiary["rgba"]))
+    hydrogen_box=difference.getbbox()
+    assert hydrogen_box and hydrogen_box[3]<center["y"]
+
+    restored=CoreSession();restored.replace_json(core.json())
+    saved=next(atom for atom in structure(restored)["atoms"] if atom["id"]==nitrogen["id"])
+    assert saved["label"]=="NH" and saved["label_side"]=="top"
+
+
 def test_formal_charge_uses_one_fixed_twenty_unit_radius():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
     gesture(core,"charge_positive",point)

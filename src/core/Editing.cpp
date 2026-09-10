@@ -894,17 +894,18 @@ struct EditorSession::Impl {
         const Atom* atom = editableMolecule()->atom(gesture->startHit.id);
         if (!atom) return AtomLabelSide::Right;
         if (distance(gesture->pressCanvas, gesture->currentCanvas) > 12.0) {
-            return canvasToEdit(gesture->currentCanvas).x < atom->position.x
+            const Point cursor=canvasToEdit(gesture->currentCanvas);
+            const double dx=cursor.x-atom->position.x,dy=cursor.y-atom->position.y;
+            if(std::abs(dx)>=std::abs(dy))return dx<0.0
                 ? AtomLabelSide::Left : AtomLabelSide::Right;
+            return dy>0.0 ? AtomLabelSide::Top : AtomLabelSide::Bottom;
         }
         const std::vector<Point> neighbours = neighborOffsets(*editableMolecule(), *atom);
         if (neighbours.empty()) return AtomLabelSide::Right;
-        // A label has only two legal layouts. Score both horizontal
-        // directions against every adjacent bond and use the side with the
-        // larger minimum angular clearance. This matters for degree-two and
-        // higher vertices: reducing a general largest-sector direction to
-        // its x sign can choose the crowded side. Exact ties deliberately
-        // prefer the conventional right-hand layout.
+        // ChemDraw-style atom labels occupy the clearest cardinal sector.
+        // This keeps the bonded element exactly on the atom while placing a
+        // suffix such as H below a secondary ring nitrogen, or above a
+        // three-connected nitrogen whose remaining bond points downward.
         const auto angularClearance = [&](double candidateAngle) {
             double clearance = std::numbers::pi;
             for (const Point& neighbour : neighbours) {
@@ -915,18 +916,34 @@ struct EditorSession::Impl {
             }
             return clearance;
         };
-        const double right = angularClearance(0.0);
-        const double left = angularClearance(std::numbers::pi);
-        return left > right + 1e-9 ? AtomLabelSide::Left : AtomLabelSide::Right;
+        struct Candidate { AtomLabelSide side; double angle; };
+        // Stable tie order deliberately preserves the conventional right
+        // layout for isolated horizontal cases, then prefers vertical text.
+        const Candidate candidates[]={{AtomLabelSide::Right,0.0},
+            {AtomLabelSide::Top,std::numbers::pi/2.0},
+            {AtomLabelSide::Bottom,-std::numbers::pi/2.0},
+            {AtomLabelSide::Left,std::numbers::pi}};
+        AtomLabelSide best=candidates[0].side;
+        double bestClearance=angularClearance(candidates[0].angle);
+        for(std::size_t index=1;index<std::size(candidates);++index){
+            const double clearance=angularClearance(candidates[index].angle);
+            if(clearance>bestClearance+1e-9){best=candidates[index].side;bestClearance=clearance;}
+        }
+        return best;
     }
 
     Point textEndpoint() const {
         if (!gesture || gesture->startHit.kind != HitKind::Atom || !editableMolecule()) return {};
         const Atom* atom = editableMolecule()->atom(gesture->startHit.id);
         if (!atom) return {};
-        const double direction = textSide() == AtomLabelSide::Left ? -1.0 : 1.0;
-        return {atom->position.x + direction * editableMolecule()->referenceBondLength * .55,
-                atom->position.y};
+        const double length=editableMolecule()->referenceBondLength*.55;
+        switch(textSide()){
+            case AtomLabelSide::Left:return {atom->position.x-length,atom->position.y};
+            case AtomLabelSide::Top:return {atom->position.x,atom->position.y+length};
+            case AtomLabelSide::Bottom:return {atom->position.x,atom->position.y-length};
+            case AtomLabelSide::Right:return {atom->position.x+length,atom->position.y};
+        }
+        return atom->position;
     }
 
     std::vector<Point> ringPolygon(int count, Point cursor, bool disableAngle = false) const {
@@ -1594,7 +1611,7 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
         std::string request;
         if (impl_->gesture->startHit.kind == HitKind::Atom) {
             request = "atom_text|" + impl_->gesture->startHit.id + "|" +
-                (impl_->textSide() == AtomLabelSide::Left ? "left" : "right");
+                toString(impl_->textSide());
         } else {
             const std::string atomId=molecule->addAtom(impl_->gesture->startModel,"C",impl_->project.allocateCreationSerial());
             if(!atomId.empty()){

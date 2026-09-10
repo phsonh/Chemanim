@@ -35,7 +35,7 @@ enum class BondStereo {
     Wavy,
 };
 enum class SecondaryLineSide { Left, Right, Center };
-enum class AtomLabelSide { Left, Right };
+enum class AtomLabelSide { Left, Right, Top, Bottom };
 enum class AtomNumberStyle { Normal, Subscript, Superscript };
 
 struct Color {

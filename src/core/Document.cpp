@@ -420,10 +420,19 @@ SecondaryLineSide secondaryLineSideFromString(const std::string& value) {
     return SecondaryLineSide::Center;
 }
 const char* toString(AtomLabelSide value) {
-    return value == AtomLabelSide::Left ? "left" : "right";
+    switch (value) {
+        case AtomLabelSide::Left: return "left";
+        case AtomLabelSide::Top: return "top";
+        case AtomLabelSide::Bottom: return "bottom";
+        case AtomLabelSide::Right: return "right";
+    }
+    return "right";
 }
 AtomLabelSide atomLabelSideFromString(const std::string& value) {
-    return value == "left" ? AtomLabelSide::Left : AtomLabelSide::Right;
+    if (value == "left") return AtomLabelSide::Left;
+    if (value == "top") return AtomLabelSide::Top;
+    if (value == "bottom") return AtomLabelSide::Bottom;
+    return AtomLabelSide::Right;
 }
 const char* toString(AtomNumberStyle value) {
     switch (value) {

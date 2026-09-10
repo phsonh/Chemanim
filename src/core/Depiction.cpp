@@ -53,12 +53,7 @@ std::vector<std::string> labelGroups(const std::string& source) {
 }
 
 std::string orientedAlias(const Atom& atom) {
-    if (atom.alias.empty()) return {};
-    std::vector<std::string> groups = labelGroups(atom.alias);
-    if (atom.labelSide == AtomLabelSide::Left) std::reverse(groups.begin(), groups.end());
-    std::string oriented;
-    for (const std::string& group : groups) oriented += group;
-    return oriented;
+    return atom.alias;
 }
 
 struct AliasParts {
@@ -71,7 +66,6 @@ AliasParts aliasParts(const Atom& atom) {
     if(groups.size()<2)return {orientedAlias(atom),{}};
     AliasParts result{groups.front(),{}};
     groups.erase(groups.begin());
-    if(atom.labelSide==AtomLabelSide::Left)std::reverse(groups.begin(),groups.end());
     for(const std::string& group:groups)result.side+=group;
     return result;
 }
@@ -508,16 +502,28 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
         }
         if(!parts.side.empty()){
             // The first element token is the bonded atom and must remain on
-            // the exact atom coordinate.  Only the substituent suffix is
-            // placed to the chosen side (NH/HN, NO2/O2N, ...).
+            // the exact atom coordinate. Only the suffix is laid out in the
+            // ChemDraw-style clear cardinal sector around that site.
             const double modelPerPoint=referenceBondLength/std::max(.01,style.bondLengthPt);
-            const double direction=atom.labelSide==AtomLabelSide::Left?-1.0:1.0;
-            const double offset=style.fontPt*.31*modelPerPoint;
+            const bool vertical=atom.labelSide==AtomLabelSide::Top||
+                                atom.labelSide==AtomLabelSide::Bottom;
+            // Stacked glyphs need a full line advance; the tighter horizontal
+            // advance keeps formulas such as NH/NO2 reading as one label.
+            const double offset=style.fontPt*(vertical?1.10:.72)*modelPerPoint;
+            double dx=0.0,dy=0.0;
+            switch(atom.labelSide){
+                case AtomLabelSide::Left:dx=-offset;break;
+                case AtomLabelSide::Top:dy=offset;break;
+                case AtomLabelSide::Bottom:dy=-offset;break;
+                case AtomLabelSide::Right:dx=offset;break;
+            }
+            const auto alignment=atom.labelSide==AtomLabelSide::Left
+                ? RDKit::MolDraw2D_detail::TextAlignType::END
+                : atom.labelSide==AtomLabelSide::Right
+                    ? RDKit::MolDraw2D_detail::TextAlignType::START
+                    : RDKit::MolDraw2D_detail::TextAlignType::MIDDLE;
             drawer.drawString(formattedLabel(parts.side,atom.numberStyle),
-                RDGeom::Point2D(atom.position.x+direction*offset,atom.position.y),
-                atom.labelSide==AtomLabelSide::Left
-                    ? RDKit::MolDraw2D_detail::TextAlignType::END
-                    : RDKit::MolDraw2D_detail::TextAlignType::START);
+                RDGeom::Point2D(atom.position.x+dx,atom.position.y+dy),alignment);
         }
     }
     const auto origin = drawer.getDrawCoords(RDGeom::Point2D(0.0, 0.0));
