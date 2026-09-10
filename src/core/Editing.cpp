@@ -1069,15 +1069,29 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
         if(!alt&&structureNode&&structureNode->type=="molecule_gradient_structure"&&
            impl_->gesture->startHit.kind==HitKind::Atom&&pivot!=impl_->gesture->original.end()){
             constexpr double snapRadiusPixels=12.0;
+            // A merged gradient can contain many stationary atoms.  Computing
+            // editToCanvas() for every atom x 24 angular candidates used to
+            // re-evaluate the complete node sequence each time through
+            // editTransform(), making one pointer move take hundreds of ms.
+            // Object transforms are immutable during this structure gesture,
+            // so evaluate them once and reuse the matrix for every candidate.
+            const Impl::EditTransform transform=impl_->editTransform();
+            const double radians=transform.rotation*std::numbers::pi/180.0;
+            const double c=std::cos(radians),s=std::sin(radians);
+            const auto candidateToCanvas=[&](Point value){
+                const double x=value.x*transform.scaleX,y=value.y*transform.scaleY;
+                return impl_->viewport.modelToCanvas({transform.origin.x+x*c-y*s,
+                                                      transform.origin.y+x*s+y*c});
+            };
             double nearest=snapRadiusPixels;std::optional<Point> snapped;int snappedDegrees=0;
             const double bondLength=molecule->referenceBondLength;
             for(const Atom& stationary:molecule->atoms){
                 if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
                 for(int step=0;step<24;++step){
-                    const double radians=step*std::numbers::pi/12.0;
-                    const Point candidate{stationary.position.x+bondLength*std::cos(radians),
-                                          stationary.position.y+bondLength*std::sin(radians)};
-                    const double screenDistance=distance(canvasPoint,impl_->editToCanvas(candidate));
+                    const double angleRadians=step*std::numbers::pi/12.0;
+                    const Point candidate{stationary.position.x+bondLength*std::cos(angleRadians),
+                                          stationary.position.y+bondLength*std::sin(angleRadians)};
+                    const double screenDistance=distance(canvasPoint,candidateToCanvas(candidate));
                     if(screenDistance<nearest){
                         nearest=screenDistance;snapped=candidate;snappedDegrees=step*15;
                         impl_->gesture->snapAtomId=stationary.id;
@@ -1086,7 +1100,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             }
             if(snapped){
                 delta={snapped->x-pivot->second.x,snapped->y-pivot->second.y};
-                impl_->gesture->currentCanvas=impl_->editToCanvas(*snapped);
+                impl_->gesture->currentCanvas=candidateToCanvas(*snapped);
                 impl_->gesture->previewText="1.00×键长 · "+std::to_string(snappedDegrees)+"°";
             }
         }

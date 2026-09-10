@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 from PIL import Image, ImageChops
 
@@ -795,6 +796,29 @@ def test_gradient_charge_addition_and_deletion_crossfade_without_exposing_ids():
     assert next(item for item in restored_middle["adornments"] if item["id"]==added["id"])["alpha"]==new_mid["alpha"]
     assert "LerpStructure" in restored.generate_lua()
     assert restored.depict_at(15,True)["rgba"]
+
+
+def test_merged_gradient_fragment_snap_pointer_moves_remain_interactive():
+    core=CoreSession();ring=core.import_smiles("ring","c1ccccc1");nitro=core.import_smiles("nitro","O=[N+]=O")
+    core.add_node("molecule_set_position",json.dumps({"target":nitro,"x":120.0,"y":0.0}))
+    gradient=core.create_merged_gradient(ring,nitro,30,"linear");core.edit_node(gradient)
+    core.set_viewport(1200,700,1,0,0);core.set_tool("move")
+    project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
+    source_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
+    target_ids=set(merge["params"]["id_map"]["target"]["atoms"].values())
+    snapshot=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    nitrogen=next(atom["id"] for atom in snapshot["atoms"] if atom["id"] in source_ids and (atom.get("label") or atom.get("element"))=="N")
+    points={item["id"]:item["center"] for item in core.depict(False)["atoms"]};point=points[nitrogen]
+    stationary=points[next(iter(target_ids))]
+    core.select_connected_component(nitrogen);core.pointer_down(point["x"],point["y"])
+    started=time.perf_counter()
+    results=[core.pointer_move(stationary["x"]+32+(index%3)-1,stationary["y"]+(index%2)) for index in range(12)]
+    elapsed=time.perf_counter()-started
+    core.cancel_gesture()
+    assert any(result["preview"].get("snap_atom") for result in results)
+    # Before the transform was cached, this deterministic 12-event sequence
+    # took about 2.4 seconds on the development machine (~200 ms/event).
+    assert elapsed<1.0,f"merged-gradient pointer moves took {elapsed:.3f}s"
 
 
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
