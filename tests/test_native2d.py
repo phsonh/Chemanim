@@ -913,6 +913,39 @@ def test_second_ring_connection_uses_two_point_rigid_snap_instead_of_fifteen_deg
             assert math.isclose(current,original,rel_tol=1e-7,abs_tol=1e-7)
 
 
+def test_dragging_one_ring_vertex_restores_exact_regular_geometry_before_angle_snap():
+    for ring_size in (4,5,7,9):
+        core=CoreSession();target=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
+        gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":target,"frames":30,"easing":"linear"}))
+        node=next(item for item in core.project()["nodes"] if item["id"]==gradient)
+        snapshot=node["params"]["end_snapshot"];by_id={atom["id"]:atom for atom in snapshot["atoms"]}
+        neighbours={atom["id"]:[] for atom in snapshot["atoms"]}
+        for bond in snapshot["bonds"]:
+            if bond.get("alive",True):
+                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
+        pivot_id=next(atom_id for atom_id,values in neighbours.items() if len(values)==2)
+        neighbour_id=neighbours[pivot_id][0];regular=(by_id[pivot_id]["x"],by_id[pivot_id]["y"])
+        by_id[pivot_id]["x"]+=8.0;by_id[pivot_id]["y"]-=5.0
+        params=node["params"];params["end_snapshot"]=snapshot;assert core.update_node(gradient,json.dumps(params))
+        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
+        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
+        neighbour=by_id[neighbour_id];angle=math.atan2(regular[1]-neighbour["y"],regular[0]-neighbour["x"])
+        quantized=round(angle/(math.pi/12))*(math.pi/12);length=snapshot["reference_bond_length"]
+        cursor_model=(neighbour["x"]+length*math.cos(quantized),neighbour["y"]+length*math.sin(quantized))
+        cursor=(points[neighbour_id]["x"]+cursor_model[0]-neighbour["x"],points[neighbour_id]["y"]-cursor_model[1]+neighbour["y"])
+        core.pointer_down(points[pivot_id]["x"],points[pivot_id]["y"])
+        preview=core.pointer_move(*cursor)["preview"]
+        assert preview["text"].startswith(f"{ring_size}元环 · 顶点吸附")
+        assert core.pointer_up(*cursor)["changed"]
+        after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+        after_atoms={atom["id"]:atom for atom in after["atoms"]}
+        assert math.dist((after_atoms[pivot_id]["x"],after_atoms[pivot_id]["y"]),regular)<1e-7
+        for bond in after["bonds"]:
+            if not bond.get("alive",True):continue
+            first,second=after_atoms[bond["a"]],after_atoms[bond["b"]]
+            assert math.isclose(math.hypot(first["x"]-second["x"],first["y"]-second["y"]),length,rel_tol=1e-7)
+
+
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
     core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=structure(core)
     left,right=molecule["atoms"][0],molecule["atoms"][1]

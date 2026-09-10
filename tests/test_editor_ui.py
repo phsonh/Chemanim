@@ -771,6 +771,42 @@ def test_real_double_click_selects_start_component_and_drag_shows_chemical_snap(
     value.close()
 
 
+def test_real_single_atom_drag_uses_five_member_ring_vertex_snap():
+    import math
+    value=window();target=value.session.import_smiles("ring","C1CCCC1")
+    gradient=value.session.add_node("molecule_gradient_structure",json.dumps({"target":target,"frames":30,"easing":"linear"}))
+    project=value.session.project();node=next(item for item in project["nodes"] if item["id"]==gradient)
+    snapshot=node["params"]["end_snapshot"];atoms={atom["id"]:atom for atom in snapshot["atoms"]}
+    neighbours={atom_id:[] for atom_id in atoms}
+    for bond in snapshot["bonds"]:
+        if bond.get("alive",True):
+            neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
+    pivot_id=next(atom_id for atom_id,items in neighbours.items() if len(items)==2)
+    neighbour_id=neighbours[pivot_id][0];regular=QPointF(atoms[pivot_id]["x"],atoms[pivot_id]["y"])
+    atoms[pivot_id]["x"]+=8.0;atoms[pivot_id]["y"]-=5.0
+    params=node["params"];params["end_snapshot"]=snapshot;assert value.session.update_node(gradient,json.dumps(params))
+    value.refresh_all(gradient);value._node_selected(gradient);value._set_tool("move");value.canvas._sync_core_viewport()
+    points={item["id"]:item["center"] for item in value.session.depict(False)["atoms"]};neighbour=atoms[neighbour_id]
+    angle=math.atan2(regular.y()-neighbour["y"],regular.x()-neighbour["x"])
+    quantized=round(angle/(math.pi/12))*(math.pi/12);length=snapshot["reference_bond_length"]
+    candidate=QPointF(neighbour["x"]+length*math.cos(quantized),neighbour["y"]+length*math.sin(quantized))
+    cursor=QPoint(round(points[neighbour_id]["x"]+candidate.x()-neighbour["x"]),
+                  round(points[neighbour_id]["y"]-candidate.y()+neighbour["y"]))
+    pivot=QPoint(round(points[pivot_id]["x"]),round(points[pivot_id]["y"]))
+    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=pivot)
+    QTest.mouseMove(value.canvas,cursor,80);QApplication.processEvents()
+    assert value.canvas._preview.get("text","").startswith("5元环 · 顶点吸附")
+    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=cursor);QApplication.processEvents()
+    after=next(item for item in value.session.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    after_atoms={atom["id"]:atom for atom in after["atoms"]}
+    assert math.dist((after_atoms[pivot_id]["x"],after_atoms[pivot_id]["y"]),(regular.x(),regular.y()))<1e-7
+    for bond in after["bonds"]:
+        if not bond.get("alive",True):continue
+        first,second=after_atoms[bond["a"]],after_atoms[bond["b"]]
+        assert math.isclose(math.hypot(first["x"]-second["x"],first["y"]-second["y"]),length,rel_tol=1e-7)
+    value.close()
+
+
 def test_parameter_panel_native_crash_probe_exits_cleanly():
     run=subprocess.run([sys.executable,"-X","faulthandler","-u",str(ROOT/"tools"/"probe_parameter_panel.py")],cwd=ROOT,capture_output=True,text=True,timeout=30)
     assert run.returncode==0,(run.returncode,run.stdout,run.stderr)

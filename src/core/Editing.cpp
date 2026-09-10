@@ -232,6 +232,65 @@ std::optional<RingSnapDirection> ringSnapDirection(const Molecule& molecule,
     }
     return best;
 }
+struct RingVertexConstraint {
+    std::string neighbour;
+    std::vector<Point> candidates;
+    int size = 0;
+};
+std::optional<RingVertexConstraint> ringVertexConstraint(
+    const Molecule& molecule, const std::string& pivotId,
+    const std::set<std::string>& movingAtoms) {
+    // A normal click selects only the atom being dragged.  In that path the
+    // selected-only ring detector cannot see the rest of the ring, so locate
+    // the shortest cycle containing the moving vertex in the complete graph.
+    if (movingAtoms.size() != 1 || !movingAtoms.contains(pivotId)) return std::nullopt;
+    const Atom* pivot = molecule.atom(pivotId);
+    if (!pivot || !pivot->alive) return std::nullopt;
+    std::map<std::string, std::set<std::string>> graph;
+    for (const Atom& atom : molecule.atoms)
+        if (atom.alive) graph[atom.id];
+    for (const Bond& bond : molecule.bonds) {
+        if (!bond.alive || !graph.contains(bond.atomA) || !graph.contains(bond.atomB)) continue;
+        graph[bond.atomA].insert(bond.atomB);
+        graph[bond.atomB].insert(bond.atomA);
+    }
+    const auto found = graph.find(pivotId);
+    if (found == graph.end() || found->second.size() < 2) return std::nullopt;
+    const std::vector<std::string> neighbours(found->second.begin(), found->second.end());
+    std::optional<RingVertexConstraint> best;
+    for (std::size_t firstIndex = 0; firstIndex < neighbours.size(); ++firstIndex) {
+        for (std::size_t secondIndex = firstIndex + 1; secondIndex < neighbours.size(); ++secondIndex) {
+            const std::string& first = neighbours[firstIndex];
+            const std::string& second = neighbours[secondIndex];
+            std::queue<std::pair<std::string, int>> pending;
+            pending.push({first, 0});
+            std::set<std::string> visited{pivotId, first};
+            int pathEdges = -1;
+            while (!pending.empty()) {
+                const auto [id, depth] = pending.front();
+                pending.pop();
+                if (id == second) {
+                    pathEdges = depth;
+                    break;
+                }
+                for (const std::string& next : graph[id])
+                    if (visited.insert(next).second) pending.push({next, depth + 1});
+            }
+            if (pathEdges < 1) continue;
+            const int ringSize = pathEdges + 2;
+            const Atom* firstAtom = molecule.atom(first);
+            const Atom* secondAtom = molecule.atom(second);
+            if (!firstAtom || !secondAtom) continue;
+            std::vector<Point> candidates = circleIntersections(
+                firstAtom->position, molecule.referenceBondLength,
+                secondAtom->position, molecule.referenceBondLength);
+            if (candidates.empty()) continue;
+            RingVertexConstraint candidate{first, std::move(candidates), ringSize};
+            if (!best || candidate.size < best->size) best = std::move(candidate);
+        }
+    }
+    return best;
+}
 bool pointInPolygon(Point point, const std::vector<Point>& polygon) {
     bool inside = false;
     for (std::size_t i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
@@ -1159,6 +1218,23 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             const double ringSnapRadiusPixels=std::max(snapRadiusPixels,maximumBondPixels*.35);
             double nearest=ringSnapRadiusPixels;std::optional<Point> snapped;std::string snapText;
             const auto movingRing=ringSnapDirection(*molecule,impl_->gesture->startHit.id,impl_->selectedAtoms,true);
+            // When the user drags one vertex of an existing ring, constrain it
+            // against both ring neighbours.  The two-circle intersection is
+            // the exact regular-ring vertex; a 15-degree lattice cannot
+            // represent pentagons, heptagons or nonagons exactly.
+            if (const auto vertexRing = ringVertexConstraint(
+                    *molecule, impl_->gesture->startHit.id, impl_->selectedAtoms)) {
+                for (const Point candidate : vertexRing->candidates) {
+                    const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
+                    if (screenDistance < nearest) {
+                        nearest = screenDistance;
+                        snapped = candidate;
+                        impl_->gesture->snapAtomId = vertexRing->neighbour;
+                        snapText = std::to_string(vertexRing->size) +
+                                   "元环 · 顶点吸附 · 1.00×键长";
+                    }
+                }
+            }
             // Once the user has drawn the first cross-component bond, use it
             // as a fixed docking pivot.  The second atom is placed at the
             // intersection of (a) its rigid distance from that pivot and
@@ -1188,7 +1264,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                     }
                 }
             }
-            if (dockAnchor) {
+            if (!snapped && dockAnchor) {
                 const double pivotRadius = distance(dockAnchor->moving, pivot->second);
                 if (pivotRadius > 1e-9) {
                     for (const Atom& stationary : molecule->atoms) {
