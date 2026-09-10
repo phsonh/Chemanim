@@ -821,6 +821,38 @@ def test_merged_gradient_fragment_snap_pointer_moves_remain_interactive():
     assert elapsed<1.0,f"merged-gradient pointer moves took {elapsed:.3f}s"
 
 
+def test_fragment_snap_uses_exact_ring_bisector_before_fifteen_degree_fallback():
+    for ring_size in (4,5,7,9):
+        core=CoreSession();stationary_molecule=core.import_smiles("anchor","C")
+        ring_molecule=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
+        gradient=core.create_merged_gradient(stationary_molecule,ring_molecule,30,"linear")
+        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
+        project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
+        moving_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
+        stationary_id=next(iter(merge["params"]["id_map"]["target"]["atoms"].values()))
+        snapshot=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+        atoms_by_id={atom["id"]:atom for atom in snapshot["atoms"]}
+        neighbours={atom_id:[] for atom_id in moving_ids}
+        for bond in snapshot["bonds"]:
+            if bond.get("alive",True) and bond["a"] in moving_ids and bond["b"] in moving_ids:
+                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
+        pivot=next(atom_id for atom_id,values in neighbours.items() if len(values)==2)
+        origin=atoms_by_id[pivot];vectors=[]
+        for neighbour_id in neighbours[pivot]:
+            neighbour=atoms_by_id[neighbour_id];dx=neighbour["x"]-origin["x"];dy=neighbour["y"]-origin["y"]
+            length=math.hypot(dx,dy);vectors.append((dx/length,dy/length))
+        inward=(vectors[0][0]+vectors[1][0],vectors[0][1]+vectors[1][1]);magnitude=math.hypot(*inward)
+        outward=(-inward[0]/magnitude,-inward[1]/magnitude);bond_length=snapshot["reference_bond_length"]
+        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]};stationary=points[stationary_id]
+        desired=(stationary["x"]-bond_length*outward[0],stationary["y"]+bond_length*outward[1])
+        local_angle=math.atan2(-outward[1],-outward[0]);quantized=round(local_angle/(math.pi/12))*(math.pi/12)
+        cursor=(stationary["x"]+bond_length*math.cos(quantized),stationary["y"]-bond_length*math.sin(quantized))
+        core.select_connected_component(pivot);core.pointer_down(points[pivot]["x"],points[pivot]["y"])
+        result=core.pointer_move(*cursor);core.cancel_gesture()
+        assert result["preview"]["text"].startswith(f"{ring_size}元环")
+        assert math.hypot(result["preview"]["current"]["x"]-desired[0],result["preview"]["current"]["y"]-desired[1])<1e-6
+
+
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
     core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=structure(core)
     left,right=molecule["atoms"][0],molecule["atoms"][1]

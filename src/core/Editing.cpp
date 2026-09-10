@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <numbers>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <tuple>
@@ -162,6 +163,52 @@ std::vector<Point> neighborOffsets(const Molecule& molecule, const Atom& atom) {
         }
     }
     return result;
+}
+struct RingSnapDirection {
+    Point outward{};
+    int size=0;
+};
+std::optional<RingSnapDirection> ringSnapDirection(const Molecule& molecule,
+                                                   const std::string& pivotId,
+                                                   const std::set<std::string>& movingAtoms,
+                                                   bool movingSide) {
+    const auto allowed=[&](const std::string& id){
+        return movingSide?movingAtoms.contains(id):!movingAtoms.contains(id);
+    };
+    const Atom* pivot=molecule.atom(pivotId);
+    if(!pivot||!pivot->alive||!allowed(pivotId))return std::nullopt;
+    std::map<std::string,std::vector<std::string>> graph;
+    for(const Atom& atom:molecule.atoms)if(atom.alive&&allowed(atom.id))graph[atom.id];
+    for(const Bond& bond:molecule.bonds)if(bond.alive&&graph.contains(bond.atomA)&&graph.contains(bond.atomB)){
+        graph[bond.atomA].push_back(bond.atomB);graph[bond.atomB].push_back(bond.atomA);
+    }
+    const auto found=graph.find(pivotId);if(found==graph.end()||found->second.size()<2)return std::nullopt;
+    std::optional<RingSnapDirection> best;
+    for(std::size_t firstIndex=0;firstIndex<found->second.size();++firstIndex){
+        for(std::size_t secondIndex=firstIndex+1;secondIndex<found->second.size();++secondIndex){
+            const std::string& first=found->second[firstIndex];const std::string& second=found->second[secondIndex];
+            std::queue<std::pair<std::string,int>> pending;pending.push({first,0});
+            std::set<std::string> visited{pivotId,first};int pathEdges=-1;
+            while(!pending.empty()){
+                const auto [id,depth]=pending.front();pending.pop();
+                if(id==second){pathEdges=depth;break;}
+                for(const std::string& next:graph[id])if(visited.insert(next).second)pending.push({next,depth+1});
+            }
+            if(pathEdges<1)continue;const int ringSize=pathEdges+2;
+            const Atom* firstAtom=molecule.atom(first);const Atom* secondAtom=molecule.atom(second);
+            if(!firstAtom||!secondAtom)continue;
+            Point a{firstAtom->position.x-pivot->position.x,firstAtom->position.y-pivot->position.y};
+            Point b{secondAtom->position.x-pivot->position.x,secondAtom->position.y-pivot->position.y};
+            const double aLength=std::hypot(a.x,a.y),bLength=std::hypot(b.x,b.y);
+            if(aLength<1e-9||bLength<1e-9)continue;
+            a={a.x/aLength,a.y/aLength};b={b.x/bLength,b.y/bLength};
+            const Point inward{a.x+b.x,a.y+b.y};const double inwardLength=std::hypot(inward.x,inward.y);
+            if(inwardLength<1e-9)continue;
+            RingSnapDirection candidate{{-inward.x/inwardLength,-inward.y/inwardLength},ringSize};
+            if(!best||candidate.size<best->size)best=candidate;
+        }
+    }
+    return best;
 }
 bool pointInPolygon(Point point, const std::vector<Point>& polygon) {
     bool inside = false;
@@ -1083,8 +1130,32 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                 return impl_->viewport.modelToCanvas({transform.origin.x+x*c-y*s,
                                                       transform.origin.y+x*s+y*c});
             };
-            double nearest=snapRadiusPixels;std::optional<Point> snapped;int snappedDegrees=0;
+            double nearest=snapRadiusPixels;std::optional<Point> snapped;std::string snapText;
             const double bondLength=molecule->referenceBondLength;
+            const auto movingRing=ringSnapDirection(*molecule,impl_->gesture->startHit.id,impl_->selectedAtoms,true);
+            // Ring-aware candidates preserve the exact local exterior
+            // bisector.  They deliberately take precedence over the global
+            // 15-degree lattice whenever the pointer is close enough.
+            for(const Atom& stationary:molecule->atoms){
+                if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
+                const auto considerRing=[&](Point candidate,int ringSize){
+                    const double screenDistance=distance(canvasPoint,candidateToCanvas(candidate));
+                    if(screenDistance<nearest){nearest=screenDistance;snapped=candidate;
+                        impl_->gesture->snapAtomId=stationary.id;
+                        snapText=std::to_string(ringSize)+"元环 · 1.00×键长";}
+                };
+                if(movingRing)considerRing({stationary.position.x-bondLength*movingRing->outward.x,
+                                           stationary.position.y-bondLength*movingRing->outward.y},movingRing->size);
+                const double maximumBondPixels=bondLength*std::max(std::abs(transform.scaleX),std::abs(transform.scaleY))*impl_->viewport.pixelsPerUnit;
+                if(distance(canvasPoint,candidateToCanvas(stationary.position))<=maximumBondPixels+snapRadiusPixels){
+                    if(const auto stationaryRing=ringSnapDirection(*molecule,stationary.id,impl_->selectedAtoms,false))
+                        considerRing({stationary.position.x+bondLength*stationaryRing->outward.x,
+                                      stationary.position.y+bondLength*stationaryRing->outward.y},stationaryRing->size);
+                }
+            }
+            // Only use the generic angular lattice when no ring geometry was
+            // close enough to express the user's intent.
+            if(!snapped){
             for(const Atom& stationary:molecule->atoms){
                 if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
                 for(int step=0;step<24;++step){
@@ -1093,15 +1164,17 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                                           stationary.position.y+bondLength*std::sin(angleRadians)};
                     const double screenDistance=distance(canvasPoint,candidateToCanvas(candidate));
                     if(screenDistance<nearest){
-                        nearest=screenDistance;snapped=candidate;snappedDegrees=step*15;
+                        nearest=screenDistance;snapped=candidate;
                         impl_->gesture->snapAtomId=stationary.id;
+                        snapText="1.00×键长 · "+std::to_string(step*15)+"°";
                     }
                 }
+            }
             }
             if(snapped){
                 delta={snapped->x-pivot->second.x,snapped->y-pivot->second.y};
                 impl_->gesture->currentCanvas=candidateToCanvas(*snapped);
-                impl_->gesture->previewText="1.00×键长 · "+std::to_string(snappedDegrees)+"°";
+                impl_->gesture->previewText=snapText;
             }
         }
         for (const auto& [id, position] : impl_->gesture->original) {
