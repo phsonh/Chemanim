@@ -853,6 +853,66 @@ def test_fragment_snap_uses_exact_ring_bisector_before_fifteen_degree_fallback()
         assert math.hypot(result["preview"]["current"]["x"]-desired[0],result["preview"]["current"]["y"]-desired[1])<1e-6
 
 
+def test_second_ring_connection_uses_two_point_rigid_snap_instead_of_fifteen_degrees():
+    for ring_size in (4,5,7,9):
+        core=CoreSession();anchor=core.import_smiles("anchor","CC")
+        ring=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
+        gradient=core.create_merged_gradient(anchor,ring,30,"linear")
+        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0)
+        project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
+        stationary_ids=list(merge["params"]["id_map"]["target"]["atoms"].values())
+        moving_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
+        node=next(item for item in project["nodes"] if item["id"]==gradient);snapshot=node["params"]["end_snapshot"]
+        by_id={atom["id"]:atom for atom in snapshot["atoms"]};neighbours={atom_id:[] for atom_id in moving_ids}
+        for bond in snapshot["bonds"]:
+            if bond.get("alive",True) and bond["a"] in moving_ids and bond["b"] in moving_ids:
+                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
+        moving0=next(iter(moving_ids));moving1=neighbours[moving0][0]
+        stationary0,stationary1=stationary_ids;bond_length=snapshot["reference_bond_length"]
+
+        # Arrange the first ring vertex one bond length above the first
+        # stationary atom, then draw the first cross-component bond exactly as
+        # the user does before positioning the second connection.
+        dx=by_id[stationary0]["x"]-by_id[moving0]["x"]
+        dy=by_id[stationary0]["y"]+bond_length-by_id[moving0]["y"]
+        for atom in snapshot["atoms"]:
+            if atom["id"] in moving_ids:atom["x"]+=dx;atom["y"]+=dy
+        params=node["params"];params["end_snapshot"]=snapshot
+        assert core.update_node(gradient,json.dumps(params));core.edit_node(gradient)
+        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
+        core.set_tool("single_bond");core.pointer_down(points[moving0]["x"],points[moving0]["y"])
+        assert core.pointer_up(points[stationary0]["x"],points[stationary0]["y"])["changed"]
+
+        core.set_tool("move");core.select_connected_component(moving1)
+        before=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+        before_atoms={atom["id"]:atom for atom in before["atoms"]}
+        original_distances={(a,b):math.hypot(before_atoms[a]["x"]-before_atoms[b]["x"],before_atoms[a]["y"]-before_atoms[b]["y"])
+                            for a in moving_ids for b in moving_ids if a<b}
+        first=(before_atoms[moving0]["x"],before_atoms[moving0]["y"])
+        second=(before_atoms[stationary1]["x"],before_atoms[stationary1]["y"])
+        pivot=(before_atoms[moving1]["x"],before_atoms[moving1]["y"])
+        pivot_radius=math.dist(first,pivot);center_distance=math.dist(first,second)
+        along=(pivot_radius*pivot_radius-bond_length*bond_length+center_distance*center_distance)/(2*center_distance)
+        height=math.sqrt(max(0.0,pivot_radius*pivot_radius-along*along))
+        ux=(second[0]-first[0])/center_distance;uy=(second[1]-first[1])/center_distance
+        base=(first[0]+along*ux,first[1]+along*uy)
+        candidate=(base[0]-height*uy,base[1]+height*ux)
+        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
+        candidate_canvas=(points[stationary1]["x"]+candidate[0]-second[0],points[stationary1]["y"]-candidate[1]+second[1])
+        core.pointer_down(points[moving1]["x"],points[moving1]["y"])
+        preview=core.pointer_move(*candidate_canvas)["preview"]
+        assert preview["text"].startswith(f"{ring_size}元环 · 双点吸附")
+        assert preview["snap_atom"]==stationary1 and core.pointer_up(*candidate_canvas)["changed"]
+
+        after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+        after_atoms={atom["id"]:atom for atom in after["atoms"]}
+        assert math.isclose(math.dist((after_atoms[moving1]["x"],after_atoms[moving1]["y"]),second),bond_length,rel_tol=1e-7)
+        assert math.isclose(math.dist((after_atoms[moving0]["x"],after_atoms[moving0]["y"]),first),0.0,abs_tol=1e-7)
+        for (first_id,second_id),original in original_distances.items():
+            current=math.hypot(after_atoms[first_id]["x"]-after_atoms[second_id]["x"],after_atoms[first_id]["y"]-after_atoms[second_id]["y"])
+            assert math.isclose(current,original,rel_tol=1e-7,abs_tol=1e-7)
+
+
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():
     core=session();gesture(core,"single_bond",(420,270),(452,270));molecule=structure(core)
     left,right=molecule["atoms"][0],molecule["atoms"][1]

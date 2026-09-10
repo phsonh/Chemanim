@@ -101,6 +101,28 @@ double pointSegmentDistance(Point point, Point first, Point second) {
     const double t = std::clamp(((point.x - first.x) * dx + (point.y - first.y) * dy) / length2, 0.0, 1.0);
     return distance(point, {first.x + t * dx, first.y + t * dy});
 }
+std::vector<Point> circleIntersections(Point first, double firstRadius,
+                                       Point second, double secondRadius) {
+    std::vector<Point> result;
+    const double dx = second.x - first.x;
+    const double dy = second.y - first.y;
+    const double centerDistance = std::hypot(dx, dy);
+    if (centerDistance < 1e-9 ||
+        centerDistance > firstRadius + secondRadius + 1e-9 ||
+        centerDistance < std::abs(firstRadius - secondRadius) - 1e-9)
+        return result;
+    const double along = (firstRadius * firstRadius - secondRadius * secondRadius +
+                          centerDistance * centerDistance) /
+                         (2.0 * centerDistance);
+    const double height = std::sqrt(std::max(0.0, firstRadius * firstRadius - along * along));
+    const Point base{first.x + along * dx / centerDistance,
+                     first.y + along * dy / centerDistance};
+    const Point normal{-dy / centerDistance, dx / centerDistance};
+    result.push_back({base.x + height * normal.x, base.y + height * normal.y});
+    if (height > 1e-9)
+        result.push_back({base.x - height * normal.x, base.y - height * normal.y});
+    return result;
+}
 bool isBondTool(Tool tool) {
     return tool == Tool::SingleBond || tool == Tool::DoubleBond || tool == Tool::TripleBond ||
            tool == Tool::SolidWedge || tool == Tool::DashedWedge ||
@@ -1107,6 +1129,8 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     if ((impl_->tool == Tool::Move || impl_->tool == Tool::SelectRectangle || impl_->tool == Tool::SelectLasso) && !impl_->gesture->original.empty()) {
         const Point current = impl_->canvasToEdit(canvasPoint);
         Point delta{current.x - impl_->gesture->pressModel.x, current.y - impl_->gesture->pressModel.y};
+        std::optional<Point> rigidCenter;
+        double rigidAngle = 0.0;
         ScriptNode* directNode=impl_->targetKind==EditTargetKind::ScriptNode?impl_->project.node(impl_->targetId):nullptr;
         if(directNode&&(directNode->type=="molecule_set_x"||directNode->type=="molecule_lerp_x"))delta.y=0.0;
         if(directNode&&(directNode->type=="molecule_set_y"||directNode->type=="molecule_lerp_y"))delta.x=0.0;
@@ -1130,46 +1154,115 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                 return impl_->viewport.modelToCanvas({transform.origin.x+x*c-y*s,
                                                       transform.origin.y+x*s+y*c});
             };
-            double nearest=snapRadiusPixels;std::optional<Point> snapped;std::string snapText;
             const double bondLength=molecule->referenceBondLength;
+            const double maximumBondPixels=bondLength*std::max(std::abs(transform.scaleX),std::abs(transform.scaleY))*impl_->viewport.pixelsPerUnit;
+            const double ringSnapRadiusPixels=std::max(snapRadiusPixels,maximumBondPixels*.35);
+            double nearest=ringSnapRadiusPixels;std::optional<Point> snapped;std::string snapText;
             const auto movingRing=ringSnapDirection(*molecule,impl_->gesture->startHit.id,impl_->selectedAtoms,true);
+            // Once the user has drawn the first cross-component bond, use it
+            // as a fixed docking pivot.  The second atom is placed at the
+            // intersection of (a) its rigid distance from that pivot and
+            // (b) one reference bond length from the new target.  Rotating
+            // the whole selected fragment around the first pivot preserves
+            // every internal ring length/angle for 4/5/7/9/... member rings.
+            struct DockAnchor {
+                Point moving{};
+                std::string stationaryId;
+            };
+            std::optional<DockAnchor> dockAnchor;
+            if (movingRing) {
+                for (const Bond& bond : molecule->bonds) {
+                    if (!bond.alive) continue;
+                    const bool aMoving = impl_->selectedAtoms.contains(bond.atomA);
+                    const bool bMoving = impl_->selectedAtoms.contains(bond.atomB);
+                    if (aMoving == bMoving) continue;
+                    const std::string& movingId = aMoving ? bond.atomA : bond.atomB;
+                    const std::string& stationaryId = aMoving ? bond.atomB : bond.atomA;
+                    if (movingId == impl_->gesture->startHit.id) continue;
+                    const auto movingPosition = impl_->gesture->original.find(movingId);
+                    const Atom* stationaryAtom = molecule->atom(stationaryId);
+                    if (movingPosition != impl_->gesture->original.end() &&
+                        stationaryAtom && stationaryAtom->alive) {
+                        dockAnchor = DockAnchor{movingPosition->second, stationaryId};
+                        break;
+                    }
+                }
+            }
+            if (dockAnchor) {
+                const double pivotRadius = distance(dockAnchor->moving, pivot->second);
+                if (pivotRadius > 1e-9) {
+                    for (const Atom& stationary : molecule->atoms) {
+                        if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id) ||
+                            stationary.id == dockAnchor->stationaryId)
+                            continue;
+                        for (const Point candidate : circleIntersections(
+                                 dockAnchor->moving, pivotRadius, stationary.position, bondLength)) {
+                            const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
+                            if (screenDistance < nearest) {
+                                nearest = screenDistance;
+                                snapped = candidate;
+                                impl_->gesture->snapAtomId = stationary.id;
+                                rigidCenter = dockAnchor->moving;
+                                rigidAngle =
+                                    std::atan2(candidate.y - dockAnchor->moving.y,
+                                               candidate.x - dockAnchor->moving.x) -
+                                    std::atan2(pivot->second.y - dockAnchor->moving.y,
+                                               pivot->second.x - dockAnchor->moving.x);
+                                snapText = std::to_string(movingRing->size) +
+                                           "元环 · 双点吸附 · 1.00×键长";
+                            }
+                        }
+                    }
+                }
+            }
             // Ring-aware candidates preserve the exact local exterior
             // bisector.  They deliberately take precedence over the global
             // 15-degree lattice whenever the pointer is close enough.
-            for(const Atom& stationary:molecule->atoms){
-                if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
-                const auto considerRing=[&](Point candidate,int ringSize){
-                    const double screenDistance=distance(canvasPoint,candidateToCanvas(candidate));
-                    if(screenDistance<nearest){nearest=screenDistance;snapped=candidate;
-                        impl_->gesture->snapAtomId=stationary.id;
-                        snapText=std::to_string(ringSize)+"元环 · 1.00×键长";}
-                };
-                if(movingRing)considerRing({stationary.position.x-bondLength*movingRing->outward.x,
-                                           stationary.position.y-bondLength*movingRing->outward.y},movingRing->size);
-                const double maximumBondPixels=bondLength*std::max(std::abs(transform.scaleX),std::abs(transform.scaleY))*impl_->viewport.pixelsPerUnit;
-                if(distance(canvasPoint,candidateToCanvas(stationary.position))<=maximumBondPixels+snapRadiusPixels){
-                    if(const auto stationaryRing=ringSnapDirection(*molecule,stationary.id,impl_->selectedAtoms,false))
-                        considerRing({stationary.position.x+bondLength*stationaryRing->outward.x,
-                                      stationary.position.y+bondLength*stationaryRing->outward.y},stationaryRing->size);
+            if (!snapped) {
+                for (const Atom& stationary : molecule->atoms) {
+                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id)) continue;
+                    const auto considerRing = [&](Point candidate, int ringSize) {
+                        const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
+                        if (screenDistance < nearest) {
+                            nearest = screenDistance;
+                            snapped = candidate;
+                            impl_->gesture->snapAtomId = stationary.id;
+                            snapText = std::to_string(ringSize) + "元环 · 1.00×键长";
+                        }
+                    };
+                    if (movingRing)
+                        considerRing({stationary.position.x - bondLength * movingRing->outward.x,
+                                      stationary.position.y - bondLength * movingRing->outward.y},
+                                     movingRing->size);
+                    if (distance(canvasPoint, candidateToCanvas(stationary.position)) <=
+                        maximumBondPixels + snapRadiusPixels) {
+                        if (const auto stationaryRing = ringSnapDirection(
+                                *molecule, stationary.id, impl_->selectedAtoms, false))
+                            considerRing({stationary.position.x + bondLength * stationaryRing->outward.x,
+                                          stationary.position.y + bondLength * stationaryRing->outward.y},
+                                         stationaryRing->size);
+                    }
                 }
             }
             // Only use the generic angular lattice when no ring geometry was
             // close enough to express the user's intent.
-            if(!snapped){
-            for(const Atom& stationary:molecule->atoms){
-                if(!stationary.alive||impl_->selectedAtoms.contains(stationary.id))continue;
-                for(int step=0;step<24;++step){
-                    const double angleRadians=step*std::numbers::pi/12.0;
-                    const Point candidate{stationary.position.x+bondLength*std::cos(angleRadians),
-                                          stationary.position.y+bondLength*std::sin(angleRadians)};
-                    const double screenDistance=distance(canvasPoint,candidateToCanvas(candidate));
-                    if(screenDistance<nearest){
-                        nearest=screenDistance;snapped=candidate;
-                        impl_->gesture->snapAtomId=stationary.id;
-                        snapText="1.00×键长 · "+std::to_string(step*15)+"°";
+            if (!snapped) {
+                nearest = snapRadiusPixels;
+                for (const Atom& stationary : molecule->atoms) {
+                    if (!stationary.alive || impl_->selectedAtoms.contains(stationary.id)) continue;
+                    for (int step = 0; step < 24; ++step) {
+                        const double angleRadians = step * std::numbers::pi / 12.0;
+                        const Point candidate{stationary.position.x + bondLength * std::cos(angleRadians),
+                                              stationary.position.y + bondLength * std::sin(angleRadians)};
+                        const double screenDistance = distance(canvasPoint, candidateToCanvas(candidate));
+                        if (screenDistance < nearest) {
+                            nearest = screenDistance;
+                            snapped = candidate;
+                            impl_->gesture->snapAtomId = stationary.id;
+                            snapText = "1.00×键长 · " + std::to_string(step * 15) + "°";
+                        }
                     }
                 }
-            }
             }
             if(snapped){
                 delta={snapped->x-pivot->second.x,snapped->y-pivot->second.y};
@@ -1178,7 +1271,13 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             }
         }
         for (const auto& [id, position] : impl_->gesture->original) {
-            const Point target{position.x + delta.x, position.y + delta.y};
+            Point target{position.x + delta.x, position.y + delta.y};
+            if (rigidCenter) {
+                const double c = std::cos(rigidAngle), s = std::sin(rigidAngle);
+                const double x = position.x - rigidCenter->x, y = position.y - rigidCenter->y;
+                target = {rigidCenter->x + x * c - y * s,
+                          rigidCenter->y + x * s + y * c};
+            }
             if (impl_->targetKind == EditTargetKind::BaseStructure||impl_->targetKind==EditTargetKind::StructureSnapshot) { if (Atom* atom = molecule->atom(id)) atom->position = target; }
             else impl_->gesture->targetPositions[id] = target;
         }
