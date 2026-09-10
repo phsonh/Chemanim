@@ -132,7 +132,21 @@ bool isRingTool(Tool tool) { return tool >= Tool::Ring3 && tool <= Tool::Benzene
 bool isStructureWriteTool(Tool tool) {
     return isBondTool(tool) || isRingTool(tool) || tool == Tool::Eraser ||
            tool == Tool::AtomLabel || tool == Tool::AtomText ||
-           tool == Tool::ChargePositive || tool == Tool::ChargeNegative;
+           tool == Tool::ChargePositive || tool == Tool::ChargeNegative ||
+           tool == Tool::LonePair || tool == Tool::SingleElectron;
+}
+bool isAdornmentTool(Tool tool) {
+    return tool == Tool::ChargePositive || tool == Tool::ChargeNegative ||
+           tool == Tool::LonePair || tool == Tool::SingleElectron;
+}
+const char* adornmentText(Tool tool) {
+    switch (tool) {
+        case Tool::ChargePositive: return "⊕";
+        case Tool::ChargeNegative: return "⊖";
+        case Tool::LonePair: return "••";
+        case Tool::SingleElectron: return "•";
+        default: return "";
+    }
 }
 int ringSize(Tool tool) { return tool == Tool::Benzene ? 6 : 3 + static_cast<int>(tool) - static_cast<int>(Tool::Ring3); }
 std::pair<BondType, BondStereo> bondStyle(Tool tool) {
@@ -1128,9 +1142,9 @@ EditResult EditorSession::pointerDown(Point canvasPoint, bool, bool control, boo
     }
     else if (isBondTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Bond;
     else if (isRingTool(impl_->tool)) gesture.previewKind=GesturePreviewKind::Ring;
-    else if ((impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative)&&gesture.startHit.kind==HitKind::Atom) {
+    else if (isAdornmentTool(impl_->tool)&&gesture.startHit.kind==HitKind::Atom) {
         gesture.previewKind=GesturePreviewKind::Adornment;
-        gesture.previewText=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
+        gesture.previewText=adornmentText(impl_->tool);
     }
     else if (impl_->tool==Tool::AtomText) {
         gesture.previewKind=GesturePreviewKind::Text;
@@ -1441,7 +1455,7 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
     } else if (isRingTool(impl_->tool)) {
         impl_->gesture->lasso.clear();
         for (Point point : impl_->ringPolygon(ringSize(impl_->tool), canvasPoint, alt)) impl_->gesture->lasso.push_back(impl_->editToCanvas(point));
-    } else if (impl_->tool==Tool::ChargePositive||impl_->tool==Tool::ChargeNegative) {
+    } else if (isAdornmentTool(impl_->tool)) {
         if (impl_->gesture->startHit.kind==HitKind::Atom)
             impl_->gesture->currentCanvas=impl_->editToCanvas(impl_->adornmentEndpoint(alt));
     } else if (impl_->tool==Tool::AtomText) {
@@ -1604,18 +1618,18 @@ EditResult EditorSession::pointerUp(Point canvasPoint, bool alt, bool control, b
             if(Atom* atom=molecule->atom(atomId))atom->alias=impl_->element=="C" ? "" : impl_->element;
         }
         impl_->gesture->changed = true;
-    } else if (impl_->tool == Tool::ChargePositive || impl_->tool == Tool::ChargeNegative) {
+    } else if (isAdornmentTool(impl_->tool)) {
         if (impl_->gesture->startHit.kind == HitKind::Atom) {
             const Atom* owner=molecule->atom(impl_->gesture->startHit.id);
             const Point endpoint=impl_->adornmentEndpoint(alt);
             const std::string id=molecule->addAdornment(impl_->gesture->startHit.id,
-                impl_->tool == Tool::ChargePositive ? "⊕" : "⊖",
+                adornmentText(impl_->tool),
                 {endpoint.x-owner->position.x,endpoint.y-owner->position.y},
                 impl_->project.allocateCreationSerial());
             impl_->gesture->changed = !id.empty();
         } else if(impl_->gesture->startHit.kind==HitKind::Adornment) {
             if(AtomAdornment* value=molecule->adornment(impl_->gesture->startHit.id)){
-                const std::string text=impl_->tool==Tool::ChargePositive?"⊕":"⊖";
+                const std::string text=adornmentText(impl_->tool);
                 if(value->text!=text){value->text=text;impl_->gesture->changed=true;}
             }
         }
@@ -2079,7 +2093,7 @@ bool EditorSession::undo() { if (!canUndo()) return false; const auto high=impl_
 bool EditorSession::redo() { if (!canRedo()) return false; const auto high=impl_->project.nextCreationSerial;auto snapshot = std::move(impl_->redo.back()); impl_->redo.pop_back(); impl_->project = snapshot.after;impl_->project.nextCreationSerial=std::max(impl_->project.nextCreationSerial,high);impl_->undo.push_back(std::move(snapshot));impl_->normalizeContext();if(impl_->targetKind==EditTargetKind::StructureSnapshot)if(const ScriptNode* node=impl_->project.node(impl_->targetId))impl_->loadStructureDraft(*node);return true; }
 
 const char* toString(Tool value) {
-    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","atom_text","charge_positive","charge_negative","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
+    static constexpr const char* names[] = {"select_rectangle","select_lasso","move","eraser","atom_label","atom_text","charge_positive","charge_negative","lone_pair","single_electron","single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar","hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"};
     return names[static_cast<int>(value)];
 }
 Tool toolFromString(const std::string& value) {

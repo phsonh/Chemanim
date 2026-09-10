@@ -18,6 +18,8 @@ enum class Tool {
     AtomText,
     ChargePositive,
     ChargeNegative,
+    LonePair,
+    SingleElectron,
     SingleBond,
     DoubleBond,
     TripleBond,

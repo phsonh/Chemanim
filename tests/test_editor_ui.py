@@ -504,7 +504,50 @@ def test_charge_tools_are_circled_symbols_inside_structure_not_a_category():
     buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton)}
     assert "charge_positive" in buttons and "charge_negative" in buttons
     assert buttons["charge_positive"].toolTip()=="形式正电荷（带圈 +）"
+    assert buttons["lone_pair"].toolTip()=="孤对电子"
+    assert buttons["single_electron"].toolTip()=="单电子"
     assert {"select_rectangle","single_bond","ring6","solid_bar","hashed_bar"}<set(buttons)
+    value.close()
+
+
+def test_canvas_real_events_add_move_delete_lone_pair_and_single_electron():
+    value=window();enable_structure(value);canvas=value.canvas;canvas._sync_core_viewport()
+    value.mode_panel.set_mode("绘制");QApplication.processEvents()
+    center=QPoint(canvas.width()//2,canvas.height()//2)
+    value._set_tool("atom_label");QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=center);QApplication.processEvents()
+    atom=active_structure(value)["atoms"][0]
+    canvas._refresh_now();atom_center=next(item["center"] for item in canvas._depiction["atoms"] if item["id"]==atom["id"])
+    point=QPoint(round(atom_center["x"]),round(atom_center["y"]))
+    canvas._sync_core_viewport();assert value.session.hit_test(point.x(),point.y())["kind"]=="atom"
+    buttons={button.property("drawKind"):button for button in value.mode_panel.tertiary.findChildren(QToolButton) if button.property("drawKind")}
+    buttons["lone_pair"].click();QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=point);QApplication.processEvents()
+    assert value.session.tool=="lone_pair" and buttons["lone_pair"].isChecked()
+    pair=next(item for item in active_structure(value)["adornments"] if item["alive"])
+    pair_center=next(item["center"] for item in value.session.depict(False)["adornments"] if item["id"]==pair["id"])
+    value._set_tool("move");start=QPoint(round(pair_center["x"]),round(pair_center["y"]));end=start+QPoint(20,10)
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,40)
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    buttons["single_electron"].click();QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=point);QApplication.processEvents()
+    assert value.session.tool=="single_electron" and buttons["single_electron"].isChecked()
+    alive=[item for item in active_structure(value)["adornments"] if item["alive"]]
+    assert {item["text"] for item in alive}=={"••","•"}
+
+    electron=next(item for item in alive if item["text"]=="•")
+    electron_center=next(item["center"] for item in value.session.depict(False)["adornments"] if item["id"]==electron["id"])
+    original=(electron["x"],electron["y"]);value._set_tool("move")
+    start=QPoint(round(electron_center["x"]),round(electron_center["y"]));end=start+QPoint(14,8)
+    QTest.mousePress(canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(canvas,end,40)
+    QTest.mouseRelease(canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    moved=next(item for item in active_structure(value)["adornments"] if item["id"]==electron["id"])
+    assert (moved["x"],moved["y"])!=original
+    electron_center=next(item["center"] for item in value.session.depict(False)["adornments"] if item["id"]==electron["id"])
+    value._set_tool("select_rectangle")
+    QTest.mouseClick(canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(electron_center["x"]),round(electron_center["y"])));QApplication.processEvents()
+    assert canvas.selected_adornments==[electron["id"]]
+    QTest.keyClick(canvas,Qt.Key.Key_Delete);QApplication.processEvents()
+    assert not next(item for item in active_structure(value)["adornments"] if item["id"]==electron["id"])["alive"]
+    QTest.keyClick(canvas,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    assert next(item for item in active_structure(value)["adornments"] if item["id"]==electron["id"])["alive"]
     value.close()
 
 
@@ -765,7 +808,7 @@ def test_real_double_click_selects_start_component_and_drag_shows_chemical_snap(
     QTest.mouseDClick(value.canvas,Qt.MouseButton.LeftButton,pos=pivot);QApplication.processEvents();assert set(value.canvas._selected_atoms)==source_ids
     destination=QPoint(round(stationary["x"]+32),round(stationary["y"]))
     QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=pivot);QTest.mouseMove(value.canvas,destination,80);QApplication.processEvents()
-    assert value.canvas._preview.get("snap_atom") in target_ids and value.canvas._preview.get("text","").startswith("1.00×")
+    assert value.canvas._preview.get("snap_atom") in target_ids and "1.00×" in value.canvas._preview.get("text","")
     QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=destination);QApplication.processEvents()
     assert value.session.gradient_summary(gradient)["moved_atoms"]==len(source_ids)
     value.close()

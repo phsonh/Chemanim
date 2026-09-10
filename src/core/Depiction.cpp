@@ -61,17 +61,32 @@ std::string orientedAlias(const Atom& atom) {
     return oriented;
 }
 
-std::string formattedAlias(const Atom& atom) {
-    const std::string oriented = orientedAlias(atom);
-    const char* tag = atom.numberStyle == AtomNumberStyle::Subscript ? "sub" : "sup";
+struct AliasParts {
+    std::string site;
+    std::string side;
+};
+
+AliasParts aliasParts(const Atom& atom) {
+    std::vector<std::string> groups=labelGroups(atom.alias);
+    if(groups.size()<2)return {orientedAlias(atom),{}};
+    AliasParts result{groups.front(),{}};
+    groups.erase(groups.begin());
+    if(atom.labelSide==AtomLabelSide::Left)std::reverse(groups.begin(),groups.end());
+    for(const std::string& group:groups)result.side+=group;
+    return result;
+}
+
+std::string formattedLabel(const std::string& source, AtomNumberStyle numberStyle) {
+    if(numberStyle==AtomNumberStyle::Normal)return source;
+    const char* tag = numberStyle == AtomNumberStyle::Subscript ? "sub" : "sup";
     std::string result;
-    for (std::size_t index = 0; index < oriented.size();) {
-        if (!std::isdigit(static_cast<unsigned char>(oriented[index]))) {
-            result.push_back(oriented[index++]); continue;
+    for (std::size_t index = 0; index < source.size();) {
+        if (!std::isdigit(static_cast<unsigned char>(source[index]))) {
+            result.push_back(source[index++]); continue;
         }
         std::size_t end = index + 1;
-        while (end < oriented.size() && std::isdigit(static_cast<unsigned char>(oriented[end]))) ++end;
-        result += "<" + std::string(tag) + ">" + oriented.substr(index, end - index) +
+        while (end < source.size() && std::isdigit(static_cast<unsigned char>(source[end]))) ++end;
+        result += "<" + std::string(tag) + ">" + source.substr(index, end - index) +
                   "</" + std::string(tag) + ">";
         index = end;
     }
@@ -105,9 +120,12 @@ BuiltMolecule build(const Molecule& source) {
             if (value.numberStyle == AtomNumberStyle::Normal)
                 result.value->getAtomWithIdx(index)->setProp(
                     RDKit::common_properties::atomLabel, std::string{});
-            else
+            else {
+                const AliasParts parts=aliasParts(value);
                 result.value->getAtomWithIdx(index)->setProp(
-                    RDKit::common_properties::atomLabel, formattedAlias(value));
+                    RDKit::common_properties::atomLabel,
+                    formattedLabel(parts.site,value.numberStyle));
+            }
         }
         result.indices[value.id] = index; result.atomIds.push_back(value.id);result.positions.push_back(value.position);
     }
@@ -173,6 +191,25 @@ std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& d
             owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y));
         const std::string color=rgb(adornment.color,molecule);
         const double opacity=std::clamp(adornment.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
+        const bool lonePair=adornment.text=="••";
+        const bool singleElectron=adornment.text=="•";
+        if(lonePair||singleElectron){
+            const double dotRadius=std::max(style.lineWidthPt*1.25,style.fontPt*.12);
+            const auto ownerCenter=drawer.getDrawCoords(RDGeom::Point2D(owner->position.x,owner->position.y));
+            double tx=-(center.y-ownerCenter.y),ty=center.x-ownerCenter.x;
+            const double length=std::max(1e-9,std::hypot(tx,ty));tx/=length;ty/=length;
+            const double separation=dotRadius*1.65;
+            svg<<"<g class='atom-adornment "<<(lonePair?"lone-pair":"single-electron")
+               <<"' fill='"<<color<<"' stroke='none' opacity='"<<opacity<<"'>\n";
+            if(lonePair){
+                svg<<"<circle cx='"<<center.x-tx*separation<<"' cy='"<<center.y-ty*separation
+                   <<"' r='"<<dotRadius<<"'/>\n"
+                   <<"<circle cx='"<<center.x+tx*separation<<"' cy='"<<center.y+ty*separation
+                   <<"' r='"<<dotRadius<<"'/>\n";
+            }else svg<<"<circle cx='"<<center.x<<"' cy='"<<center.y<<"' r='"<<dotRadius<<"'/>\n";
+            svg<<"</g>\n";
+            continue;
+        }
         const bool negative=adornment.text.find("⊖")!=std::string::npos||
                             adornment.text.find("−")!=std::string::npos||
                             adornment.text.find('-')!=std::string::npos;
@@ -203,7 +240,8 @@ std::string explicitBondSvg(const Molecule& molecule, const Style& style, Drawer
     const double modelPerPoint=reference/std::max(.01,style.bondLengthPt);
     const auto labelExtents=[&](const Atom* atom)->Point{
         if(!atom||atom->hidden||(atom->element=="C"&&atom->alias.empty()))return {};
-        std::size_t glyphs=(atom->alias.empty()?atom->element:atom->alias).size();
+        const AliasParts parts=aliasParts(*atom);
+        std::size_t glyphs=(atom->alias.empty()?atom->element:parts.site).size();
         if(atom->implicitHydrogens>0)glyphs+=1+(atom->implicitHydrogens>1?1:0);
         return {(std::max(style.fontPt*.38,style.fontPt*.28*glyphs)+style.lineWidthPt)*modelPerPoint,
                 (style.fontPt*.50+style.lineWidthPt)*modelPerPoint};
@@ -450,19 +488,37 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     RDKit::MolDraw2DUtils::setACS1996Options(options, referenceBondLength);
     drawer.drawMolecule(*built.value);
     for (const Atom& atom : molecule.atoms) {
-        if (!atom.alive || atom.hidden || atom.alias.empty() ||
-            atom.numberStyle != AtomNumberStyle::Normal) continue;
+        if (!atom.alive || atom.hidden || atom.alias.empty()) continue;
+        const AliasParts parts=aliasParts(atom);
+        if(atom.numberStyle!=AtomNumberStyle::Normal&&parts.side.empty())continue;
         const Color resolved=resolvedColor(atom.color,molecule);
         drawer.setColour(RDKit::DrawColour(
             std::clamp(resolved.red / 255.0, 0.0, 1.0),
             std::clamp(resolved.green / 255.0, 0.0, 1.0),
             std::clamp(resolved.blue / 255.0, 0.0, 1.0),
             std::clamp(atom.alpha * molecule.alpha / (255.0 * 255.0), 0.0, 1.0)));
-        drawer.drawString(orientedAlias(atom),
-            RDGeom::Point2D(atom.position.x, atom.position.y),
-            atom.labelSide == AtomLabelSide::Left
-                ? RDKit::MolDraw2D_detail::TextAlignType::END
-                : RDKit::MolDraw2D_detail::TextAlignType::START);
+        if(atom.numberStyle==AtomNumberStyle::Normal){
+            if(parts.side.empty())drawer.drawString(parts.site,
+                RDGeom::Point2D(atom.position.x,atom.position.y),
+                atom.labelSide==AtomLabelSide::Left
+                    ? RDKit::MolDraw2D_detail::TextAlignType::END
+                    : RDKit::MolDraw2D_detail::TextAlignType::START);
+            else drawer.drawString(parts.site,RDGeom::Point2D(atom.position.x,atom.position.y),
+                                   RDKit::MolDraw2D_detail::TextAlignType::MIDDLE);
+        }
+        if(!parts.side.empty()){
+            // The first element token is the bonded atom and must remain on
+            // the exact atom coordinate.  Only the substituent suffix is
+            // placed to the chosen side (NH/HN, NO2/O2N, ...).
+            const double modelPerPoint=referenceBondLength/std::max(.01,style.bondLengthPt);
+            const double direction=atom.labelSide==AtomLabelSide::Left?-1.0:1.0;
+            const double offset=style.fontPt*.31*modelPerPoint;
+            drawer.drawString(formattedLabel(parts.side,atom.numberStyle),
+                RDGeom::Point2D(atom.position.x+direction*offset,atom.position.y),
+                atom.labelSide==AtomLabelSide::Left
+                    ? RDKit::MolDraw2D_detail::TextAlignType::END
+                    : RDKit::MolDraw2D_detail::TextAlignType::START);
+        }
     }
     const auto origin = drawer.getDrawCoords(RDGeom::Point2D(0.0, 0.0));
     const auto unit = drawer.getDrawCoords(RDGeom::Point2D(1.0, 0.0));

@@ -378,7 +378,10 @@ class MainWindow(QMainWindow):
         menu=QMenu(self);objects=[("分子",{"position":("坐标","molecule_set_position","molecule_lerp_position"),"alpha":("透明度","molecule_set_alpha","molecule_lerp_alpha"),"color":("颜色","molecule_set_color","molecule_lerp_color"),"scale":("缩放","molecule_set_scale","molecule_lerp_scale"),"rotation":("旋转","molecule_set_rotation","molecule_lerp_rotation")})]
         if kind=="atom":objects.append(("原子",{"xy":("坐标","atom_set_xy","atom_lerp_xy"),"alpha":("透明度","atom_set_alpha","atom_lerp_alpha"),"color":("颜色","atom_set_color","atom_lerp_color"),"element":("元素/文字","atom_set_element",None)}))
         elif kind=="bond":objects.append(("键",{"alpha":("透明度","bond_set_alpha","bond_lerp_alpha"),"color":("颜色","bond_set_color","bond_lerp_color"),"type":("视觉键型","bond_set_order",None),"secondary":("双键副线方向","bond_set_secondary_side",None)}))
-        elif kind=="adornment":objects.append(("形式电荷",{"offset":("坐标","adornment_set_offset","adornment_lerp_offset"),"alpha":("透明度","adornment_set_alpha","adornment_lerp_alpha"),"color":("颜色","adornment_set_color","adornment_lerp_color")}))
+        elif kind=="adornment":
+            adornment=next((item for item in molecule.get("adornments",[]) if item.get("id")==hit.get("id")),{})
+            object_label={"••":"孤对电子","•":"单电子"}.get(adornment.get("text"),"形式电荷")
+            objects.append((object_label,{"offset":("坐标","adornment_set_offset","adornment_lerp_offset"),"alpha":("透明度","adornment_set_alpha","adornment_lerp_alpha"),"color":("颜色","adornment_set_color","adornment_lerp_color")}))
         for object_label,properties in objects:
             root=menu.addMenu(object_label);set_menu=root.addMenu("设定");lerp_menu=root.addMenu("插值")
             for _key,(label,set_type,lerp_type) in properties.items():

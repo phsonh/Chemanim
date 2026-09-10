@@ -33,6 +33,11 @@ def icon_for(kind: str, text="") -> QIcon:
     elif kind in ("charge_positive","charge_negative"):
         painter.drawEllipse(5,5,18,18);painter.drawLine(9,14,19,14)
         if kind=="charge_positive":painter.drawLine(14,9,14,19)
+    elif kind=="lone_pair":
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(225,230,238))
+        painter.drawEllipse(QPointF(10.5,14),2.2,2.2);painter.drawEllipse(QPointF(17.5,14),2.2,2.2)
+    elif kind=="single_electron":
+        painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(225,230,238));painter.drawEllipse(QPointF(14,14),2.4,2.4)
     elif kind=="atom_text":
         painter.drawText(7,21,"A")
     else:
@@ -46,7 +51,7 @@ def icon_for(kind: str, text="") -> QIcon:
 class ModeToolPanel(QWidget):
     nodeRequested=pyqtSignal(str);drawToolRequested=pyqtSignal(str);elementRequested=pyqtSignal(str);periodicTableRequested=pyqtSignal()
     SCRIPT_CATEGORIES=("通用","分子","箭头");DRAW_CATEGORIES=("绘制",)
-    STRUCTURE_WRITE_TOOLS={"eraser","atom_label","atom_text","charge_positive","charge_negative",
+    STRUCTURE_WRITE_TOOLS={"eraser","atom_label","atom_text","charge_positive","charge_negative","lone_pair","single_electron",
         "single_bond","double_bond","triple_bond","solid_wedge","dashed_wedge","solid_bar",
         "hashed_bar","wavy_bond","ring3","ring4","ring5","ring6","ring7","ring8","benzene"}
 
@@ -224,6 +229,8 @@ class ModeToolPanel(QWidget):
             self._separator()
             self._tool("charge_positive","⊕",self.drawToolRequested,True,"形式正电荷（带圈 +）",icon_only=True)
             self._tool("charge_negative","⊖",self.drawToolRequested,True,"形式负电荷（带圈 −）",icon_only=True)
+            self._tool("lone_pair","••",self.drawToolRequested,True,"孤对电子",icon_only=True)
+            self._tool("single_electron","•",self.drawToolRequested,True,"单电子",icon_only=True)
             self._separator()
             self._tool("atom_text","文字",self.drawToolRequested,True,"原子文字：点击后输入，左右拖动决定排版",icon_only=True)
             self._text_style_button("X2","normal","数字正常排列")

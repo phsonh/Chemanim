@@ -709,6 +709,63 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
     assert "class='formal-charge'" in svg and "<circle" in svg
 
 
+def test_lone_pair_and_single_electron_are_positioned_structure_objects():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
+    point=canvas_point(core,atom["id"])
+    expected=(("lone_pair","••","lone-pair",(point[0]+70,point[1]-20)),
+              ("single_electron","•","single-electron",(point[0]-70,point[1]-20)))
+    for tool,text,svg_class,end in expected:
+        core.set_tool(tool);down=core.pointer_down(*point)
+        assert down["preview"]["kind"]=="adornment" and down["preview"]["text"]==text
+        core.pointer_move(*end);assert core.pointer_up(*end)["changed"]
+        value=next(item for item in reversed(adornments(core)) if item["alive"])
+        assert value["text"]==text and math.isclose(math.hypot(value["x"],value["y"]),20,rel_tol=1e-9)
+        assert f"class='atom-adornment {svg_class}'" in core.depict(False)["svg"]
+    assert len([item for item in adornments(core) if item["alive"]])==2
+
+    centers={item["id"]:item["center"] for item in core.depict(False)["adornments"]}
+    pair=next(item for item in adornments(core) if item["text"]=="••")
+    core.set_tool("select_rectangle");center=centers[pair["id"]]
+    core.pointer_down(center["x"],center["y"]);selected=core.pointer_up(center["x"],center["y"])
+    assert selected["selected_adornments"]==[pair["id"]] and core.delete_selection()
+    assert not next(item for item in adornments(core) if item["id"]==pair["id"])["alive"]
+    assert core.undo() and next(item for item in adornments(core) if item["id"]==pair["id"])["alive"]
+
+
+def test_electron_adornments_crossfade_and_survive_save_reload():
+    core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":core.active_molecule,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient);gesture(core,"lone_pair",canvas_point(core,atom["id"]));pair=adornments(core)[0]
+    middle=next(item for item in core.evaluated_project(15)["molecules"] if item["id"]==core.active_molecule)
+    assert 120<=next(item for item in middle["adornments"] if item["id"]==pair["id"])["alpha"]<=135
+    restored=CoreSession();restored.replace_json(core.json());restored.edit_node(gradient)
+    assert next(item for item in structure(restored)["adornments"] if item["id"]==pair["id"])["text"]=="••"
+    assert "class='atom-adornment lone-pair'" in restored.depict(False)["svg"]
+    assert "••" in restored.generate_lua()
+    assert "class='atom-adornment lone-pair'" in restored.depict_at(30,False)["svg"]
+
+
+def test_multitoken_atom_label_keeps_bonded_element_on_atom_site():
+    core=session();gesture(core,"ring6",(480,270));atom_id=atoms(core)[3]["id"]
+    assert sum(bond["alive"] and atom_id in (bond["a"],bond["b"]) for bond in bonds(core))==2
+
+    core.set_atom_label(atom_id,"N","right","subscript")
+    base=core.depict(True);center=next(item["center"] for item in base["atoms"] if item["id"]==atom_id)
+    core.set_atom_label(atom_id,"NH","right","subscript")
+    right=core.depict(True)
+    difference=ImageChops.difference(
+        Image.frombytes("RGBA",(base["width"],base["height"]),base["rgba"]),
+        Image.frombytes("RGBA",(right["width"],right["height"]),right["rgba"]))
+    right_box=difference.getbbox();assert right_box and right_box[0]>=center["x"]-2 and right_box[2]>center["x"]+5
+
+    core.set_atom_label(atom_id,"NH","left","subscript")
+    left=core.depict(True)
+    difference=ImageChops.difference(
+        Image.frombytes("RGBA",(base["width"],base["height"]),base["rgba"]),
+        Image.frombytes("RGBA",(left["width"],left["height"]),left["rgba"]))
+    left_box=difference.getbbox();assert left_box and left_box[2]<=center["x"]+2 and left_box[0]<center["x"]-5
+
+
 def test_formal_charge_uses_one_fixed_twenty_unit_radius():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
     gesture(core,"charge_positive",point)

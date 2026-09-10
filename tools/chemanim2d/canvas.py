@@ -433,12 +433,18 @@ class StructureCanvas(QWidget):
                     path=QPainterPath(points[0]);path.cubicTo(points[1],points[2],points[3]);painter.drawPath(path)
                     painter.setPen(QPen(QColor(230,145,45,185),1.2,Qt.PenStyle.DashLine));painter.drawLine(points[0],points[1]);painter.drawLine(points[3],points[2])
             elif kind=="adornment" and current:
-                center=QPointF(current["x"],current["y"]);radius=8.0
-                painter.setBrush(QColor(45,145,235,24));painter.drawEllipse(center,radius,radius)
-                painter.setPen(QPen(QColor(45,145,235,230),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
-                painter.drawLine(QPointF(center.x()-4,center.y()),QPointF(center.x()+4,center.y()))
-                if self._preview.get("text")=="⊕":
-                    painter.drawLine(QPointF(center.x(),center.y()-4),QPointF(center.x(),center.y()+4))
+                center=QPointF(current["x"],current["y"]);text=self._preview.get("text")
+                if text in ("•","••"):
+                    painter.setPen(Qt.PenStyle.NoPen);painter.setBrush(QColor(45,145,235,230))
+                    if text=="••":
+                        painter.drawEllipse(QPointF(center.x()-3,center.y()),2.0,2.0)
+                        painter.drawEllipse(QPointF(center.x()+3,center.y()),2.0,2.0)
+                    else:painter.drawEllipse(center,2.2,2.2)
+                else:
+                    radius=8.0;painter.setBrush(QColor(45,145,235,24));painter.drawEllipse(center,radius,radius)
+                    painter.setPen(QPen(QColor(45,145,235,230),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+                    painter.drawLine(QPointF(center.x()-4,center.y()),QPointF(center.x()+4,center.y()))
+                    if text=="⊕":painter.drawLine(QPointF(center.x(),center.y()-4),QPointF(center.x(),center.y()+4))
             elif kind=="text" and start and current:
                 first=QPointF(start["x"],start["y"]);second=QPointF(current["x"],current["y"])
                 painter.setPen(QPen(QColor(45,145,235,230),2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))

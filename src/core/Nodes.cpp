@@ -71,12 +71,12 @@ const json& registry() {
         definition("merge_molecules", "合并分子", "分子", "对象", {field("target","主分子","molecule",""),field("source","并入分子","molecule",""),field("output","新分子","molecule","")}),
         definition("split_molecule", "分裂分子", "分子", "对象", {field("target","原分子","molecule",""),field("output","新分子","molecule","")}),
 
-        definition("adornment_set_offset", "设定形式电荷坐标", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("x","本地 X","float",0),field("y","本地 Y","float",0)}),
-        definition("adornment_lerp_offset", "插值形式电荷坐标", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("x","目标本地 X","float",0),field("y","目标本地 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("adornment_set_alpha", "设定形式电荷透明度", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("value","Alpha","alpha",255)}),
-        definition("adornment_lerp_alpha", "插值形式电荷透明度", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("value","目标 Alpha","alpha",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
-        definition("adornment_set_color", "设定形式电荷颜色", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("r","R","byte",0),field("g","G","byte",0),field("b","B","byte",0)}),
-        definition("adornment_lerp_color", "插值形式电荷颜色", "分子", "形式电荷", {field("target","分子","molecule",""),field("adornment","形式电荷 ID","text",""),field("r","目标 R","byte",0),field("g","目标 G","byte",0),field("b","目标 B","byte",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("adornment_set_offset", "设定电荷/电子坐标", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("x","本地 X","float",0),field("y","本地 Y","float",0)}),
+        definition("adornment_lerp_offset", "插值电荷/电子坐标", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("x","目标本地 X","float",0),field("y","目标本地 Y","float",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("adornment_set_alpha", "设定电荷/电子透明度", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("value","Alpha","alpha",255)}),
+        definition("adornment_lerp_alpha", "插值电荷/电子透明度", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("value","目标 Alpha","alpha",255),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
+        definition("adornment_set_color", "设定电荷/电子颜色", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("r","R","byte",0),field("g","G","byte",0),field("b","B","byte",0)}),
+        definition("adornment_lerp_color", "插值电荷/电子颜色", "分子", "电荷/电子", {field("target","分子","molecule",""),field("adornment","电荷/电子标记","text",""),field("r","目标 R","byte",0),field("g","目标 G","byte",0),field("b","目标 B","byte",0),field("frames","帧数","int",30),field("easing","缓动","easing","linear")}),
 
         definition("arrow_new", "新建箭头", "箭头", "对象", {field("target","箭头名","arrow","arrow1")}),
         definition("arrow_delete", "删除箭头", "箭头", "对象", {field("target","箭头","arrow","")}),
