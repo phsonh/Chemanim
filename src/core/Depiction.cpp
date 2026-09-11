@@ -480,11 +480,27 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     options.clearBackground = false; options.prepareMolsBeforeDrawing = false;
     if (!style.fontFile.empty()) options.fontFile = style.fontFile;
     RDKit::MolDraw2DUtils::setACS1996Options(options, referenceBondLength);
+    // Close-contact markers are RDKit diagnostics, not document content.
+    // Merged fragments may legitimately overlap while a gradient end state is
+    // being arranged; the default option otherwise leaks a tiny red cross/dot
+    // into the editor and exported frames. Explicit electron adornments are
+    // rendered separately below and remain visible.
+    options.flagCloseContactsDist = -1;
     drawer.drawMolecule(*built.value);
+    unsigned int manualLabelIndex=0;
     for (const Atom& atom : molecule.atoms) {
-        if (!atom.alive || atom.hidden || atom.alias.empty()) continue;
+        if (!atom.alive) continue;
+        const unsigned int atomIndex=manualLabelIndex++;
+        if (atom.hidden || atom.alias.empty()) continue;
+        // Literal label pieces are drawn after RDKit's topology pass so we
+        // can keep the atom-site token fixed while laying a suffix out in a
+        // ChemDraw-like direction. Associate every piece with its atom: the
+        // SVG post-pass below can then apply that atom's animated opacity and
+        // colour to both sides of a structure-label cross-fade.
         const AliasParts parts=aliasParts(atom);
         if(atom.numberStyle!=AtomNumberStyle::Normal&&parts.side.empty())continue;
+        drawer.setActiveAtmIdx(static_cast<int>(atomIndex));
+        drawer.setActiveClass("manual-atom-"+std::to_string(atomIndex));
         const Color resolved=resolvedColor(atom.color,molecule);
         drawer.setColour(RDKit::DrawColour(
             std::clamp(resolved.red / 255.0, 0.0, 1.0),
@@ -525,6 +541,8 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
             drawer.drawString(formattedLabel(parts.side,atom.numberStyle),
                 RDGeom::Point2D(atom.position.x+dx,atom.position.y+dy),alignment);
         }
+        drawer.setActiveClass();
+        drawer.setActiveAtmIdx();
     }
     const auto origin = drawer.getDrawCoords(RDGeom::Point2D(0.0, 0.0));
     const auto unit = drawer.getDrawCoords(RDGeom::Point2D(1.0, 0.0));
@@ -599,7 +617,23 @@ DepictionResult DepictionCore::depict(const Molecule& molecule, const Style& sty
     }
     drawer.finishDrawing(); result.svg = drawer.getDrawingText();
     unsigned labelIndex=0;
-    for(const Atom& atom:molecule.atoms){if(!atom.alive)continue;const std::string pattern="(<path class='atom-"+std::to_string(labelIndex)+"'[^>]*fill=')#[0-9A-Fa-f]{6}('[^>]*)(/>)";const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);result.svg=std::regex_replace(result.svg,std::regex(pattern),"$1"+hexColor(atom.color,molecule)+"$2 opacity='"+std::to_string(opacity)+"'$3");++labelIndex;}
+    for(const Atom& atom:molecule.atoms){
+        if(!atom.alive)continue;
+        const double opacity=std::clamp(atom.alpha*molecule.alpha/(255.0*255.0),0.0,1.0);
+        const std::string replacement="$1"+hexColor(atom.color,molecule)+"$2 opacity='"+std::to_string(opacity)+"'$3";
+        const std::string atomClass="atom-"+std::to_string(labelIndex);
+        const std::string manualClass="manual-atom-"+std::to_string(labelIndex);
+        // RDKit encodes alpha in manual drawString() fills as #RRGGBBAA.
+        // Qt's SVG renderer does not consistently honour that form, leaving
+        // an old NH suffix opaque until the layout changes at the endpoint.
+        // Normalize both RDKit's atom glyph and every manual label piece to
+        // an ordinary RGB fill plus an explicit SVG opacity.
+        for(const std::string& className:{atomClass,manualClass}){
+            const std::string pattern="(<path class='(?:[^']+ )?"+className+"(?: [^']+)?'[^>]*fill=')#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?('[^>]*)(/>)";
+            result.svg=std::regex_replace(result.svg,std::regex(pattern),replacement);
+        }
+        ++labelIndex;
+    }
     result.svg=std::regex_replace(result.svg,std::regex("<path class='bond-[^>]*?(?:/>|></path>)"),"");
     // MolDraw2D ACS output also emits small anonymous miter patches at
     // carbon junctions.  Once the classed RDKit bonds are replaced by our

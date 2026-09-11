@@ -5,8 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
-from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
+from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QTimer
+from PyQt6.QtGui import QColor, QDropEvent, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
                              QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog, QDialogButtonBox,
@@ -92,6 +92,36 @@ def test_node_ui_edits_the_core_ordered_sequence(tmp_path:Path):
     timing=next(item for item in value.session.node_timings() if item["id"]==lerp_id);assert timing["start"]==0
     path=tmp_path/"ui-roundtrip.cmm";value.session.save(str(path));value.session.load(str(path))
     assert [node["id"] for node in value.session.project()["nodes"]]==[node["id"] for node in json.loads(path.read_text(encoding="utf-8"))["nodes"]]
+    value.close()
+
+
+def test_dragged_node_order_survives_wait_parameter_refresh():
+    value=window();target=value.session.active_molecule
+    gradient=value._add_node("molecule_gradient_structure",{
+        "target":target,"frames":30,"easing":"linear"},False)
+    wait=value._add_node("wait",{"frames":30},False)
+    tree=value.node_list.tree
+    items={tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole):tree.topLevelItem(index)
+           for index in range(tree.topLevelItemCount())}
+    tree.scrollToItem(items[gradient]);QApplication.processEvents()
+    source=tree.visualItemRect(items[gradient]).center()
+    destination=tree.visualItemRect(items[wait]).bottomLeft()+QPoint(20,-2)
+    QTest.mouseClick(tree.viewport(),Qt.MouseButton.LeftButton,pos=source)
+    drop=QDropEvent(QPointF(destination),Qt.DropAction.MoveAction,QMimeData(),
+                    Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
+    tree.dropEvent(drop)
+    QApplication.processEvents()
+    order=[node["id"] for node in value.session.project()["nodes"]]
+    assert order.index(gradient)==order.index(wait)+1
+
+    inspector=open_inspector_real(value,wait)
+    frames=inspector.findChildren(QSpinBox)[0]
+    frames.setFocus();frames.selectAll();QTest.keyClicks(frames,"60");QTest.keyClick(frames,Qt.Key.Key_Return)
+    QApplication.processEvents()
+    order=[node["id"] for node in value.session.project()["nodes"]]
+    visible=[tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)
+             for index in range(tree.topLevelItemCount())]
+    assert order.index(gradient)==order.index(wait)+1 and visible==order
     value.close()
 
 

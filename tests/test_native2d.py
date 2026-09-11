@@ -709,6 +709,49 @@ def test_formal_charge_has_drag_preview_15_degree_offset_and_circled_svg():
     assert "class='formal-charge'" in svg and "<circle" in svg
 
 
+def test_rdkit_close_contact_diagnostic_never_leaks_as_a_red_atom_dot():
+    core=session();gesture(core,"ring6",(480,270));atom=atoms(core)[0]
+    assert core.set_atom_label(atom["id"],"NH","top","subscript")
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({
+        "target":core.active_molecule,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient)
+    assert core.set_atom_label(atom["id"],"NH","right","subscript")
+
+    # A label-layout cross-fade deliberately carries two visual copies of the
+    # atom at exactly the same position. RDKit's default close-contact warning
+    # used to leak a red dot/cross into editor and exported frames.
+    svg=core.depict_at(15,False)["svg"]
+    assert "#FF0000" not in svg.upper()
+
+
+def test_gradient_atom_label_direction_crossfades_every_label_piece():
+    core=session();gesture(core,"ring6",(480,270));atom=atoms(core)[0]
+    assert core.set_atom_label(atom["id"],"NH","top","subscript")
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({
+        "target":core.active_molecule,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient)
+    assert core.set_atom_label(atom["id"],"NH","right","subscript")
+
+    middle=next(value for value in core.evaluated_project(15)["molecules"]
+                if value["id"]==core.active_molecule)
+    labels=[value for value in middle["atoms"] if value["label"]=="NH"]
+    assert {value["label_side"] for value in labels}=={"top","right"}
+    assert all(value["alpha"] in (127,128) for value in labels)
+
+    # Each copy has both an N site glyph and an H suffix glyph. They must all
+    # carry the interpolated atom opacity; otherwise H remains opaque and then
+    # jumps when the old layout is removed at the endpoint.
+    svg=core.depict_at(15,False)["svg"]
+    for index in range(2):
+        site_paths=re.findall(r"<path class='atom-%d'[^>]*>" % index,svg)
+        suffix_paths=re.findall(r"<path class='manual-atom-%d'[^>]*>" % index,svg)
+        assert site_paths and suffix_paths
+        assert all(path.count("opacity='0.501961'")==1
+                   for path in site_paths+suffix_paths)
+        assert not any(re.search(r"fill='#[0-9A-Fa-f]{8}'",path)
+                       for path in site_paths+suffix_paths)
+
+
 def test_lone_pair_and_single_electron_are_positioned_structure_objects():
     core=session();gesture(core,"atom_label",(480,270));atom=atoms(core)[0]
     point=canvas_point(core,atom["id"])

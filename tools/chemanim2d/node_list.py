@@ -22,6 +22,37 @@ def _arrow_name(value):
     return f"箭头 {suffix}" if suffix else str(value)
 
 
+class NodeTree(QTreeWidget):
+    """A flat tree whose internal drop has one authoritative final index."""
+
+    orderDropped = pyqtSignal(str, int)
+
+    def dropEvent(self, event):
+        source = self.currentItem()
+        if source is None or source.parent() is not None:
+            event.ignore(); return
+        old_index = self.indexOfTopLevelItem(source)
+        position = event.position().toPoint()
+        target = self.itemAt(position)
+        while target is not None and target.parent() is not None:
+            target = target.parent()
+        if target is None:
+            insertion = self.topLevelItemCount()
+        else:
+            target_index = self.indexOfTopLevelItem(target)
+            insertion = target_index + (position.y() > self.visualItemRect(target).center().y())
+        if old_index < insertion:
+            insertion -= 1
+        insertion = max(0, min(insertion, self.topLevelItemCount() - 1))
+        if insertion == old_index:
+            event.ignore(); return
+        item = self.takeTopLevelItem(old_index)
+        self.insertTopLevelItem(insertion, item)
+        self.setCurrentItem(item)
+        event.setDropAction(Qt.DropAction.MoveAction); event.accept()
+        self.orderDropped.emit(item.data(0, Qt.ItemDataRole.UserRole), insertion)
+
+
 class NodeList(QWidget):
     nodeSelected = pyqtSignal(str)
     frameRequested = pyqtSignal(int)
@@ -33,7 +64,7 @@ class NodeList(QWidget):
 
     def __init__(self, session, parent=None):
         super().__init__(parent); self.session = session; self._updating = False; self._copied_node_id = ""
-        self.tree = QTreeWidget(); self.tree.setColumnCount(1);self.tree.setHeaderHidden(True)
+        self.tree = NodeTree(); self.tree.setColumnCount(1);self.tree.setHeaderHidden(True)
         font=self.tree.font();font.setPointSizeF(max(10.5,font.pointSizeF()+1.0));self.tree.setFont(font)
         self.tree.setRootIsDecorated(False); self.tree.setUniformRowHeights(True)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
@@ -41,7 +72,7 @@ class NodeList(QWidget):
         self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.tree.installEventFilter(self)
         self.tree.currentItemChanged.connect(self._selected); self.tree.itemDoubleClicked.connect(self._double_clicked)
-        self.tree.model().rowsMoved.connect(self._rows_moved)
+        self.tree.orderDropped.connect(self._order_dropped)
         buttons = QHBoxLayout()
         for text, callback in (("复制", self.duplicate), ("删除", self.delete), ("上移", lambda: self.move(-1)), ("下移", lambda: self.move(1))):
             button = QPushButton(text); button.clicked.connect(callback); buttons.addWidget(button)
@@ -131,15 +162,13 @@ class NodeList(QWidget):
         if timing: self.frameRequested.emit(timing["start"])
         self.editRequested.emit(node_id)
 
-    def _rows_moved(self, *args):
-        if self._updating: return
-        for index in range(self.tree.topLevelItemCount()):
-            node_id = self.tree.topLevelItem(index).data(0, Qt.ItemDataRole.UserRole)
-            project = self.session.project(); current = next((i for i, value in enumerate(project["nodes"]) if value["id"] == node_id), -1)
-            if current != index:
-                if self.session.move_node(node_id, index): self.sequenceEdited.emit()
-                else:self.operationRejected.emit("不能把节点移出目标对象的有效生命周期")
-                self.refresh(node_id); break
+    def _order_dropped(self, node_id, index):
+        if self._updating:return
+        if self.session.move_node(node_id,index):
+            self.sequenceEdited.emit()
+        else:
+            self.operationRejected.emit("不能把节点移出目标对象的有效生命周期")
+            self.refresh(node_id)
 
     def duplicate(self):
         if node_id := self.current_id():
