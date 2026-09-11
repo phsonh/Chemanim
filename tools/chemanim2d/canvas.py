@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QMimeData, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (QColor, QImage, QKeyEvent, QKeySequence, QMouseEvent,
                          QPainter, QPainterPath, QPen, QPolygonF, QWheelEvent)
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from .core import CoreSession
 
@@ -21,6 +21,7 @@ class StructureCanvas(QWidget):
     redoRequested = pyqtSignal()
     atomTextRequested = pyqtSignal(str, str)
     manipulationChanged = pyqtSignal()
+    STRUCTURE_MIME = "application/x-chemanim-structure-v1"
 
     def __init__(self, session: CoreSession, parent=None):
         super().__init__(parent)
@@ -450,16 +451,19 @@ class StructureCanvas(QWidget):
                 painter.setPen(QPen(QColor(45,145,235,230),2,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
                 painter.drawLine(first,second);painter.drawEllipse(second,4,4)
             snap_id=self._preview.get("snap_atom","")
-            if snap_id and current and self._depiction:
-                target=next((item.get("center") for item in self._depiction.get("atoms",[]) if item.get("id")==snap_id),None)
-                if target:
-                    target_point=QPointF(target["x"],target["y"]);anchor=QPointF(current["x"],current["y"])
-                    painter.setPen(QPen(QColor(35,170,235,235),2,Qt.PenStyle.DashLine))
-                    painter.setBrush(QColor(35,170,235,34));painter.drawEllipse(target_point,11,11)
-                    painter.drawLine(target_point,anchor);painter.drawEllipse(anchor,9,9)
-                    label=self._preview.get("text","")
-                    if label:
-                        painter.setPen(QPen(QColor(35,130,215),1));painter.drawText(anchor+QPointF(12,-10),label)
+            origin=self._preview.get("snap_origin")
+            target=self._preview.get("snap_target")
+            if not origin and snap_id and current and self._depiction:
+                origin=next((item.get("center") for item in self._depiction.get("atoms",[]) if item.get("id")==snap_id),None)
+                target=current
+            if origin and target:
+                origin_point=QPointF(origin["x"],origin["y"]);target_point=QPointF(target["x"],target["y"])
+                painter.setPen(QPen(QColor(35,170,235,235),2,Qt.PenStyle.DashLine))
+                painter.setBrush(QColor(35,170,235,34));painter.drawEllipse(origin_point,11,11)
+                painter.drawLine(origin_point,target_point);painter.drawEllipse(target_point,9,9)
+                label=self._preview.get("text","")
+                if label:
+                    painter.setPen(QPen(QColor(35,130,215),1));painter.drawText(target_point+QPointF(12,-10),label)
 
     @staticmethod
     def _mods(event):
@@ -558,6 +562,21 @@ class StructureCanvas(QWidget):
         self.request_refresh();event.accept()
 
     def keyPressEvent(self,event:QKeyEvent):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            payload=self.session.copy_selection()
+            if payload:
+                mime=QMimeData();mime.setData(self.STRUCTURE_MIME,payload.encode("utf-8"))
+                QApplication.clipboard().setMimeData(mime)
+            event.accept();return
+        if event.matches(QKeySequence.StandardKey.Paste):
+            mime=QApplication.clipboard().mimeData()
+            if mime.hasFormat(self.STRUCTURE_MIME):
+                payload=bytes(mime.data(self.STRUCTURE_MIME)).decode("utf-8")
+                result=self.session.paste_structure(payload)
+                self._consume(result)
+                if result.get("changed"):
+                    self.request_refresh();self.transactionCommitted.emit()
+            event.accept();return
         if event.matches(QKeySequence.StandardKey.SelectAll):
             self._consume(self.session.select_all());self.request_refresh();event.accept();return
         if event.matches(QKeySequence.StandardKey.Undo):

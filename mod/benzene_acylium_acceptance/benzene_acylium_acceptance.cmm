@@ -1751,7 +1751,11 @@
   },
   "style": {
     "bond_length_pt": 14.4,
+    "charge_adornment_distance": 20.0,
+    "default_arrow_width": 1.5,
     "double_bond_spacing": 0.18,
+    "electron_adornment_distance": 20.0,
+    "electron_dot_radius_pt": 0.75,
     "font_family": "Arial",
     "font_file": "C:/Windows/Fonts/arial.ttf",
     "font_pt": 10.0,

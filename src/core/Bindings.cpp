@@ -41,7 +41,10 @@ py::dict editResult(const core::EditResult& value) {
     py::dict preview; preview["active"] = value.preview.active;preview["kind"]=previewNames[static_cast<int>(value.preview.kind)]; preview["start"] = point(value.preview.start); preview["current"] = point(value.preview.current);
     py::list polygon; for (const core::Point& item : value.preview.polygon) polygon.append(point(item)); preview["polygon"] = polygon;
     preview["text"] = value.preview.text;
-    preview["snap_atom"] = value.preview.snapAtomId ? py::cast(*value.preview.snapAtomId) : py::none(); result["preview"] = preview;
+    preview["snap_atom"] = value.preview.snapAtomId ? py::cast(*value.preview.snapAtomId) : py::none();
+    if(value.preview.snapOrigin)preview["snap_origin"]=point(*value.preview.snapOrigin);else preview["snap_origin"]=py::none();
+    if(value.preview.snapTarget)preview["snap_target"]=point(*value.preview.snapTarget);else preview["snap_target"]=py::none();
+    result["preview"] = preview;
     return result;
 }
 
@@ -80,6 +83,8 @@ public:
     bool adjustArrowCurveBend(int direction) { return session_.adjustArrowCurveBend(direction); }
     void cancelGesture() { session_.cancelGesture(); }
     py::dict selectAll() { return editResult(session_.selectAll()); }
+    std::string copySelection() const{return session_.copySelectionJson();}
+    py::dict pasteStructure(const std::string& payload){return editResult(session_.pasteStructureJson(payload));}
     bool deleteSelection() { return session_.deleteSelection(); }
     bool setAtomPosition(const std::string& id, double x, double y) { return session_.setAtomPosition(id,{x,y}); }
     bool setAtomElement(const std::string& id, const std::string& value) { return session_.setAtomElement(id,value); }
@@ -138,6 +143,49 @@ public:
     py::object evaluatedProject(int frame)const{core::Project value=session_.project();value.molecules.clear();for(const auto& [_,molecule]:core::evaluateNodes(session_.project(),frame).molecules)value.molecules.push_back(molecule);value.nodes.clear();return jsonObject(core::toJson(value));}
 
     py::dict depict(bool finalEffect) {
+        if(!finalEffect&&session_.canEditStructure()&&[&]{
+            const core::EvaluatedScene scene=core::evaluateNodes(session_.project(),session_.previewFrame());
+            return std::any_of(scene.molecules.begin(),scene.molecules.end(),[&](const auto& item){
+                return item.first!=session_.activeMoleculeId()&&!item.second.retired&&item.second.visible;
+            });
+        }()){
+            core::EvaluatedScene evaluated=core::evaluateNodes(session_.project(),session_.previewFrame());
+            evaluated.molecules[session_.activeMoleculeId()]=session_.displayMolecule();
+            core::DepictionResult composite;composite.width=session_.viewport().width;composite.height=session_.viewport().height;
+            composite.svg="<svg xmlns='http://www.w3.org/2000/svg' width='"+std::to_string(composite.width)+"px' height='"+std::to_string(composite.height)+"px' viewBox='0 0 "+std::to_string(composite.width)+" "+std::to_string(composite.height)+"'>\n";
+            std::vector<std::pair<std::string,const core::Molecule*>> ordered;
+            for(const auto& [id,molecule]:evaluated.molecules)ordered.push_back({id,&molecule});
+            std::stable_sort(ordered.begin(),ordered.end(),[](const auto& first,const auto& second){
+                if(first.second->layer!=second.second->layer)return first.second->layer<second.second->layer;
+                return first.first<second.first;
+            });
+            py::list referenceAtoms;
+            for(const auto& [id,molecule]:ordered){
+                if(molecule->retired||!molecule->visible)continue;
+                const core::DepictionResult depiction=depiction_.depict(*molecule,session_.project().style,session_.viewport());
+                const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");
+                if(start!=std::string::npos&&end!=std::string::npos){
+                    const double viewWidth=depiction.viewBox.right-depiction.viewBox.left;
+                    const double viewHeight=depiction.viewBox.bottom-depiction.viewBox.top;
+                    if(viewWidth>0.0&&viewHeight>0.0){
+                        const double sx=composite.width/viewWidth,sy=composite.height/viewHeight;
+                        composite.svg.append("<g data-molecule='"+id+"' transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
+                        composite.svg.append(depiction.svg.substr(start+1,end-start-1));composite.svg.append("\n</g>\n");
+                    }
+                }
+                if(id==session_.activeMoleculeId()){
+                    composite.atoms=depiction.atoms;composite.bonds=depiction.bonds;composite.adornments=depiction.adornments;
+                    composite.modelScale=depiction.modelScale;composite.modelOrigin=depiction.modelOrigin;
+                }else for(const auto& atom:depiction.atoms){py::dict item;item["molecule"]=id;item["center"]=point(atom.center);referenceAtoms.append(item);}
+            }
+            composite.svg+="</svg>";
+            py::dict result;result["width"]=composite.width;result["height"]=composite.height;result["svg"]=composite.svg;
+            py::dict transform;transform["origin"]=point(composite.modelOrigin);transform["pixels_per_unit"]=composite.modelScale;result["transform"]=transform;
+            py::list atoms;for(const auto& atom:composite.atoms){py::dict item;item["id"]=atom.id;item["center"]=point(atom.center);item["bounds"]=py::make_tuple(atom.labelBounds.left,atom.labelBounds.top,atom.labelBounds.right,atom.labelBounds.bottom);atoms.append(item);}result["atoms"]=atoms;
+            py::list bonds;for(const auto& bond:composite.bonds){py::dict item;item["id"]=bond.id;item["first"]=point(bond.first);item["second"]=point(bond.second);item["type"]=core::toString(bond.type);item["secondary_line_side"]=core::toString(bond.secondaryLineSide);item["stereo"]=core::toString(bond.stereo);item["line_spacing"]=bond.lineSpacing;item["first_extensions"]=py::make_tuple(bond.firstNegativeExtension,bond.firstPositiveExtension);item["second_extensions"]=py::make_tuple(bond.secondNegativeExtension,bond.secondPositiveExtension);py::list polygon;for(auto value:bond.hitPolygon)polygon.append(point(value));item["hit_polygon"]=polygon;bonds.append(item);}result["bonds"]=bonds;
+            py::list adornments;for(const auto& adornment:composite.adornments){py::dict item;item["id"]=adornment.id;item["atom"]=adornment.atomId;item["center"]=point(adornment.center);adornments.append(item);}result["adornments"]=adornments;
+            result["reference_atoms"]=referenceAtoms;result["rgba"]=py::none();return result;
+        }
         const core::Molecule molecule = session_.displayMolecule();
         const core::DepictionResult depiction = depiction_.depict(molecule, session_.project().style, session_.viewport());
         core::Viewport actual = session_.viewport();
@@ -286,7 +334,9 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("pointer_up", &CoreSession::pointerUp, py::arg("x"),py::arg("y"),py::arg("alt")=false,py::arg("control")=false,py::arg("shift")=false)
         .def("select_connected_component",&CoreSession::selectConnectedComponent,py::arg("atom_id"),py::arg("additive")=false)
         .def("adjust_arrow_curve_bend", &CoreSession::adjustArrowCurveBend)
-        .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll).def("delete_selection", &CoreSession::deleteSelection)
+        .def("cancel_gesture", &CoreSession::cancelGesture).def("select_all", &CoreSession::selectAll)
+        .def("copy_selection",&CoreSession::copySelection).def("paste_structure",&CoreSession::pasteStructure)
+        .def("delete_selection", &CoreSession::deleteSelection)
         .def("set_atom_position", &CoreSession::setAtomPosition).def("set_atom_element", &CoreSession::setAtomElement)
         .def("set_atom_label", &CoreSession::setAtomLabel)
         .def("add_charge_adornment", &CoreSession::addChargeAdornment).def("set_adornment_offset",&CoreSession::setAdornmentOffset).def_property_readonly("can_undo", &CoreSession::canUndo)

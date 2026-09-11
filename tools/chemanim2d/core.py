@@ -23,7 +23,7 @@ try:
         "can_edit_structure", "can_direct_manipulate",
         "gradient_summary", "rebuild_gradient", "direct_controls",
         "comparison_frame", "adjust_arrow_curve_bend",
-        "update_style",
+        "update_style", "copy_selection", "paste_structure",
     )
     if DOCUMENT_VERSION < 8 or any(not hasattr(CoreSession, name) for name in required_api):
         raise RuntimeError(

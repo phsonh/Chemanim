@@ -10,6 +10,7 @@ import sys
 import time
 
 from PIL import Image, ImageChops
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -961,140 +962,179 @@ def test_merged_gradient_fragment_snap_pointer_moves_remain_interactive():
     assert elapsed<1.0,f"merged-gradient pointer moves took {elapsed:.3f}s"
 
 
-def test_fragment_snap_uses_exact_ring_bisector_before_fifteen_degree_fallback():
-    for ring_size in (4,5,7,9):
-        core=CoreSession();stationary_molecule=core.import_smiles("anchor","C")
-        ring_molecule=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
-        gradient=core.create_merged_gradient(stationary_molecule,ring_molecule,30,"linear")
-        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
-        project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
-        moving_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
-        stationary_id=next(iter(merge["params"]["id_map"]["target"]["atoms"].values()))
-        snapshot=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-        atoms_by_id={atom["id"]:atom for atom in snapshot["atoms"]}
-        neighbours={atom_id:[] for atom_id in moving_ids}
-        for bond in snapshot["bonds"]:
-            if bond.get("alive",True) and bond["a"] in moving_ids and bond["b"] in moving_ids:
-                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
-        pivot=next(atom_id for atom_id,values in neighbours.items() if len(values)==2)
-        origin=atoms_by_id[pivot];vectors=[]
-        for neighbour_id in neighbours[pivot]:
-            neighbour=atoms_by_id[neighbour_id];dx=neighbour["x"]-origin["x"];dy=neighbour["y"]-origin["y"]
-            length=math.hypot(dx,dy);vectors.append((dx/length,dy/length))
-        inward=(vectors[0][0]+vectors[1][0],vectors[0][1]+vectors[1][1]);magnitude=math.hypot(*inward)
-        outward=(-inward[0]/magnitude,-inward[1]/magnitude);bond_length=snapshot["reference_bond_length"]
-        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]};stationary=points[stationary_id]
-        desired=(stationary["x"]-bond_length*outward[0],stationary["y"]+bond_length*outward[1])
-        local_angle=math.atan2(-outward[1],-outward[0]);quantized=round(local_angle/(math.pi/12))*(math.pi/12)
-        cursor=(stationary["x"]+bond_length*math.cos(quantized),stationary["y"]-bond_length*math.sin(quantized))
-        core.select_connected_component(pivot);core.pointer_down(points[pivot]["x"],points[pivot]["y"])
-        result=core.pointer_move(*cursor);core.cancel_gesture()
-        assert result["preview"]["text"].startswith(f"{ring_size}元环")
-        assert math.hypot(result["preview"]["current"]["x"]-desired[0],result["preview"]["current"]["y"]-desired[1])<1e-6
+def test_structure_edit_shows_other_molecules_and_snaps_to_cross_molecule_atoms():
+    core=CoreSession();active=core.import_smiles("active","CC");reference=core.import_smiles("reference","CC")
+    core.add_node("molecule_set_position",json.dumps({"target":active,"x":-90.0,"y":0.0}))
+    core.add_node("molecule_set_position",json.dumps({"target":reference,"x":90.0,"y":0.0}))
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":active,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
+    depiction=core.depict(False)
+    assert f"data-molecule='{active}'" in depiction["svg"] and f"data-molecule='{reference}'" in depiction["svg"]
+    assert len(depiction["reference_atoms"])==2
+    moving=depiction["atoms"][0]["center"];target=depiction["reference_atoms"][0]["center"]
+    core.pointer_down(moving["x"],moving["y"])
+    preview=core.pointer_move(target["x"],target["y"])["preview"]
+    assert preview["text"]=="原子重合 · 0×键长" and preview["snap_atom"] is None
+    assert math.dist((preview["snap_origin"]["x"],preview["snap_origin"]["y"]),(target["x"],target["y"]))<1e-8
+    assert preview["snap_origin"]==preview["snap_target"]
+    assert core.pointer_up(target["x"],target["y"])["changed"]
+    end=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]
+    assert len([bond for bond in end["bonds"] if bond.get("alive",True)])==1
 
 
-def test_second_ring_connection_uses_two_point_rigid_snap_instead_of_fifteen_degrees():
-    for ring_size in (4,5,7,9):
-        core=CoreSession();anchor=core.import_smiles("anchor","CC")
-        ring=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
-        gradient=core.create_merged_gradient(anchor,ring,30,"linear")
-        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0)
-        project=core.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==core.active_molecule)
-        stationary_ids=list(merge["params"]["id_map"]["target"]["atoms"].values())
-        moving_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
-        node=next(item for item in project["nodes"] if item["id"]==gradient);snapshot=node["params"]["end_snapshot"]
-        by_id={atom["id"]:atom for atom in snapshot["atoms"]};neighbours={atom_id:[] for atom_id in moving_ids}
-        for bond in snapshot["bonds"]:
-            if bond.get("alive",True) and bond["a"] in moving_ids and bond["b"] in moving_ids:
-                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
-        moving0=next(iter(moving_ids));moving1=neighbours[moving0][0]
-        stationary0,stationary1=stationary_ids;bond_length=snapshot["reference_bond_length"]
-
-        # Arrange the first ring vertex one bond length above the first
-        # stationary atom, then draw the first cross-component bond exactly as
-        # the user does before positioning the second connection.
-        dx=by_id[stationary0]["x"]-by_id[moving0]["x"]
-        dy=by_id[stationary0]["y"]+bond_length-by_id[moving0]["y"]
-        for atom in snapshot["atoms"]:
-            if atom["id"] in moving_ids:atom["x"]+=dx;atom["y"]+=dy
-        params=node["params"];params["end_snapshot"]=snapshot
-        assert core.update_node(gradient,json.dumps(params));core.edit_node(gradient)
-        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
-        core.set_tool("single_bond");core.pointer_down(points[moving0]["x"],points[moving0]["y"])
-        assert core.pointer_up(points[stationary0]["x"],points[stationary0]["y"])["changed"]
-
-        core.set_tool("move");core.select_connected_component(moving1)
-        before=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-        before_atoms={atom["id"]:atom for atom in before["atoms"]}
-        original_distances={(a,b):math.hypot(before_atoms[a]["x"]-before_atoms[b]["x"],before_atoms[a]["y"]-before_atoms[b]["y"])
-                            for a in moving_ids for b in moving_ids if a<b}
-        first=(before_atoms[moving0]["x"],before_atoms[moving0]["y"])
-        second=(before_atoms[stationary1]["x"],before_atoms[stationary1]["y"])
-        pivot=(before_atoms[moving1]["x"],before_atoms[moving1]["y"])
-        pivot_radius=math.dist(first,pivot);center_distance=math.dist(first,second)
-        along=(pivot_radius*pivot_radius-bond_length*bond_length+center_distance*center_distance)/(2*center_distance)
-        height=math.sqrt(max(0.0,pivot_radius*pivot_radius-along*along))
-        ux=(second[0]-first[0])/center_distance;uy=(second[1]-first[1])/center_distance
-        base=(first[0]+along*ux,first[1]+along*uy)
-        candidate=(base[0]-height*uy,base[1]+height*ux)
-        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
-        candidate_canvas=(points[stationary1]["x"]+candidate[0]-second[0],points[stationary1]["y"]-candidate[1]+second[1])
-        core.pointer_down(points[moving1]["x"],points[moving1]["y"])
-        preview=core.pointer_move(*candidate_canvas)["preview"]
-        assert preview["text"].startswith(f"{ring_size}元环 · 双点吸附")
-        assert preview["snap_atom"]==stationary1 and core.pointer_up(*candidate_canvas)["changed"]
-
-        after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-        after_atoms={atom["id"]:atom for atom in after["atoms"]}
-        assert math.isclose(math.dist((after_atoms[moving1]["x"],after_atoms[moving1]["y"]),second),bond_length,rel_tol=1e-7)
-        assert math.isclose(math.dist((after_atoms[moving0]["x"],after_atoms[moving0]["y"]),first),0.0,abs_tol=1e-7)
-        for (first_id,second_id),original in original_distances.items():
-            current=math.hypot(after_atoms[first_id]["x"]-after_atoms[second_id]["x"],after_atoms[first_id]["y"]-after_atoms[second_id]["y"])
-            assert math.isclose(current,original,rel_tol=1e-7,abs_tol=1e-7)
+def test_structure_reference_snap_keeps_fifteen_degree_lattice_and_alt_bypasses_it():
+    core=CoreSession();active=core.import_smiles("active","C");reference=core.import_smiles("reference","C")
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":active,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
+    depiction=core.depict(False);moving=depiction["atoms"][0]["center"];anchor=depiction["reference_atoms"][0]["center"]
+    length=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]["reference_bond_length"]
+    target=(anchor["x"]+length*math.cos(math.pi/6),anchor["y"]-length*math.sin(math.pi/6))
+    core.pointer_down(moving["x"],moving["y"]);preview=core.pointer_move(*target)["preview"]
+    assert preview["text"]=="1.00×键长 · 30°" and preview["snap_origin"]==anchor
+    core.cancel_gesture();core.pointer_down(moving["x"],moving["y"])
+    bypass=core.pointer_move(*target,True)["preview"]
+    assert bypass["snap_origin"] is None and bypass["text"]==""
+    core.cancel_gesture()
 
 
-def test_dragging_one_ring_vertex_regularizes_the_complete_polygon_not_only_two_edges():
-    for ring_size in (4,5,7,9):
-        core=CoreSession();target=core.import_smiles("ring",f'C1{"C"*(ring_size-2)}C1')
-        gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":target,"frames":30,"easing":"linear"}))
-        node=next(item for item in core.project()["nodes"] if item["id"]==gradient)
-        snapshot=node["params"]["end_snapshot"];by_id={atom["id"]:atom for atom in snapshot["atoms"]}
-        neighbours={atom["id"]:[] for atom in snapshot["atoms"]}
-        for bond in snapshot["bonds"]:
-            if bond.get("alive",True):
-                neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
-        pivot_id=next(atom_id for atom_id,values in neighbours.items() if len(values)==2)
-        # Distort several vertices.  The old implementation repaired only the
-        # two incident edge lengths, which still left a visibly asymmetric
-        # polygon exactly like the real editor failure.
-        ordered=[];previous=None;current=pivot_id
-        while current not in ordered:
-            ordered.append(current)
-            following=next(value for value in neighbours[current] if value!=previous)
-            previous,current=current,following
-        for index,atom_id in enumerate(ordered[1:],1):
-            by_id[atom_id]["x"]+=(index%3-1)*4.5
-            by_id[atom_id]["y"]+=(-1 if index%2 else 1)*3.25
-        params=node["params"];params["end_snapshot"]=snapshot;assert core.update_node(gradient,json.dumps(params))
-        core.edit_node(gradient);core.set_viewport(1200,700,1,0,0);core.set_tool("move")
-        points={item["id"]:item["center"] for item in core.depict(False)["atoms"]}
-        cursor=(points[pivot_id]["x"]+13,points[pivot_id]["y"]-7)
-        core.pointer_down(points[pivot_id]["x"],points[pivot_id]["y"])
-        preview=core.pointer_move(*cursor)["preview"]
-        assert preview["text"].startswith(f"{ring_size}元环 · 正多边形吸附")
-        assert core.pointer_up(*cursor)["changed"]
-        after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-        after_atoms={atom["id"]:atom for atom in after["atoms"]}
-        length=snapshot["reference_bond_length"]
-        for bond in after["bonds"]:
-            if not bond.get("alive",True):continue
-            first,second=after_atoms[bond["a"]],after_atoms[bond["b"]]
-            assert math.isclose(math.hypot(first["x"]-second["x"],first["y"]-second["y"]),length,rel_tol=1e-7)
-        center=(sum(after_atoms[atom_id]["x"] for atom_id in ordered)/ring_size,
-                sum(after_atoms[atom_id]["y"] for atom_id in ordered)/ring_size)
-        radii=[math.dist((after_atoms[atom_id]["x"],after_atoms[atom_id]["y"]),center) for atom_id in ordered]
-        expected=length/(2*math.sin(math.pi/ring_size))
-        assert max(abs(value-expected) for value in radii)<1e-7
+def test_structure_clipboard_crosses_molecules_and_nodes_preserving_world_geometry_and_undo():
+    core=CoreSession();source=core.import_smiles("source","CCO")
+    core.add_node("molecule_set_position",json.dumps({"target":source,"x":-70.0,"y":25.0}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":source,"value":1.4}))
+    core.add_node("molecule_set_scale_y",json.dumps({"target":source,"value":0.75}))
+    core.add_node("molecule_set_rotation",json.dumps({"target":source,"value":30.0}))
+    source_structure=next(node for node in core.project()["nodes"] if node["type"]=="molecule_set_structure" and node["params"]["target"]==source)
+    core.edit_node(source_structure["id"]);core.select_all();payload=core.copy_selection()
+    assert json.loads(payload)["format"]=="chemanim-structure-clipboard"
+
+    destination=core.import_smiles("destination","N")
+    core.add_node("molecule_set_position",json.dumps({"target":destination,"x":105.0,"y":-35.0}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":destination,"value":0.8}))
+    core.add_node("molecule_set_scale_y",json.dumps({"target":destination,"value":1.25}))
+    core.add_node("molecule_set_rotation",json.dumps({"target":destination,"value":-20.0}))
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":destination,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient);before=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]
+    result=core.paste_structure(payload)
+    assert result["changed"] and len(result["selected_atoms"])==3
+    after=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]
+    assert len(after["atoms"])==len(before["atoms"])+3 and len(after["bonds"])==len(before["bonds"])+2
+    source_world=next(item for item in core.evaluated_project(core.end_frame)["molecules"] if item["id"]==source)
+    destination_world=next(item for item in core.evaluated_project(core.end_frame)["molecules"] if item["id"]==destination)
+    expected={(round(atom["x"],6),round(atom["y"],6)) for atom in source_world["atoms"] if atom.get("alive",True)}
+    pasted_ids=set(result["selected_atoms"])
+    actual={(round(atom["x"],6),round(atom["y"],6)) for atom in destination_world["atoms"] if atom["id"] in pasted_ids}
+    assert actual==expected
+    assert core.undo();undone=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]
+    assert len(undone["atoms"])==len(before["atoms"])
+    assert core.redo();redone=next(node for node in core.project()["nodes"] if node["id"]==gradient)["params"]["end_snapshot"]
+    assert redone==after
+
+    blank=core.add_blank_molecule("blank destination")
+    core.add_node("molecule_set_position",json.dumps({"target":blank,"x":210.0,"y":60.0}))
+    blank_structure=core.add_node("molecule_set_structure",json.dumps({"target":blank}))
+    core.edit_node(blank_structure);blank_result=core.paste_structure(payload)
+    assert blank_result["changed"] and len(blank_result["selected_atoms"])==3
+    blank_identity=next(item for item in core.project()["molecules"] if item["id"]==blank)
+    assert blank_identity["anchor_initialized"] is True
+    blank_world=next(item for item in core.evaluated_project(core.end_frame)["molecules"] if item["id"]==blank)
+    blank_actual={(round(atom["x"],6),round(atom["y"],6)) for atom in blank_world["atoms"] if atom["id"] in set(blank_result["selected_atoms"])}
+    assert blank_actual==expected
+
+
+def test_object_position_drag_snaps_atoms_and_parallel_bonds_across_molecules_with_alt_bypass():
+    def prepared():
+        core=CoreSession();moving=core.import_smiles("moving","CC");reference=core.import_smiles("reference","CC")
+        position=core.add_node("molecule_set_position",json.dumps({"target":moving,"x":-100.0,"y":0.0}))
+        core.add_node("molecule_set_position",json.dumps({"target":reference,"x":100.0,"y":0.0}))
+        core.edit_node(position);core.set_viewport(1200,700,1.0,0.0,0.0);core.set_tool("move")
+        return core,moving,reference,position
+
+    core,moving,reference,_=prepared();drawing=core.depict(False)
+    source=drawing["atoms"][0]["center"]
+    target_molecule=next(item for item in core.evaluated_project(core.preview_frame)["molecules"] if item["id"]==reference)
+    target_atom=target_molecule["atoms"][0];target={"x":600.0+target_atom["x"],"y":350.0-target_atom["y"]}
+    core.pointer_down(source["x"],source["y"]);preview=core.pointer_move(target["x"],target["y"])["preview"]
+    assert preview["text"]=="对象原子重合" and preview["snap_origin"]==preview["snap_target"]
+    assert core.pointer_up(target["x"],target["y"])["changed"]
+    moved=next(item for item in core.evaluated_project(core.preview_frame)["molecules"] if item["id"]==moving)
+    assert min(math.dist((atom["x"],atom["y"]),(target_atom["x"],target_atom["y"])) for atom in moved["atoms"])<1e-8
+    assert len(core.evaluated_project(core.preview_frame)["molecules"])==2
+
+    core, moving,reference,_=prepared();drawing=core.depict(False);shown_bond=drawing["bonds"][0]
+    source_bond={"x":(shown_bond["first"]["x"]+shown_bond["second"]["x"])*.5,
+                 "y":(shown_bond["first"]["y"]+shown_bond["second"]["y"])*.5}
+    target_molecule=next(item for item in core.evaluated_project(core.preview_frame)["molecules"] if item["id"]==reference)
+    by_id={atom["id"]:atom for atom in target_molecule["atoms"]};bond=target_molecule["bonds"][0]
+    target_world=((by_id[bond["a"]]["x"]+by_id[bond["b"]]["x"])*.5,
+                  (by_id[bond["a"]]["y"]+by_id[bond["b"]]["y"])*.5)
+    target=(600.0+target_world[0],350.0-target_world[1])
+    core.pointer_down(source_bond["x"],source_bond["y"]);preview=core.pointer_move(*target)["preview"]
+    assert preview["text"]=="对象键重合"
+    assert core.pointer_up(*target)["changed"]
+    moved=next(item for item in core.evaluated_project(core.preview_frame)["molecules"] if item["id"]==moving)
+    moved_points=sorted((round(atom["x"],8),round(atom["y"],8)) for atom in moved["atoms"])
+    reference_points=sorted((round(atom["x"],8),round(atom["y"],8)) for atom in target_molecule["atoms"])
+    assert moved_points==reference_points
+
+    core,moving,reference,_=prepared();drawing=core.depict(False);source=drawing["atoms"][0]["center"]
+    target_molecule=next(item for item in core.evaluated_project(core.preview_frame)["molecules"] if item["id"]==reference)
+    target_atom=target_molecule["atoms"][0];target=(600.0+target_atom["x"],350.0-target_atom["y"])
+    core.pointer_down(source["x"],source["y"]);bypass=core.pointer_move(*target,True)["preview"]
+    assert bypass["text"]=="" and bypass["snap_origin"] is None
+    core.cancel_gesture()
+
+
+@pytest.mark.parametrize("index,name",list(enumerate([
+    "atom","chain","branch","ring3","ring4","ring5","ring6","ring7","ring8","fused",
+])))
+def test_reference_geometry_example_copies_into_gradient_without_topology_or_world_drift(index,name):
+    core=session();source=core.active_molecule
+    if name=="atom":gesture(core,"atom_label",(480,270))
+    elif name=="chain":
+        gesture(core,"single_bond",(420,270),(452,270))
+        for _ in range(2):
+            endpoint=canvas_point(core,atoms(core)[-1]["id"])
+            gesture(core,"single_bond",endpoint,(endpoint[0]+32,endpoint[1]))
+    elif name=="branch":
+        gesture(core,"atom_label",(480,270));center=canvas_point(core,atoms(core)[0]["id"])
+        for angle in (0,120,240):
+            radians=math.radians(angle)
+            gesture(core,"single_bond",center,(center[0]+32*math.cos(radians),center[1]-32*math.sin(radians)))
+    elif name.startswith("ring"):
+        gesture(core,name,(480,270))
+    else:
+        gesture(core,"ring6",(480,270));shared=core.depict(False)["bonds"][0]
+        midpoint=((shared["first"]["x"]+shared["second"]["x"])*.5,
+                  (shared["first"]["y"]+shared["second"]["y"])*.5)
+        gesture(core,"ring5",midpoint)
+    core.add_node("molecule_set_position",json.dumps({"target":source,"x":-80.0+index*3.0,"y":25.0-index}))
+    core.add_node("molecule_set_rotation",json.dumps({"target":source,"value":7.5*index}))
+    source_node=next(item for item in core.project()["nodes"] if item["type"]=="molecule_set_structure" and item["params"]["target"]==source)
+    source_snapshot=source_node["params"]["snapshot"]
+    living_atoms=sum(atom.get("alive",True) for atom in source_snapshot["atoms"])
+    living_bonds=sum(bond.get("alive",True) for bond in source_snapshot["bonds"])
+    core.edit_node(source_node["id"]);core.select_all();payload=core.copy_selection()
+
+    destination=core.import_smiles(f"destination-{name}","N")
+    core.add_node("molecule_set_position",json.dumps({"target":destination,"x":120.0,"y":-45.0}))
+    core.add_node("molecule_set_scale_x",json.dumps({"target":destination,"value":0.8}))
+    core.add_node("molecule_set_scale_y",json.dumps({"target":destination,"value":1.25}))
+    gradient=core.add_node("molecule_gradient_structure",json.dumps({"target":destination,"frames":30,"easing":"linear"}))
+    core.edit_node(gradient);before=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    result=core.paste_structure(payload)
+    assert result["changed"] and len(result["selected_atoms"])==living_atoms,name
+    after=next(item for item in core.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
+    assert len(after["atoms"])-len(before["atoms"])==living_atoms,name
+    assert len(after["bonds"])-len(before["bonds"])==living_bonds,name
+    source_world=next(item for item in core.evaluated_project(core.end_frame)["molecules"] if item["id"]==source)
+    destination_world=next(item for item in core.evaluated_project(core.end_frame)["molecules"] if item["id"]==destination)
+    expected=sorted((round(atom["x"],6),round(atom["y"],6)) for atom in source_world["atoms"] if atom.get("alive",True))
+    pasted=set(result["selected_atoms"])
+    actual=sorted((round(atom["x"],6),round(atom["y"],6)) for atom in destination_world["atoms"] if atom["id"] in pasted)
+    assert actual==expected,name
+    depiction=core.depict(False)
+    assert len(depiction["reference_atoms"])==living_atoms,name
+    assert f"data-molecule='{source}'" in depiction["svg"] and f"data-molecule='{destination}'" in depiction["svg"],name
 
 
 def test_atom_text_requests_left_right_and_persists_one_visual_label_field():

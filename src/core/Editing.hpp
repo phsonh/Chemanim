@@ -65,6 +65,8 @@ struct GesturePreview {
     std::vector<Point> polygon;
     std::string text;
     std::optional<std::string> snapAtomId;
+    std::optional<Point> snapOrigin;
+    std::optional<Point> snapTarget;
 };
 
 struct EditResult {
@@ -124,6 +126,8 @@ public:
     bool adjustArrowCurveBend(int direction);
     void cancelGesture();
     [[nodiscard]] EditResult selectAll();
+    [[nodiscard]] std::string copySelectionJson() const;
+    [[nodiscard]] EditResult pasteStructureJson(const std::string& payload);
     bool deleteSelection();
     bool setAtomPosition(const std::string& atomId, Point position);
     bool setAtomElement(const std::string& atomId, std::string element);

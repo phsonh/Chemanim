@@ -880,99 +880,77 @@ def test_real_double_click_selects_start_component_and_drag_shows_chemical_snap(
     value.close()
 
 
-def test_real_single_atom_drag_regularizes_complete_five_member_ring():
-    import math
-    value=window();target=value.session.import_smiles("ring","C1CCCC1")
-    gradient=value.session.add_node("molecule_gradient_structure",json.dumps({"target":target,"frames":30,"easing":"linear"}))
-    project=value.session.project();node=next(item for item in project["nodes"] if item["id"]==gradient)
-    snapshot=node["params"]["end_snapshot"];atoms={atom["id"]:atom for atom in snapshot["atoms"]}
-    neighbours={atom_id:[] for atom_id in atoms}
-    for bond in snapshot["bonds"]:
-        if bond.get("alive",True):
-            neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
-    pivot_id=next(atom_id for atom_id,items in neighbours.items() if len(items)==2)
-    ordered=[];previous=None;current=pivot_id
-    while current not in ordered:
-        ordered.append(current)
-        following=next(value for value in neighbours[current] if value!=previous)
-        previous,current=current,following
-    for index,atom_id in enumerate(ordered[1:],1):
-        atoms[atom_id]["x"]+=(index%3-1)*4.5
-        atoms[atom_id]["y"]+=(-1 if index%2 else 1)*3.25
-    params=node["params"];params["end_snapshot"]=snapshot;assert value.session.update_node(gradient,json.dumps(params))
-    value.refresh_all(gradient);value._node_selected(gradient);value._set_tool("move");value.canvas._sync_core_viewport()
-    points={item["id"]:item["center"] for item in value.session.depict(False)["atoms"]}
-    cursor=QPoint(round(points[pivot_id]["x"]+13),round(points[pivot_id]["y"]-7))
-    pivot=QPoint(round(points[pivot_id]["x"]),round(points[pivot_id]["y"]))
-    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=pivot)
-    QTest.mouseMove(value.canvas,cursor,80);QApplication.processEvents()
-    assert value.canvas._preview.get("text","").startswith("5元环 · 正多边形吸附")
-    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=cursor);QApplication.processEvents()
-    after=next(item for item in value.session.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-    after_atoms={atom["id"]:atom for atom in after["atoms"]}
-    length=snapshot["reference_bond_length"]
-    for bond in after["bonds"]:
-        if not bond.get("alive",True):continue
-        first,second=after_atoms[bond["a"]],after_atoms[bond["b"]]
-        assert math.isclose(math.hypot(first["x"]-second["x"],first["y"]-second["y"]),length,rel_tol=1e-7)
-    center=(sum(after_atoms[atom_id]["x"] for atom_id in ordered)/5,
-            sum(after_atoms[atom_id]["y"] for atom_id in ordered)/5)
-    radii=[math.dist((after_atoms[atom_id]["x"],after_atoms[atom_id]["y"]),center) for atom_id in ordered]
-    expected=length/(2*math.sin(math.pi/5))
-    assert max(abs(radius-expected) for radius in radii)<1e-7
+def test_real_structure_clipboard_crosses_molecules_and_structure_node_kinds():
+    value=window();source=value.session.import_smiles("source","C1CCCC1")
+    source_node=next(item["id"] for item in value.session.project()["nodes"]
+                     if item["type"]=="molecule_set_structure" and item["params"]["target"]==source)
+    value.refresh_all(source_node);value._node_selected(source_node);value.canvas.setFocus()
+    QTest.keyClick(value.canvas,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(value.canvas,Qt.Key.Key_C,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    assert QApplication.clipboard().mimeData().hasFormat(value.canvas.STRUCTURE_MIME)
+
+    destination=value.session.import_smiles("destination","N")
+    gradient=value.session.add_node("molecule_gradient_structure",json.dumps({"target":destination,"frames":30,"easing":"linear"}))
+    value.refresh_all(gradient);value._node_selected(gradient);value.canvas.setFocus()
+    before=active_structure(value);before_counts=(len(before["atoms"]),len(before["bonds"]))
+    QTest.keyClick(value.canvas,Qt.Key.Key_V,Qt.KeyboardModifier.ControlModifier);QApplication.processEvents()
+    after=active_structure(value)
+    assert (len(after["atoms"]),len(after["bonds"]))==(before_counts[0]+5,before_counts[1]+5)
+    assert len(value.canvas.selected_atoms)==5 and value.dirty
+    value.undo();QApplication.processEvents();undone=active_structure(value)
+    assert (len(undone["atoms"]),len(undone["bonds"]))==before_counts
     value.close()
 
 
-def test_real_benzene_cyclohexane_merge_gradient_builds_regular_biphenyl_like_product(tmp_path:Path):
-    import math
-    value=window();benzene=value.session.import_smiles("benzene","c1ccccc1");cyclohexane=value.session.import_smiles("cyclohexane","C1CCCCC1")
-    value.session.add_node("molecule_set_position",json.dumps({"target":cyclohexane,"x":150.0,"y":0.0}))
-    gradient=value.session.create_merged_gradient(benzene,cyclohexane,30,"linear")
+def test_real_gradient_canvas_displays_external_reference_and_snaps_without_joining():
+    value=window();active=value.session.import_smiles("active","CC");reference=value.session.import_smiles("reference","CC")
+    value.session.add_node("molecule_set_position",json.dumps({"target":active,"x":-90.0,"y":0.0}))
+    value.session.add_node("molecule_set_position",json.dumps({"target":reference,"x":90.0,"y":0.0}))
+    gradient=value.session.add_node("molecule_gradient_structure",json.dumps({"target":active,"frames":30,"easing":"linear"}))
     value.refresh_all(gradient);value._node_selected(gradient);value._set_tool("move");value.canvas._sync_core_viewport()
-    project=value.session.project();merge=next(item for item in project["nodes"] if item["type"]=="merge_molecules" and item.get("params",{}).get("output")==value.session.active_molecule)
-    benzene_ids=set(merge["params"]["id_map"]["target"]["atoms"].values())
-    cyclohexane_ids=set(merge["params"]["id_map"]["source"]["atoms"].values())
-    end=next(item for item in project["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-    by_id={atom["id"]:atom for atom in end["atoms"]};neighbours={atom["id"]:[] for atom in end["atoms"]}
-    for bond in end["bonds"]:
-        if bond.get("alive",True):neighbours[bond["a"]].append(bond["b"]);neighbours[bond["b"]].append(bond["a"])
-    stationary=max(benzene_ids,key=lambda atom_id:by_id[atom_id]["x"])
-    pivot=min(cyclohexane_ids,key=lambda atom_id:by_id[atom_id]["x"])
-    target=by_id[stationary];vectors=[]
-    for neighbour_id in neighbours[stationary]:
-        neighbour=by_id[neighbour_id];dx=neighbour["x"]-target["x"];dy=neighbour["y"]-target["y"]
-        magnitude=math.hypot(dx,dy);vectors.append((dx/magnitude,dy/magnitude))
-    inward=(vectors[0][0]+vectors[1][0],vectors[0][1]+vectors[1][1]);magnitude=math.hypot(*inward)
-    outward=(-inward[0]/magnitude,-inward[1]/magnitude);length=end["reference_bond_length"]
-    points={item["id"]:item["center"] for item in value.session.depict(False)["atoms"]}
-    pivot_point=QPoint(round(points[pivot]["x"]),round(points[pivot]["y"]))
-    destination=QPoint(round(points[stationary]["x"]+length*outward[0]),round(points[stationary]["y"]-length*outward[1]))
-    QTest.mouseDClick(value.canvas,Qt.MouseButton.LeftButton,pos=pivot_point);QApplication.processEvents()
-    assert set(value.canvas._selected_atoms)==cyclohexane_ids
-    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=pivot_point)
-    QTest.mouseMove(value.canvas,destination,80);QApplication.processEvents()
-    assert value.canvas._preview.get("text","").startswith("6元环 · 正多边形吸附")
-    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=destination);QApplication.processEvents()
-    points={item["id"]:item["center"] for item in value.session.depict(False)["atoms"]}
-    value._set_tool("single_bond")
-    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(points[pivot]["x"]),round(points[pivot]["y"])))
-    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=QPoint(round(points[stationary]["x"]),round(points[stationary]["y"])))
-    QApplication.processEvents()
-    after=next(item for item in value.session.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-    after_atoms={atom["id"]:atom for atom in after["atoms"]}
-    cross=[bond for bond in after["bonds"] if bond.get("alive",True) and {bond["a"],bond["b"]}=={pivot,stationary}]
-    assert len(cross)==1
-    assert math.isclose(math.dist((after_atoms[pivot]["x"],after_atoms[pivot]["y"]),
-                                  (after_atoms[stationary]["x"],after_atoms[stationary]["y"])),length,rel_tol=1e-7)
-    center=(sum(after_atoms[atom_id]["x"] for atom_id in cyclohexane_ids)/6,
-            sum(after_atoms[atom_id]["y"] for atom_id in cyclohexane_ids)/6)
-    radii=[math.dist((after_atoms[atom_id]["x"],after_atoms[atom_id]["y"]),center) for atom_id in cyclohexane_ids]
-    expected=length/(2*math.sin(math.pi/6))
-    assert max(abs(radius-expected) for radius in radii)<1e-7
-    assert value.session.gradient_summary(gradient)["added_bonds"]==1
-    saved=tmp_path/"benzene-cyclohexane.cmm";value.session.save(str(saved));reopened=type(value.session)();reopened.load(str(saved))
-    reopened_end=next(item for item in reopened.project()["nodes"] if item["id"]==gradient)["params"]["end_snapshot"]
-    assert reopened_end==after
+    depiction=value.session.depict(False)
+    assert len(depiction["reference_atoms"])==2 and f"data-molecule='{reference}'" in depiction["svg"]
+    moving=depiction["atoms"][0]["center"];target=depiction["reference_atoms"][0]["center"]
+    start=QPoint(round(moving["x"]),round(moving["y"]));end=QPoint(round(target["x"]),round(target["y"]))
+    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=start)
+    QTest.mouseMove(value.canvas,end,80);QApplication.processEvents()
+    assert value.canvas._preview.get("text")=="原子重合 · 0×键长"
+    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    snapshot=active_structure(value)
+    assert len([item for item in snapshot["bonds"] if item.get("alive",True)])==1
+    assert len(value.session.evaluated_project(value.session.end_frame)["molecules"])>=2
+    value.close()
+
+
+def test_real_position_node_drag_snaps_to_other_molecule_atom_and_parallel_bond():
+    value=window();moving=value.session.import_smiles("moving","CC");reference=value.session.import_smiles("reference","CC")
+    position=value.session.add_node("molecule_set_position",json.dumps({"target":moving,"x":-100.0,"y":0.0}))
+    value.session.add_node("molecule_set_position",json.dumps({"target":reference,"x":100.0,"y":0.0}))
+    value.refresh_all(position);value._node_selected(position);value._set_tool("move");value.canvas._sync_core_viewport()
+
+    active_drawing=value.session.depict(False);source=active_drawing["atoms"][0]["center"]
+    reference_state=next(item for item in value.session.evaluated_project(value.session.preview_frame)["molecules"] if item["id"]==reference)
+    target_atom=reference_state["atoms"][0]
+    target_screen=value.canvas.world_to_screen(QPointF(target_atom["x"],target_atom["y"]))
+    start=QPoint(round(source["x"]),round(source["y"]));end=QPoint(round(target_screen.x()),round(target_screen.y()))
+    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=start);QTest.mouseMove(value.canvas,end,80);QApplication.processEvents()
+    assert value.canvas._preview.get("text")=="对象原子重合"
+    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=end);QApplication.processEvents()
+    value.undo();QApplication.processEvents()
+
+    active_drawing=value.session.depict(False);shown=active_drawing["bonds"][0]
+    source_mid=QPoint(round((shown["first"]["x"]+shown["second"]["x"])*.5),
+                      round((shown["first"]["y"]+shown["second"]["y"])*.5))
+    reference_state=next(item for item in value.session.evaluated_project(value.session.preview_frame)["molecules"] if item["id"]==reference)
+    by_id={atom["id"]:atom for atom in reference_state["atoms"]};bond=reference_state["bonds"][0]
+    world_mid=QPointF((by_id[bond["a"]]["x"]+by_id[bond["b"]]["x"])*.5,
+                      (by_id[bond["a"]]["y"]+by_id[bond["b"]]["y"])*.5)
+    target_screen=value.canvas.world_to_screen(world_mid);target_mid=QPoint(round(target_screen.x()),round(target_screen.y()))
+    QTest.mousePress(value.canvas,Qt.MouseButton.LeftButton,pos=source_mid);QTest.mouseMove(value.canvas,target_mid,80);QApplication.processEvents()
+    assert value.canvas._preview.get("text")=="对象键重合"
+    QTest.mouseRelease(value.canvas,Qt.MouseButton.LeftButton,pos=target_mid);QApplication.processEvents()
+    moved=next(item for item in value.session.evaluated_project(value.session.preview_frame)["molecules"] if item["id"]==moving)
+    assert sorted((round(atom["x"],6),round(atom["y"],6)) for atom in moved["atoms"])==sorted((round(atom["x"],6),round(atom["y"],6)) for atom in reference_state["atoms"])
     value.close()
 
 

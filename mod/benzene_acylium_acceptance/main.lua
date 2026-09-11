@@ -4,6 +4,9 @@ chem.scene {
     width = 1920, height = 1080,
     logic_width = 960, logic_height = 540,
     fps = 60, view_zoom = 2.2,
+    font_pt = 10, bond_length_pt = 14.4,
+    line_width_pt = 0.6, double_bond_spacing = 0.18,
+    electron_dot_radius_pt = 0.75, default_arrow_width = 1.5,
     background = "FFFFFFFF", title = "native2d"
 }
 
@@ -91,7 +94,7 @@ molecule1.SetPos(-75, 0)
 
 molecule2.SetPos(95, 0)
 
-local arrow1 = chem.NewArrow()
+local arrow1 = chem.NewArrow { thickness = 1.5 }
 
 arrow1.SetCurve(-48, 22, -5, 70, 42, 55, 72, 12)
 
