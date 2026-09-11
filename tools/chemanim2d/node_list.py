@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence
 from PyQt6.QtWidgets import (QHBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -25,32 +25,21 @@ def _arrow_name(value):
 class NodeTree(QTreeWidget):
     """A flat tree whose internal drop has one authoritative final index."""
 
-    orderDropped = pyqtSignal(str, int)
+    orderDropped = pyqtSignal(str)
 
     def dropEvent(self, event):
         source = self.currentItem()
         if source is None or source.parent() is not None:
             event.ignore(); return
-        old_index = self.indexOfTopLevelItem(source)
-        position = event.position().toPoint()
-        target = self.itemAt(position)
-        while target is not None and target.parent() is not None:
-            target = target.parent()
-        if target is None:
-            insertion = self.topLevelItemCount()
-        else:
-            target_index = self.indexOfTopLevelItem(target)
-            insertion = target_index + (position.y() > self.visualItemRect(target).center().y())
-        if old_index < insertion:
-            insertion -= 1
-        insertion = max(0, min(insertion, self.topLevelItemCount() - 1))
-        if insertion == old_index:
-            event.ignore(); return
-        item = self.takeTopLevelItem(old_index)
-        self.insertTopLevelItem(insertion, item)
-        self.setCurrentItem(item)
-        event.setDropAction(Qt.DropAction.MoveAction); event.accept()
-        self.orderDropped.emit(item.data(0, Qt.ItemDataRole.UserRole), insertion)
+        node_id = source.data(0, Qt.ItemDataRole.UserRole)
+        super().dropEvent(event)
+        if event.isAccepted():
+            # QAbstractItemView still owns the source item until dropEvent()
+            # returns. Committing synchronously causes MainWindow to rebuild
+            # the tree, after which Qt's MoveAction cleanup removes the newly
+            # rebuilt row. Defer both the Core move and refresh until the drag
+            # stack has completely unwound.
+            QTimer.singleShot(0, lambda stable_id=node_id:self.orderDropped.emit(stable_id))
 
 
 class NodeList(QWidget):
@@ -145,7 +134,7 @@ class NodeList(QWidget):
         for node in project.get("nodes", []):
             definition = registry.get(node["type"], {})
             item = QTreeWidgetItem([self._sentence(node,definition,project)])
-            item.setFlags(item.flags()&~Qt.ItemFlag.ItemIsUserCheckable)
+            item.setFlags(item.flags()&~Qt.ItemFlag.ItemIsUserCheckable&~Qt.ItemFlag.ItemIsDropEnabled)
             item.setData(0, Qt.ItemDataRole.UserRole, node["id"])
             if not node.get("enabled",True):item.setToolTip(0,"此节点已禁用")
             self.tree.addTopLevelItem(item)
@@ -162,8 +151,14 @@ class NodeList(QWidget):
         if timing: self.frameRequested.emit(timing["start"])
         self.editRequested.emit(node_id)
 
-    def _order_dropped(self, node_id, index):
+    def _order_dropped(self, node_id):
         if self._updating:return
+        item=next((self.tree.topLevelItem(index) for index in range(self.tree.topLevelItemCount())
+                   if self.tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole)==node_id),None)
+        index=self.tree.indexOfTopLevelItem(item) if item is not None else -1
+        if index<0:
+            self.operationRejected.emit("节点拖放结果无效，已恢复原顺序")
+            self.refresh(node_id);return
         if self.session.move_node(node_id,index):
             self.sequenceEdited.emit()
         else:

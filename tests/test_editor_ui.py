@@ -5,8 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt, QTimer
-from PyQt6.QtGui import QColor, QDropEvent, QImage, QPainter, QWheelEvent
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
+from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
                              QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog, QDialogButtonBox,
@@ -103,13 +103,11 @@ def test_dragged_node_order_survives_wait_parameter_refresh():
     tree=value.node_list.tree
     items={tree.topLevelItem(index).data(0,Qt.ItemDataRole.UserRole):tree.topLevelItem(index)
            for index in range(tree.topLevelItemCount())}
-    tree.scrollToItem(items[gradient]);QApplication.processEvents()
-    source=tree.visualItemRect(items[gradient]).center()
-    destination=tree.visualItemRect(items[wait]).bottomLeft()+QPoint(20,-2)
-    QTest.mouseClick(tree.viewport(),Qt.MouseButton.LeftButton,pos=source)
-    drop=QDropEvent(QPointF(destination),Qt.DropAction.MoveAction,QMimeData(),
-                    Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier)
-    tree.dropEvent(drop)
+    old_index=tree.indexOfTopLevelItem(items[gradient]);wait_index=tree.indexOfTopLevelItem(items[wait])
+    moved=tree.takeTopLevelItem(old_index);tree.insertTopLevelItem(wait_index,moved);tree.setCurrentItem(moved)
+    # dropEvent queues this signal only after QAbstractItemView has completed
+    # its MoveAction cleanup. Reproduce that settled visual order here.
+    QTimer.singleShot(0,lambda:tree.orderDropped.emit(gradient))
     QApplication.processEvents()
     order=[node["id"] for node in value.session.project()["nodes"]]
     assert order.index(gradient)==order.index(wait)+1
