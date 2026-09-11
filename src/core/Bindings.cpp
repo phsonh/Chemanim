@@ -130,6 +130,7 @@ public:
     bool repairMoleculeAnchor(const std::string& target){return session_.repairMoleculeAnchor(target);}
     py::dict selectConnectedComponent(const std::string& atom,bool additive){return editResult(session_.selectConnectedComponent(atom,additive));}
     bool updateScene(const std::string& value){return session_.updateScene(value);}
+    bool updateStyle(const std::string& value){return session_.updateStyle(value);}
     int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
     py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
     py::dict evaluatedArrows(int frame)const{py::dict result;for(const auto& [id,arrow]:core::evaluateNodes(session_.project(),frame).arrows){py::dict item;item["exists"]=arrow.exists;item["visible"]=arrow.visible;item["position"]=point(arrow.position);item["start"]=point(arrow.start);item["control1"]=point(arrow.control1);item["control2"]=point(arrow.control2);item["end"]=point(arrow.end);item["progress"]=arrow.progress;item["alpha"]=arrow.alpha;item["width"]=arrow.width;item["scale_x"]=arrow.scaleX;item["scale_y"]=arrow.scaleY;item["r"]=arrow.red;item["g"]=arrow.green;item["b"]=arrow.blue;result[py::str(id)]=item;}return result;}
@@ -199,17 +200,19 @@ public:
                 };
                 depictedMolecule=localize(molecule);
                 core::Molecule extent=depictedMolecule;
+                std::optional<core::Molecule> finalLocal;
                 if(const auto found=finalEvaluated.molecules.find(id);found!=finalEvaluated.molecules.end()){
-                    core::Molecule finalLocal=localize(found->second);
-                    extent.atoms.insert(extent.atoms.end(),finalLocal.atoms.begin(),finalLocal.atoms.end());
+                    finalLocal=localize(found->second);
+                    extent.atoms.insert(extent.atoms.end(),finalLocal->atoms.begin(),finalLocal->atoms.end());
                 }
                 if(!extent.atoms.empty()){
                     double minX=extent.atoms.front().position.x,maxX=minX;
                     double minY=extent.atoms.front().position.y,maxY=minY;
-                    for(const core::Atom& atom:extent.atoms){
-                        minX=std::min(minX,atom.position.x);maxX=std::max(maxX,atom.position.x);
-                        minY=std::min(minY,atom.position.y);maxY=std::max(maxY,atom.position.y);
-                    }
+                    const auto includePoint=[&](core::Point point){minX=std::min(minX,point.x);maxX=std::max(maxX,point.x);minY=std::min(minY,point.y);maxY=std::max(maxY,point.y);};
+                    for(const core::Atom& atom:extent.atoms)includePoint(atom.position);
+                    const auto includeAdornments=[&](const core::Molecule& value){for(const core::AtomAdornment& adornment:value.adornments)if(adornment.alive)if(const core::Atom* owner=value.atom(adornment.atomId);owner&&owner->alive)includePoint({owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y});};
+                    includeAdornments(depictedMolecule);
+                    if(finalLocal)includeAdornments(*finalLocal);
                     const double canonicalPixelsPerUnit=14.4/std::max(.01,molecule.referenceBondLength);
                     depictionViewport.width=std::max(64,static_cast<int>(std::ceil((maxX-minX)*canonicalPixelsPerUnit+64.0)));
                     depictionViewport.height=std::max(64,static_cast<int>(std::ceil((maxY-minY)*canonicalPixelsPerUnit+64.0)));
@@ -303,7 +306,7 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("living_molecule_targets",&CoreSession::livingMoleculeTargets,py::arg("insertion_index")=-1)
         .def("create_merged_gradient",&CoreSession::createMergedGradient,py::arg("target"),py::arg("source"),py::arg("frames")=30,py::arg("easing")="linear",py::arg("insertion_index")=-1)
         .def("update_node",&CoreSession::updateNode).def("enable_node",&CoreSession::enableNode).def("move_node",&CoreSession::moveNode)
-        .def("duplicate_node",&CoreSession::duplicateNode,py::arg("id"),py::arg("index")=-1).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene)
+        .def("duplicate_node",&CoreSession::duplicateNode,py::arg("id"),py::arg("index")=-1).def("delete_node",&CoreSession::deleteNode).def("update_scene",&CoreSession::updateScene).def("update_style",&CoreSession::updateStyle)
         .def("gradient_summary",&CoreSession::gradientSummary).def("rebuild_gradient",&CoreSession::rebuildGradient).def("retarget_gradient",&CoreSession::retargetGradient).def("repair_molecule_anchor",&CoreSession::repairMoleculeAnchor)
         .def_property_readonly("end_frame",&CoreSession::endFrame).def("evaluated_molecules",&CoreSession::evaluatedMolecules).def("evaluated_arrows",&CoreSession::evaluatedArrows).def("diagnostics",&CoreSession::diagnostics).def("evaluated_project",&CoreSession::evaluatedProject)
         .def("depict", &CoreSession::depict, py::arg("final_effect")=false)

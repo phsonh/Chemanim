@@ -166,12 +166,16 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         // from every scheduled state so a cached texture never clips that
         // excursion or changes its centre during playback.
         bool any=false;double minX=0.0,maxX=0.0,minY=0.0,maxY=0.0;
+        const auto includePoint=[&](core::Point point){
+            if(!any){minX=maxX=point.x;minY=maxY=point.y;any=true;}
+            else{minX=std::min(minX,point.x);maxX=std::max(maxX,point.x);minY=std::min(minY,point.y);maxY=std::max(maxY,point.y);}
+        };
         for(int frame=0;frame<=engine_.maxScheduledFrame();++frame){
             const auto extent=engine_.moleculeAt(object.id,frame);if(!extent)continue;
-            for(const auto& atom:extent->atoms){if(!atom.alive)continue;
-                if(!any){minX=maxX=atom.position.x;minY=maxY=atom.position.y;any=true;}
-                else{minX=std::min(minX,atom.position.x);maxX=std::max(maxX,atom.position.x);minY=std::min(minY,atom.position.y);maxY=std::max(maxY,atom.position.y);}
-            }
+            for(const auto& atom:extent->atoms)if(atom.alive)includePoint(atom.position);
+            for(const auto& adornment:extent->adornments)if(adornment.alive)
+                if(const core::Atom* owner=extent->atom(adornment.atomId);owner&&owner->alive)
+                    includePoint({owner->position.x+adornment.offset.x,owner->position.y+adornment.offset.y});
         }
         if(!any)return;
         const double reference = std::max(0.01, evaluatedMolecule->referenceBondLength);
@@ -211,7 +215,11 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
         if(const auto value=object.numericTracks.find("bond:"+bond.id+":color:b");value!=object.numericTracks.end())bond.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));
     }
     for(auto& adornment:currentMolecule.adornments){const std::string prefix="adornment:"+adornment.id+":";if(const auto value=object.numericTracks.find(prefix+"x");value!=object.numericTracks.end())adornment.offset.x=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"y");value!=object.numericTracks.end())adornment.offset.y=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"alpha");value!=object.numericTracks.end())adornment.alpha=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.stringTracks.find(prefix+"text");value!=object.stringTracks.end())adornment.text=value->second.valueAt(currentFrame_);if(const auto value=object.numericTracks.find(prefix+"color:r");value!=object.numericTracks.end())adornment.color.red=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:g");value!=object.numericTracks.end())adornment.color.green=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));if(const auto value=object.numericTracks.find(prefix+"color:b");value!=object.numericTracks.end())adornment.color.blue=static_cast<int>(std::round(value->second.valueAt(currentFrame_)));}
+    const core::Style& depictionStyle=engine_.scene.depictionStyle;
     std::ostringstream geometry; geometry << std::setprecision(12)
+        << "style:" << depictionStyle.fontPt << ':' << depictionStyle.bondLengthPt << ':'
+        << depictionStyle.lineWidthPt << ':' << depictionStyle.doubleBondSpacing << ':'
+        << depictionStyle.electronDotRadiusPt << ';'
         << "molecule-color:" << currentMolecule.color.red << ':' << currentMolecule.color.green << ':' << currentMolecule.color.blue << ':' << currentMolecule.colorOverride << ';';
     for (const auto& atom : currentMolecule.atoms) geometry << atom.id << ':' << atom.element << ':' << atom.alias << ':'
         << static_cast<int>(atom.labelSide) << ':' << static_cast<int>(atom.numberStyle) << ':'
@@ -222,8 +230,8 @@ void Renderer::drawAcsMolecule(int table, const Object& object) {
     const std::string geometryKey = geometry.str();
     const bool geometryChanged = cache.geometryKey != geometryKey;
     if (geometryChanged) {
-        const auto start = std::chrono::steady_clock::now(); const core::Style style;
-        cache.svg = depictionCore_.depict(currentMolecule, style, cache.viewport).svg;
+        const auto start = std::chrono::steady_clock::now();
+        cache.svg = depictionCore_.depict(currentMolecule, depictionStyle, cache.viewport).svg;
         profile_.svgGenerationMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         cache.geometryKey = geometryKey; ++profile_.moleculeCacheMisses;
     } else ++profile_.moleculeCacheHits;

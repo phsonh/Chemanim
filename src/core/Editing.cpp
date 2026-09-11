@@ -876,9 +876,12 @@ struct EditorSession::Impl {
         if (!gesture || gesture->startHit.kind != HitKind::Atom || !editableMolecule()) return {};
         const Atom* atom = editableMolecule()->atom(gesture->startHit.id);
         if (!atom) return {};
-        // Formal-charge placement is a single, predictable document-space
-        // radius.  At 100% editor zoom this is exactly 20 screen pixels.
-        constexpr double length = 20.0;
+        // Charges and electron marks have independent authoring distances.
+        // They remain structure-local so placement survives object transforms.
+        const bool electronMark=tool==Tool::LonePair||tool==Tool::SingleElectron;
+        const double length=electronMark
+            ?project.style.electronAdornmentDistance
+            :project.style.chargeAdornmentDistance;
         if (distance(gesture->pressCanvas, gesture->currentCanvas) <= 12.0) {
             const Point offset = sketcher_geometry::bestPlacementAroundOrigin(
                 neighborOffsets(*editableMolecule(), *atom), length);
@@ -2097,6 +2100,23 @@ bool EditorSession::updateScene(const std::string& sceneJson) {
     next.title=value.value("title",next.title);next.viewZoom=value.value("view_zoom",next.viewZoom);
     const Scene& old=impl_->project.scene;if(old.width==next.width&&old.height==next.height&&old.logicWidth==next.logicWidth&&old.logicHeight==next.logicHeight&&old.fps==next.fps&&old.background==next.background&&old.title==next.title&&old.viewZoom==next.viewZoom)return false;
     Project before=impl_->project;impl_->project.scene=std::move(next);impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
+}
+bool EditorSession::updateStyle(const std::string& styleJson) {
+    const json value=json::parse(styleJson);if(!value.is_object())throw std::runtime_error("Style must be an object");Style next=impl_->project.style;
+    next.defaultArrowWidth=value.value("default_arrow_width",next.defaultArrowWidth);
+    next.chargeAdornmentDistance=value.value("charge_adornment_distance",next.chargeAdornmentDistance);
+    next.electronDotRadiusPt=value.value("electron_dot_radius_pt",next.electronDotRadiusPt);
+    next.electronAdornmentDistance=value.value("electron_adornment_distance",next.electronAdornmentDistance);
+    if(next.defaultArrowWidth<=0.0||next.chargeAdornmentDistance<=0.0||
+       next.electronDotRadiusPt<=0.0||next.electronAdornmentDistance<=0.0)
+        throw std::runtime_error("Drawing preference values must be positive");
+    const Style& old=impl_->project.style;
+    if(old.defaultArrowWidth==next.defaultArrowWidth&&
+       old.chargeAdornmentDistance==next.chargeAdornmentDistance&&
+       old.electronDotRadiusPt==next.electronDotRadiusPt&&
+       old.electronAdornmentDistance==next.electronAdornmentDistance)return false;
+    Project before=impl_->project;impl_->project.style=std::move(next);
+    impl_->undo.push_back({std::move(before),impl_->project,Impl::SnapshotDomain::Authoring});impl_->redo.clear();return true;
 }
 bool EditorSession::canUndo() const {
     if (impl_->undo.empty() || impl_->targetKind == EditTargetKind::TimelinePreview) return false;

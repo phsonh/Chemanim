@@ -156,7 +156,7 @@ Object& LuaRuntime::createObjectTable(const std::string& kind, int propertiesInd
         setDefaultNumber(table, "x2", 0); setDefaultNumber(table, "y2", 0);
         setDefaultNumber(table, "cx1", 0); setDefaultNumber(table, "cy1", 0);
         setDefaultNumber(table, "cx2", 0); setDefaultNumber(table, "cy2", 0);
-        setDefaultNumber(table, "thickness", 1.5);
+        setDefaultNumber(table, "thickness", engine_->scene.depictionStyle.defaultArrowWidth);
         setDefaultNumber(table, "progress", 0);
     }
 
@@ -364,6 +364,12 @@ int LuaRuntime::lScene(lua_State* state) {
     runtime.engine_->scene.logicHeight = static_cast<int>(numberField(state, 1, "logic_height", runtime.engine_->scene.height));
     runtime.engine_->scene.fps = static_cast<int>(numberField(state, 1, "fps", runtime.engine_->scene.fps));
     runtime.engine_->scene.viewZoom = numberField(state, 1, "view_zoom", runtime.engine_->scene.viewZoom);
+    runtime.engine_->scene.depictionStyle.fontPt = numberField(state, 1, "font_pt", runtime.engine_->scene.depictionStyle.fontPt);
+    runtime.engine_->scene.depictionStyle.bondLengthPt = numberField(state, 1, "bond_length_pt", runtime.engine_->scene.depictionStyle.bondLengthPt);
+    runtime.engine_->scene.depictionStyle.lineWidthPt = numberField(state, 1, "line_width_pt", runtime.engine_->scene.depictionStyle.lineWidthPt);
+    runtime.engine_->scene.depictionStyle.doubleBondSpacing = numberField(state, 1, "double_bond_spacing", runtime.engine_->scene.depictionStyle.doubleBondSpacing);
+    runtime.engine_->scene.depictionStyle.electronDotRadiusPt = numberField(state, 1, "electron_dot_radius_pt", runtime.engine_->scene.depictionStyle.electronDotRadiusPt);
+    runtime.engine_->scene.depictionStyle.defaultArrowWidth = numberField(state, 1, "default_arrow_width", runtime.engine_->scene.depictionStyle.defaultArrowWidth);
     runtime.engine_->scene.endFrame = static_cast<int>(numberField(state, 1, "end_frame", runtime.engine_->scene.endFrame));
     runtime.engine_->scene.title = stringField(state, 1, "title", runtime.engine_->scene.title);
     lua_getfield(state, 1, "background");

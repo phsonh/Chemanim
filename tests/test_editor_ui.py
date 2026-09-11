@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer
+from PyQt6.QtCore import QPoint, QPointF, QSettings, Qt, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
@@ -18,6 +18,7 @@ sys.path.insert(0,str(ROOT/"tools"))
 from chemanim2d.app import MainWindow, GradientStructureDialog
 from chemanim2d.node_inspector import NodeInspector
 from chemanim2d.periodic_table import PeriodicTableDialog
+from chemanim2d.preferences import DEFAULT_PREFERENCES, PreferenceStore, PreferencesDialog
 
 
 _APP=None
@@ -63,6 +64,43 @@ def test_scene_is_single_core_state_and_artboard_updates():
     assert abs(rect.width()/rect.height()-540/960)<1e-9
     assert value.canvas.scene()["background"]=="192A44FF"
     value.close()
+
+
+def test_preferences_dialog_applies_drawing_values_and_new_project_dimensions(tmp_path:Path):
+    application();settings=QSettings(str(tmp_path/"preferences.ini"),QSettings.Format.IniFormat);store=PreferenceStore(settings)
+    value=MainWindow(ROOT,store);value.show();QApplication.processEvents()
+    original_scene=dict(value.session.project()["scene"])
+
+    def fill_and_accept():
+        dialog=next(widget for widget in QApplication.topLevelWidgets() if isinstance(widget,PreferencesDialog))
+        values={"canvas_width":1440,"canvas_height":900,"logic_width":720,"logic_height":450,
+                "default_arrow_width":2.25,"charge_adornment_distance":28.0,
+                "electron_dot_radius_pt":0.45,"electron_adornment_distance":16.0}
+        for key,setting in values.items():dialog.fields[key].setValue(setting)
+        QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Ok),Qt.MouseButton.LeftButton)
+
+    QTimer.singleShot(0,fill_and_accept);value.actions["preferences"].trigger();QApplication.processEvents()
+    project=value.session.project()
+    assert project["scene"]==original_scene
+    assert project["style"]["default_arrow_width"]==2.25
+    assert project["style"]["electron_dot_radius_pt"]==0.45
+    assert value.dirty and store.values()["canvas_width"]==1440
+
+    value.new_project();project=value.session.project()
+    assert (project["scene"]["width"],project["scene"]["height"])==(1440,900)
+    assert (project["scene"]["logic_width"],project["scene"]["logic_height"])==(720,450)
+    assert project["style"]["charge_adornment_distance"]==28.0
+    assert not value.dirty
+    value.close()
+
+
+def test_preferences_restore_button_restores_every_default(tmp_path:Path):
+    application();settings=QSettings(str(tmp_path/"preferences-reset.ini"),QSettings.Format.IniFormat);store=PreferenceStore(settings)
+    store.save({key:(333 if isinstance(default,int) else 3.33) for key,default in DEFAULT_PREFERENCES.items()})
+    dialog=PreferencesDialog(store);dialog.show();QApplication.processEvents()
+    QTest.mouseClick(dialog.restore_button,Qt.MouseButton.LeftButton)
+    assert dialog.values()==DEFAULT_PREFERENCES
+    dialog.close()
 
 
 def test_wheel_zoom_keeps_world_point_under_same_pixel():

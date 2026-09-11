@@ -459,7 +459,11 @@ std::string toJson(const Project& project, int indent) {
     root["style"] = {{"preset", project.style.preset}, {"font_family", project.style.fontFamily},
         {"font_file", project.style.fontFile}, {"font_pt", project.style.fontPt},
         {"bond_length_pt", project.style.bondLengthPt}, {"line_width_pt", project.style.lineWidthPt},
-        {"double_bond_spacing", project.style.doubleBondSpacing}};
+        {"double_bond_spacing", project.style.doubleBondSpacing},
+        {"default_arrow_width", project.style.defaultArrowWidth},
+        {"charge_adornment_distance", project.style.chargeAdornmentDistance},
+        {"electron_dot_radius_pt", project.style.electronDotRadiusPt},
+        {"electron_adornment_distance", project.style.electronAdornmentDistance}};
     root["molecules"] = json::array();
     for (const Molecule& molecule : project.molecules) {
         json item{{"id", molecule.id}, {"name", molecule.name}, {"source_smiles", molecule.sourceSmiles},
@@ -532,6 +536,10 @@ Project fromJson(const std::string& source) {
         project.style.fontFile = found->value("font_file", project.style.fontFile); project.style.fontPt = found->value("font_pt", project.style.fontPt);
         project.style.bondLengthPt = found->value("bond_length_pt", project.style.bondLengthPt); project.style.lineWidthPt = found->value("line_width_pt", project.style.lineWidthPt);
         project.style.doubleBondSpacing = found->value("double_bond_spacing", project.style.doubleBondSpacing);
+        project.style.defaultArrowWidth = found->value("default_arrow_width", project.style.defaultArrowWidth);
+        project.style.chargeAdornmentDistance = found->value("charge_adornment_distance", project.style.chargeAdornmentDistance);
+        project.style.electronDotRadiusPt = found->value("electron_dot_radius_pt", project.style.electronDotRadiusPt);
+        project.style.electronAdornmentDistance = found->value("electron_adornment_distance", project.style.electronAdornmentDistance);
     }
     for (const json& raw : root.value("molecules", json::array())) {
         Molecule molecule;

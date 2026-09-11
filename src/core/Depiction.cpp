@@ -188,7 +188,7 @@ std::string adornmentSvg(const Molecule& molecule, const Style& style, Drawer& d
         const bool lonePair=adornment.text=="••";
         const bool singleElectron=adornment.text=="•";
         if(lonePair||singleElectron){
-            const double dotRadius=std::max(style.lineWidthPt*1.25,style.fontPt*.12);
+            const double dotRadius=style.electronDotRadiusPt;
             const auto ownerCenter=drawer.getDrawCoords(RDGeom::Point2D(owner->position.x,owner->position.y));
             double tx=-(center.y-ownerCenter.y),ty=center.x-ownerCenter.x;
             const double length=std::max(1e-9,std::hypot(tx,ty));tx/=length;ty/=length;

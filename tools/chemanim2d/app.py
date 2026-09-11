@@ -18,6 +18,7 @@ from .node_inspector import (LEGACY_STRUCTURE_TYPES, STRUCTURE_TRANSFORM_TYPES,
                              NodeInspector, molecule_name)
 from .node_list import NodeList
 from .periodic_table import PeriodicTableDialog
+from .preferences import PreferenceStore, PreferencesDialog
 from .scene_inspector import SceneInspector
 
 
@@ -59,8 +60,8 @@ class GradientStructureDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self,root:Path):
-        super().__init__();self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose,True);self.root=root;self.path=None;self.dirty=False;self.session=CoreSession();self.session.add_blank_molecule("molecule1");self._context_hit={"kind":"none","id":""};self._playing=False
+    def __init__(self,root:Path,preference_store:PreferenceStore|None=None):
+        super().__init__();self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose,True);self.root=root;self.path=None;self.dirty=False;self.preference_store=preference_store or PreferenceStore();self.session=CoreSession();self._apply_new_project_preferences();self.session.add_blank_molecule("molecule1");self._context_hit={"kind":"none","id":""};self._playing=False
         QFontDatabase.addApplicationFont("C:/Windows/Fonts/msyh.ttc");font=QFont("Microsoft YaHei UI");font.setPointSizeF(10.5);self.setFont(font)
         self.setWindowTitle("Chemanim");self.resize(1600,980)
         self.setStyleSheet("""
@@ -109,13 +110,29 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self):
-        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M"),"repair_anchor":self._action("重新居中对象锚点并保持画面",self._repair_active_anchor)}
+        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M"),"repair_anchor":self._action("重新居中对象锚点并保持画面",self._repair_active_anchor),"preferences":self._action("编辑首选项…",self.edit_preferences)}
 
     def _build_menu(self):
         file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();[file.addAction(self.actions[k]) for k in ("lua","render")]
         edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"]);edit.addSeparator();edit.addAction(self.actions["duplicate"]);edit.addAction(self.actions["delete"])
         view=self.menuBar().addMenu("视图");[view.addAction(self.actions[k]) for k in ("fit","fit_all","final")]
         build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"]);build.addSeparator();build.addAction(self.actions["repair_anchor"])
+        preferences=self.menuBar().addMenu("首选项");preferences.addAction(self.actions["preferences"])
+
+    def _apply_new_project_preferences(self):
+        values=self.preference_store.values();project=self.session.project()
+        project["scene"].update(width=values["canvas_width"],height=values["canvas_height"],logic_width=values["logic_width"],logic_height=values["logic_height"])
+        project["style"].update(default_arrow_width=values["default_arrow_width"],charge_adornment_distance=values["charge_adornment_distance"],electron_dot_radius_pt=values["electron_dot_radius_pt"],electron_adornment_distance=values["electron_adornment_distance"])
+        self.session.replace_json(json.dumps(project,ensure_ascii=False))
+
+    def edit_preferences(self):
+        dialog=PreferencesDialog(self.preference_store,self)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        values=dialog.values();self.preference_store.save(values)
+        style={key:values[key] for key in ("default_arrow_width","charge_adornment_distance","electron_dot_radius_pt","electron_adornment_distance")}
+        if self.session.update_style(json.dumps(style)):
+            self.mark_dirty();self.refresh_all(self.node_list.current_id());self.canvas.request_refresh()
+        self.statusBar().showMessage("首选项已保存；画布与逻辑分辨率将在新工程中生效",5000)
 
     def _repair_active_anchor(self):
         target=self.session.active_molecule
@@ -281,6 +298,7 @@ class MainWindow(QMainWindow):
             self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);return node_id
         definition=next((item for item in self.session.node_registry() if item["type"]==node_type),{})
         params={field["key"]:field.get("default") for field in definition.get("fields",[])};params.update(seed or {})
+        if node_type in ("arrow_set_width","arrow_lerp_width","arrow_global_set_width") and "value" not in (seed or {}):params["value"]=project.get("style",{}).get("default_arrow_width",1.5)
         if any(field.get("key")=="target" and field.get("kind")=="molecule" for field in definition.get("fields",[])) and not params.get("target"):params["target"]=self.session.active_molecule
         if node_type=="merge_molecules" and not params.get("source"):
             candidates=[item for item in project.get("molecules",[]) if item.get("id")!=params.get("target")]
@@ -415,7 +433,7 @@ class MainWindow(QMainWindow):
             node_id=self.node_list.current_id()
             if not node_id or not self._activate_node(node_id):self._preview_frame(self.frame_spin.value())
     def new_project(self):
-        self._stop_playback(False);self.session.new_project();self.session.add_blank_molecule("molecule1");self.path=None;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
+        self._stop_playback(False);self.session.new_project();self._apply_new_project_preferences();self.session.add_blank_molecule("molecule1");self.path=None;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
     def add_blank(self):
         nodes=self.session.project().get("nodes",[]);current=self.node_list.current_id();index=next((i+1 for i,n in enumerate(nodes) if n["id"]==current),len(nodes));stable_id=self.session.add_blank_molecule("",index);node_id=next((n["id"] for n in self.session.project().get("nodes",[]) if n["type"]=="molecule_create" and n.get("params",{}).get("target")==stable_id),"");self.mark_dirty();self.refresh_all(node_id);self._node_selected(node_id);self.statusBar().showMessage(f"已新建 {stable_id}")
     def add_smiles(self):

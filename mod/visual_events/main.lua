@@ -4,6 +4,9 @@ chem.scene {
     width = 1920, height = 1080,
     logic_width = 960, logic_height = 540,
     fps = 60, view_zoom = 2.2,
+    font_pt = 10, bond_length_pt = 14.4,
+    line_width_pt = 0.6, double_bond_spacing = 0.18,
+    electron_dot_radius_pt = 0.75, default_arrow_width = 1.5,
     background = "F4F1EAFF", title = "visual_events"
 }
 

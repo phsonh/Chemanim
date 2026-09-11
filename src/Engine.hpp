@@ -33,6 +33,7 @@ struct SceneSettings {
     int endFrame = 0;
     std::string title = "Chemanim Preview";
     ColorValue background{245, 245, 242, 255};
+    core::Style depictionStyle;
 };
 
 enum class Ease {

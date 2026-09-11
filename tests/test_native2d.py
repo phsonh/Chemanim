@@ -1517,6 +1517,42 @@ def test_default_arrow_width_matches_structure_stroke_and_codegen():
         assert field["default"]==1.5
 
 
+def test_project_drawing_preferences_drive_arrow_and_electron_geometry_and_roundtrip():
+    core=session()
+    assert core.update_style(json.dumps({
+        "default_arrow_width":2.75,
+        "charge_adornment_distance":31.0,
+        "electron_dot_radius_pt":0.4,
+        "electron_adornment_distance":17.0,
+    }))
+    gesture(core,"atom_label",(480,270));atom=atoms(core)[0];point=canvas_point(core,atom["id"])
+    gesture(core,"charge_positive",point);charge=adornments(core)[-1]
+    gesture(core,"lone_pair",point);pair=adornments(core)[-1]
+    assert math.isclose(math.hypot(charge["x"],charge["y"]),31,rel_tol=1e-9)
+    assert math.isclose(math.hypot(pair["x"],pair["y"]),17,rel_tol=1e-9)
+    radii=[float(value) for value in re.findall(r"<circle[^>]* r='([^']+)'",core.depict(False)["svg"])]
+    assert radii.count(0.4)==2
+
+    core.add_node("arrow_new",json.dumps({"target":"arrow1"}))
+    assert core.evaluated_arrows(0)["arrow1"]["width"]==2.75
+    lua=core.generate_lua()
+    assert "electron_dot_radius_pt = 0.4" in lua
+    assert "default_arrow_width = 2.75" in lua
+    assert "chem.NewArrow { thickness = 2.75 }" in lua
+
+    restored=CoreSession();restored.replace_json(core.json())
+    assert restored.project()["style"]["electron_dot_radius_pt"]==0.4
+    assert restored.evaluated_arrows(0)["arrow1"]["width"]==2.75
+
+
+def test_drawing_preference_change_is_one_undo_step():
+    core=CoreSession();core.add_blank_molecule("molecule1");before=core.project()["style"]
+    assert core.update_style(json.dumps({"electron_dot_radius_pt":0.33}))
+    assert core.project()["style"]["electron_dot_radius_pt"]==0.33
+    assert core.undo() and core.project()["style"]==before
+    assert core.redo() and core.project()["style"]["electron_dot_radius_pt"]==0.33
+
+
 def test_global_override_order_delete_undo_redo_and_reload_are_deterministic():
     core=CoreSession();target=core.add_blank_molecule("global-order")
     first=core.add_node("molecule_global_set_scale_x",json.dumps({"value":2}))

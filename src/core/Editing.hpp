@@ -160,6 +160,7 @@ public:
     [[nodiscard]] EditResult selectConnectedComponent(const std::string& atomId,
                                                       bool additive = false);
     bool updateScene(const std::string& sceneJson);
+    bool updateStyle(const std::string& styleJson);
 
     [[nodiscard]] bool canUndo() const;
     [[nodiscard]] bool canRedo() const;

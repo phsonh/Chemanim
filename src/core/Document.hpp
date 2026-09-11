@@ -171,6 +171,10 @@ struct Style {
     double bondLengthPt = 14.4;
     double lineWidthPt = 0.6;
     double doubleBondSpacing = 0.18;
+    double defaultArrowWidth = 1.5;
+    double chargeAdornmentDistance = 20.0;
+    double electronDotRadiusPt = 0.75;
+    double electronAdornmentDistance = 20.0;
 };
 
 enum class Easing { Linear, InQuad, OutQuad, InOutQuad, SmoothStep, Step };
