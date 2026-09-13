@@ -117,6 +117,27 @@ def canvas_point(core: CoreSession, atom_id: str):
     return point["x"], point["y"]
 
 
+def test_molecule_presence_rejects_deleted_disabled_and_invalid_operation_outputs():
+    core=CoreSession();source=core.import_smiles("source","CC")
+    split=core.add_node("split_molecule","{}")
+    output=next(node["params"]["output"] for node in core.project()["nodes"] if node["id"]==split)
+    assert core.enable_node(split,False)
+    states=core.evaluated_molecules(0)
+    assert states[source]["exists"] and states[source]["valid"]
+    assert not states[output]["exists"] and not states[output]["valid"]
+
+    create=next(node["id"] for node in core.project()["nodes"]
+                if node["type"]=="molecule_create" and node["params"]["target"]==source)
+    assert core.enable_node(create,False)
+    states=core.evaluated_molecules(0)
+    assert not states[source]["exists"] and not states[source]["valid"]
+
+    restored=CoreSession();deleted=restored.import_smiles("deleted","O")
+    restored.add_node("molecule_delete",json.dumps({"target":deleted}))
+    state=restored.evaluated_molecules(0)[deleted]
+    assert not state["exists"] and state["valid"]
+
+
 def test_structure_commands_are_sealed_by_explicit_structure_node_context():
     core=CoreSession();core.add_blank_molecule("sealed");core.set_viewport(960,540,1,0,0)
     create=next(node for node in core.project()["nodes"] if node["type"]=="molecule_create")
@@ -1363,6 +1384,32 @@ def test_split_and_merge_are_atomic_disconnected_object_operations():
     assert all(next(m for m in final["molecules"] if m["id"]==value)["retired"] for value in (source,copy_id))
     reopened=CoreSession();reopened.replace_json(core.json());assert reopened.evaluated_project(0)==final
     lua=core.generate_lua();assert f"{source}.Delete()" in lua and f"{copy_id}.Delete()" in lua
+
+
+def test_split_output_inherits_source_transform_at_the_actual_operation_frame():
+    core=CoreSession();source=core.import_smiles("source","CC")
+    core.add_node("molecule_lerp_position",json.dumps({"target":source,"x":80.0,"y":-30.0,"frames":30,"easing":"linear"}))
+    core.add_node("molecule_lerp_scale_x",json.dumps({"target":source,"value":1.6,"frames":30,"easing":"linear"}))
+    core.add_node("molecule_lerp_scale_y",json.dumps({"target":source,"value":0.75,"frames":30,"easing":"linear"}))
+    core.add_node("molecule_lerp_rotation",json.dumps({"target":source,"value":40.0,"frames":30,"easing":"linear"}))
+    operation=core.add_node("split_molecule","{}")
+    project=core.project();params=next(node["params"] for node in project["nodes"] if node["id"]==operation);output=params["output"]
+    output_create_index=next(index for index,node in enumerate(project["nodes"])
+                             if node["type"]=="molecule_create" and node["params"]["target"]==output)
+    core.add_node("wait",json.dumps({"frames":30}),output_create_index)
+
+    states=core.evaluated_molecules(30)
+    for property_name in ("x","y","scale_x","scale_y","rotation"):
+        assert math.isclose(states[output][property_name],states[source][property_name],abs_tol=1e-9)
+
+    scene=core.evaluated_project(30)
+    original=next(molecule for molecule in scene["molecules"] if molecule["id"]==source)
+    copied=next(molecule for molecule in scene["molecules"] if molecule["id"]==output)
+    original_atoms={atom["id"]:atom for atom in original["atoms"]}
+    copied_atoms={atom["id"]:atom for atom in copied["atoms"]}
+    for original_id,copied_id in params["id_map"]["target"]["atoms"].items():
+        assert math.isclose(copied_atoms[copied_id]["x"],original_atoms[original_id]["x"],abs_tol=1e-8)
+        assert math.isclose(copied_atoms[copied_id]["y"],original_atoms[original_id]["y"],abs_tol=1e-8)
 
 
 def test_object_operation_output_creation_moves_as_one_lifecycle_safe_block():

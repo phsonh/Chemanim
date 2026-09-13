@@ -94,7 +94,8 @@ class MoleculeVisibilityPanel(QFrame):
         names = {item["id"]: item.get("name", item["id"])
                  for item in project_molecules}
         molecule_ids = [item["id"] for item in project_molecules
-                        if states.get(item["id"], {}).get("exists", False)]
+                        if states.get(item["id"], {}).get("exists", False)
+                        and states.get(item["id"], {}).get("valid", False)]
         if tuple(molecule_ids) != self._ids:
             self._rebuild(molecule_ids, names)
         for molecule_id in molecule_ids:

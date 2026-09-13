@@ -144,22 +144,48 @@ public:
     py::dict evaluatedMolecules(int frame)const{
         const core::Project& project=session_.project();
         const auto timings=core::compileNodeTimings(project);
-        std::set<std::string> explicitCreates,startedCreates;
+        std::set<std::string> explicitCreates,startedCreates,invalidOperationOutputs;
+        std::map<std::string,int> enabledCreateCounts;
         for(std::size_t index=0;index<project.nodes.size();++index){
             const core::ScriptNode& node=project.nodes[index];
-            if(!node.enabled||node.type!="molecule_create")continue;
             try{
                 const nlohmann::json params=nlohmann::json::parse(node.paramsJson);
+                if(node.type=="split_molecule"||(node.type=="merge_molecules"&&params.value("operation_version","")=="object_v1")){
+                    const std::string output=params.value("output",std::string{});
+                    if(!node.enabled&&!output.empty())invalidOperationOutputs.insert(output);
+                }
+                if(node.type!="molecule_create")continue;
                 const std::string target=params.value("target",params.value("molecule",std::string{}));
                 if(target.empty())continue;
                 explicitCreates.insert(target);
-                if(index<timings.size()&&frame>=timings[index].startFrame)startedCreates.insert(target);
+                if(node.enabled){
+                    ++enabledCreateCounts[target];
+                    if(index<timings.size()&&frame>=timings[index].startFrame)startedCreates.insert(target);
+                }
             }catch(...){}
         }
+        const core::EvaluatedScene evaluated=core::evaluateNodes(project,frame);
+        std::set<std::string> errorNodes;
+        for(const core::NodeDiagnostic& diagnostic:evaluated.diagnostics)
+            if(diagnostic.severity=="error")errorNodes.insert(diagnostic.nodeId);
+        for(const core::ScriptNode& node:project.nodes){
+            if(!errorNodes.contains(node.id))continue;
+            try{
+                const nlohmann::json params=nlohmann::json::parse(node.paramsJson);
+                if(node.type=="split_molecule"||(node.type=="merge_molecules"&&params.value("operation_version","")=="object_v1")){
+                    const std::string output=params.value("output",std::string{});
+                    if(!output.empty())invalidOperationOutputs.insert(output);
+                }
+            }catch(...){}
+        }
+        const bool explicitLifecycle=!explicitCreates.empty();
         py::dict result;
-        for(const auto& [id,molecule]:core::evaluateNodes(project,frame).molecules){
+        for(const auto& [id,molecule]:evaluated.molecules){
             py::dict item;const auto coordinate=molecule.coordinate();
-            item["exists"]=(!explicitCreates.contains(id)||startedCreates.contains(id))&&!molecule.retired;
+            const bool lifecycleValid=!explicitLifecycle||(explicitCreates.contains(id)&&enabledCreateCounts[id]==1);
+            const bool valid=lifecycleValid&&!invalidOperationOutputs.contains(id);
+            item["valid"]=valid;
+            item["exists"]=valid&&(!explicitLifecycle||startedCreates.contains(id))&&!molecule.retired;
             item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;
         }
         return result;

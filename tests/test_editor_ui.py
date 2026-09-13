@@ -138,6 +138,19 @@ def test_fixed_molecule_panel_tracks_lifecycle_and_only_changes_viewport():
     QTest.mouseClick(checkbox, Qt.MouseButton.LeftButton)
     QTest.qWait(30)
     assert value.session.viewport_molecule_visible(second)
+
+    value.session.add_node("molecule_delete", json.dumps({"target": second}))
+    value.refresh_all()
+    value.canvas.molecule_panel.sync(20)
+    assert value.canvas.molecule_panel.molecule_ids() == [first]
+
+    first_create = next(node["id"] for node in value.session.project()["nodes"]
+                        if node["type"] == "molecule_create"
+                        and node["params"]["target"] == first)
+    assert value.session.enable_node(first_create, False)
+    value.refresh_all()
+    value.canvas.molecule_panel.sync(20)
+    assert value.canvas.molecule_panel.molecule_ids() == []
     value.close()
     QApplication.processEvents()
 

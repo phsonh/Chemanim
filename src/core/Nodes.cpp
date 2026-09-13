@@ -383,7 +383,11 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
     const auto track=[&](const std::string& key,double base)->NumberTrack&{auto [it,inserted]=tracks.try_emplace(key);if(inserted)it->second.base=base;return it->second;};
     const auto add=[&](const std::string& key,double base,int start,int duration,double target,Easing easing){track(key,base).add(start,duration,target,easing);};
     const auto addColor=[&](const std::string& prefix,Color base,const json& p,int start,int duration,Easing easing){add(prefix+":r",base.red,start,duration,p.value("r",base.red),easing);add(prefix+":g",base.green,start,duration,p.value("g",base.green),easing);add(prefix+":b",base.blue,start,duration,p.value("b",base.blue),easing);};
-    std::set<std::string> explicitCreates;for(const ScriptNode& node:project.nodes)if(node.enabled&&node.type=="molecule_create")explicitCreates.insert(targetOf(parseParams(node)));
+    // The presence of a creation node opts the document into explicit object
+    // lifetimes even when that node is disabled. Otherwise disabling the only
+    // creation node accidentally fell back to the legacy "all molecules exist"
+    // mode and exposed an invalid/orphan object in the editor.
+    std::set<std::string> explicitCreates;for(const ScriptNode& node:project.nodes)if(node.type=="molecule_create")explicitCreates.insert(targetOf(parseParams(node)));
     if(!explicitCreates.empty())for(auto& [_,molecule]:result.molecules)molecule.visible=false;
     std::set<std::string> liveTargets=explicitCreates.empty()?std::set<std::string>{}:std::set<std::string>{};
     if(explicitCreates.empty())for(const auto& [id,_]:result.molecules)liveTargets.insert(id);
@@ -439,12 +443,42 @@ static EvaluatedScene evaluateNodesInternal(const Project& project, int frame,
         else if(meta.targetKind=="molecule"&&molecule&&p.contains("adornment")&&!p.value("adornment","").empty()&&!molecule->adornment(p.value("adornment",""))){diagnostic(node,"节点引用了已经消失的标记 "+p.value("adornment",""));continue;}
         else if(node.type=="molecule_delete"&&molecule){if(frame>=timing.startFrame){molecule->visible=false;molecule->retired=true;}liveTargets.erase(target);}
         else if((node.type=="split_molecule"||(node.type=="merge_molecules"&&p.value("operation_version","")=="object_v1"))&&frame>=timing.startFrame){
+            const auto targetObjectAt=[&](const char* property,double fallback){
+                const auto found=tracks.find(target+":"+property);
+                return found==tracks.end()?fallback:found->second.at(timing.startFrame);
+            };
+            const Point inheritedOrigin{targetObjectAt("anchor:x",molecule?molecule->origin.x:0.0),
+                                        targetObjectAt("anchor:y",molecule?molecule->origin.y:0.0)};
+            const double inheritedScaleX=targetObjectAt("scale_x",molecule?molecule->scaleX:1.0);
+            const double inheritedScaleY=targetObjectAt("scale_y",molecule?molecule->scaleY:1.0);
+            const double inheritedRotation=targetObjectAt("rotation",molecule?molecule->rotation:0.0);
             Molecule& output=result.molecules.at(p.value("output",""));
             if(!applyCapturedObject(output,p)){diagnostic(node,"对象操作缺少有效的结构快照");continue;}
+            // Object-operation snapshots own stable local structure, but their
+            // coordinate system must be inherited at the actual operation
+            // frame. Keeping the transform captured when the node was first
+            // created made a later reorder or wait-duration edit shift a split
+            // copy away from its source. A zero-frame track freezes the current
+            // target transform for the new independent output object.
+            add(output.id+":anchor:x",output.origin.x,timing.startFrame,0,inheritedOrigin.x,Easing::Linear);
+            add(output.id+":anchor:y",output.origin.y,timing.startFrame,0,inheritedOrigin.y,Easing::Linear);
+            add(output.id+":scale_x",output.scaleX,timing.startFrame,0,inheritedScaleX,Easing::Linear);
+            add(output.id+":scale_y",output.scaleY,timing.startFrame,0,inheritedScaleY,Easing::Linear);
+            add(output.id+":rotation",output.rotation,timing.startFrame,0,inheritedRotation,Easing::Linear);
             if(node.type=="merge_molecules"){
                 Molecule& source=result.molecules.at(p.value("source",""));
                 if(molecule){molecule->visible=false;molecule->retired=true;}source.visible=false;source.retired=true;
                 liveTargets.erase(target);liveTargets.erase(source.id);
+            }else if(molecule){
+                output.layer=molecule->layer;output.visible=molecule->visible;
+                add(output.id+":alpha",output.alpha,timing.startFrame,0,
+                    targetObjectAt("alpha",molecule->alpha),Easing::Linear);
+                add(output.id+":color:r",output.color.red,timing.startFrame,0,
+                    targetObjectAt("color:r",molecule->color.red),Easing::Linear);
+                add(output.id+":color:g",output.color.green,timing.startFrame,0,
+                    targetObjectAt("color:g",molecule->color.green),Easing::Linear);
+                add(output.id+":color:b",output.color.blue,timing.startFrame,0,
+                    targetObjectAt("color:b",molecule->color.blue),Easing::Linear);
             }
         }
         else if((node.type=="molecule_set_position"||node.type=="molecule_lerp_position")&&molecule){if(const auto coordinate=molecule->coordinate()){add(target+":anchor:x",coordinate->x,timing.startFrame,duration,p.value("x",coordinate->x),easing);add(target+":anchor:y",coordinate->y,timing.startFrame,duration,p.value("y",coordinate->y),easing);}}
