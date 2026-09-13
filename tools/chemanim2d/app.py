@@ -226,7 +226,7 @@ class MainWindow(QMainWindow):
     def canvas_fit(self):self.canvas.fit_artboard()
     def canvas_fit_all(self):self.canvas.fit_all()
     def refresh_all(self,selected_node=""):
-        self.node_list.refresh(selected_node);end=max(0,self.session.end_frame);self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.canvas.request_refresh();self._title()
+        self.node_list.refresh(selected_node);end=max(0,self.session.end_frame);self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.canvas.request_molecule_panel_sync();self._title()
     def _transaction(self):
         node_id=self.node_list.current_id();self.mark_dirty();self.refresh_all(node_id)
         # The Core has already committed the active draft and undo record.  A
@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
             self.frame_slider.blockSignals(True);self.frame_spin.blockSignals(True)
             self.frame_slider.setRange(0,end);self.frame_spin.setRange(0,max(100,end));self.frame_slider.setValue(frame);self.frame_spin.setValue(frame)
             self.frame_slider.blockSignals(False);self.frame_spin.blockSignals(False)
-            self.canvas.show_edit_frame(frame);self.canvas.request_refresh();self._sync_edit_state()
+            self.canvas.show_edit_frame(frame);self.canvas.request_molecule_panel_sync();self._sync_edit_state()
         except Exception as error:QMessageBox.warning(self,"参数更新失败",str(error))
     def _set_frame(self,frame):self.frame_spin.setValue(frame)
     def _preview_frame(self,frame):

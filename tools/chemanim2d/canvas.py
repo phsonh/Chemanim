@@ -1,12 +1,114 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QByteArray, QMimeData, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (QByteArray, QMimeData, QPointF, QRectF,
+                          QSignalBlocker, Qt, QTimer, pyqtSignal)
 from PyQt6.QtGui import (QColor, QImage, QKeyEvent, QKeySequence, QMouseEvent,
                          QPainter, QPainterPath, QPen, QPolygonF, QWheelEvent)
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import (QApplication, QCheckBox, QFrame, QLabel,
+                             QScrollArea, QVBoxLayout, QWidget)
 
 from .core import CoreSession
+
+
+class MoleculeVisibilityPanel(QFrame):
+    """Fixed, viewport-only visibility controls for molecules alive at a frame."""
+
+    visibilityChanged = pyqtSignal()
+
+    def __init__(self, session: CoreSession, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self._ids: tuple[str, ...] = ()
+        self.setObjectName("moleculeVisibilityPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("""
+          QFrame#moleculeVisibilityPanel{background:rgba(29,33,38,232);border:1px solid #4a525b;border-radius:4px}
+          QFrame#moleculeVisibilityPanel QLabel#panelTitle{font-weight:600;color:#f1f4f7}
+          QFrame#moleculeVisibilityPanel QLabel#emptyLabel{color:#929ba5}
+          QFrame#moleculeVisibilityPanel QCheckBox{color:#e4e8ec;padding:2px 3px;spacing:7px}
+          QFrame#moleculeVisibilityPanel QCheckBox[timelineVisible="false"]{color:#89919a}
+        """)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 7, 8, 7)
+        outer.setSpacing(4)
+        title = QLabel("在场分子")
+        title.setObjectName("panelTitle")
+        outer.addWidget(title)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._content = QWidget()
+        self._rows = QVBoxLayout(self._content)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(1)
+        self._rows.addStretch()
+        self._scroll.setWidget(self._content)
+        outer.addWidget(self._scroll)
+        self.setFixedWidth(202)
+        self._resize_for_rows(0)
+
+    def molecule_ids(self):
+        return list(self._ids)
+
+    def _resize_for_rows(self, count: int):
+        rows = max(1, min(7, count))
+        self.setFixedHeight(39 + rows * 27)
+
+    def _clear_rows(self):
+        while self._rows.count():
+            item = self._rows.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.checkboxes.clear()
+
+    def _toggle(self, stable_id: str, checked: bool):
+        self.session.set_viewport_molecule_visible(stable_id, checked)
+        self.visibilityChanged.emit()
+
+    def _rebuild(self, molecule_ids: list[str], names: dict[str, str]):
+        self._clear_rows()
+        if not molecule_ids:
+            empty = QLabel("当前帧没有分子")
+            empty.setObjectName("emptyLabel")
+            self._rows.addWidget(empty)
+        else:
+            for molecule_id in molecule_ids:
+                name = names.get(molecule_id, molecule_id).strip() or molecule_id
+                label = name if name == molecule_id else f"{name} · {molecule_id}"
+                checkbox = QCheckBox(label)
+                checkbox.setObjectName(f"moleculeVisibility_{molecule_id}")
+                checkbox.toggled.connect(lambda checked, stable_id=molecule_id:
+                                         self._toggle(stable_id, checked))
+                self._rows.addWidget(checkbox)
+                self.checkboxes[molecule_id] = checkbox
+        self._rows.addStretch()
+        self._ids = tuple(molecule_ids)
+        self._resize_for_rows(len(molecule_ids))
+
+    def sync(self, frame: int):
+        states = self.session.evaluated_molecules(max(0, int(frame)))
+        project_molecules = self.session.project().get("molecules", [])
+        names = {item["id"]: item.get("name", item["id"])
+                 for item in project_molecules}
+        molecule_ids = [item["id"] for item in project_molecules
+                        if states.get(item["id"], {}).get("exists", False)]
+        if tuple(molecule_ids) != self._ids:
+            self._rebuild(molecule_ids, names)
+        for molecule_id in molecule_ids:
+            checkbox = self.checkboxes[molecule_id]
+            timeline_visible = bool(states[molecule_id].get("visible", True))
+            blocker = QSignalBlocker(checkbox)
+            checkbox.setChecked(self.session.viewport_molecule_visible(molecule_id))
+            checkbox.setProperty("timelineVisible", timeline_visible)
+            checkbox.style().unpolish(checkbox)
+            checkbox.style().polish(checkbox)
+            checkbox.setToolTip(
+                "仅控制编辑画布显示；不修改时间轴、工程文件或最终导出。"
+                + ("" if timeline_visible else "\n该分子当前也被时间轴设为不可见。"))
+            del blocker
 
 
 class StructureCanvas(QWidget):
@@ -46,6 +148,10 @@ class StructureCanvas(QWidget):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._refresh_now)
+        self._molecule_panel_sync_pending = True
+        self.molecule_panel = MoleculeVisibilityPanel(self.session, self)
+        self.molecule_panel.move(12, 12)
+        self.molecule_panel.visibilityChanged.connect(self.request_refresh)
 
     def scene(self):
         return self.session.project().get("scene", {})
@@ -122,11 +228,22 @@ class StructureCanvas(QWidget):
         if not self._timer.isActive():
             self._timer.start(16)
 
+    def request_molecule_panel_sync(self):
+        self._molecule_panel_sync_pending = True
+        self.request_refresh()
+
     def _refresh_now(self):
         self._sync_core_viewport()
+        if self._molecule_panel_sync_pending:
+            try:
+                self.molecule_panel.sync(self.preview_frame)
+            except RuntimeError:
+                pass
+            self._molecule_panel_sync_pending = False
+        self.molecule_panel.raise_()
         try:
             editable=self.session.edit_target_kind in ("base_structure","structure_snapshot")
-            data = self.session.depict(self.final_effect) if editable else self.session.depict_at(self.preview_frame,self.final_effect)
+            data = self.session.depict(False) if editable and not self.final_effect else self.session.depict_at(self.preview_frame,self.final_effect)
         except RuntimeError:
             self._depiction = self._svg = self._raster = None
             self.update()
@@ -149,12 +266,12 @@ class StructureCanvas(QWidget):
     def set_preview_frame(self, frame: int):
         self.preview_frame = max(0, int(frame))
         self.session.preview_timeline(self.preview_frame)
-        self.request_refresh()
+        self.request_molecule_panel_sync()
 
     def show_edit_frame(self, frame: int):
         """Update the displayed frame without changing Core's edit target."""
         self.preview_frame=max(0,int(frame))
-        self.request_refresh()
+        self.request_molecule_panel_sync()
 
     def set_final_effect(self, enabled: bool):
         self.final_effect = enabled
@@ -174,6 +291,8 @@ class StructureCanvas(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.molecule_panel.move(12, 12)
+        self.molecule_panel.raise_()
         if self._fit_pending:
             QTimer.singleShot(0, self.fit_artboard)
         else:

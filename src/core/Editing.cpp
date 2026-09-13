@@ -317,6 +317,9 @@ Point Viewport::canvasToModel(Point value) const {
 struct EditorSession::Impl {
     Project project;
     std::string activeMolecule;
+    // Viewport-only visibility deliberately stays outside Project. Toggling
+    // an eye never creates nodes, dirties a document, or changes generated Lua.
+    std::set<std::string> viewportHiddenMolecules;
     Tool tool = Tool::SelectRectangle;
     std::string element = "C";
     Viewport viewport;
@@ -357,6 +360,10 @@ struct EditorSession::Impl {
         bool changed = false;
     };
     std::optional<Gesture> gesture;
+
+    [[nodiscard]] bool viewportMoleculeVisible(const std::string& id) const {
+        return !viewportHiddenMolecules.contains(id);
+    }
 
     void markGradientNodesForReview(std::size_t afterIndex=0,const std::string& moleculeId={}) {
         for(std::size_t index=afterIndex;index<project.nodes.size();++index){ScriptNode& node=project.nodes[index];if(!isEditableStructureTransform(node.type))continue;json params=json::parse(node.paramsJson);if(!moleculeId.empty()&&params.value("target","")!=moleculeId&&params.value("source","")!=moleculeId&&params.value("destination","")!=moleculeId)continue;params["needs_review"]=true;node.paramsJson=params.dump();}
@@ -571,7 +578,7 @@ struct EditorSession::Impl {
                 {"p3",{shown->position.x+shown->end.x,shown->position.y+shown->end.y}}}};
             Hit control;control.distance=1e9;for(const auto& [id,position]:controls){const double d=distance(canvasPoint,viewport.modelToCanvas(position));if(d<=12.0&&d<control.distance)control={HitKind::Control,id,d};}if(control.kind==HitKind::Control)return control;
         }}
-        if (!molecule()) return {};
+        if (!molecule() || !viewportMoleculeVisible(activeMolecule)) return {};
         const Molecule displayedMolecule = displayed(); const Molecule* value = &displayedMolecule;
         Hit best;
         best.distance = 1e9;
@@ -911,6 +918,18 @@ const Project& EditorSession::project() const { return impl_->project; }
 void EditorSession::replaceProject(Project project) { impl_ = std::make_unique<Impl>(); impl_->project = std::move(project); impl_->project.ensureDefaultNodes(); if (!impl_->project.molecules.empty()) impl_->activeMolecule = impl_->project.molecules.front().id; }
 void EditorSession::setActiveMolecule(const std::string& stableId) { if (!impl_->project.molecule(stableId)) throw std::runtime_error("Unknown molecule: " + stableId); impl_->activeMolecule = stableId; impl_->selectedAtoms.clear(); impl_->selectedBonds.clear(); impl_->selectedAdornments.clear(); }
 std::string EditorSession::activeMoleculeId() const { return impl_->activeMolecule; }
+void EditorSession::setViewportMoleculeVisible(const std::string& stableId,bool visible) {
+    if(!impl_->project.molecule(stableId))throw std::runtime_error("Unknown molecule: "+stableId);
+    if(visible)impl_->viewportHiddenMolecules.erase(stableId);
+    else impl_->viewportHiddenMolecules.insert(stableId);
+    if(!visible&&stableId==impl_->activeMolecule){
+        impl_->gesture.reset();impl_->selectedAtoms.clear();impl_->selectedBonds.clear();impl_->selectedAdornments.clear();
+    }
+}
+bool EditorSession::viewportMoleculeVisible(const std::string& stableId) const {
+    return impl_->project.molecule(stableId)&&impl_->viewportMoleculeVisible(stableId);
+}
+bool EditorSession::hasHiddenViewportMolecules() const {return !impl_->viewportHiddenMolecules.empty();}
 void EditorSession::setTool(Tool tool) {
     impl_->tool = tool;
     impl_->gesture.reset();
@@ -1133,7 +1152,8 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
             if(impl_->gesture->startHit.kind==HitKind::Atom&&pivot!=impl_->gesture->original.end()){
                 const Point source=pivot->second;
                 for(const auto& [id,reference]:referenceScene.molecules){
-                    if(id==impl_->activeMolecule||reference.retired||!reference.visible)continue;
+                    if(id==impl_->activeMolecule||reference.retired||!reference.visible||
+                       !impl_->viewportMoleculeVisible(id))continue;
                     for(const Atom& atom:reference.atoms)if(atom.alive){
                         const Point rawProposed{source.x+delta.x,source.y+delta.y};
                         const double screenDistance=distance(impl_->viewport.modelToCanvas(rawProposed),
@@ -1151,7 +1171,8 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                 const Atom* sourceA=sourceBond?beforeShown.atom(sourceBond->atomA):nullptr;
                 const Atom* sourceB=sourceBond?beforeShown.atom(sourceBond->atomB):nullptr;
                 if(sourceA&&sourceB)for(const auto& [id,reference]:referenceScene.molecules){
-                    if(id==impl_->activeMolecule||reference.retired||!reference.visible)continue;
+                    if(id==impl_->activeMolecule||reference.retired||!reference.visible||
+                       !impl_->viewportMoleculeVisible(id))continue;
                     for(const Bond& bond:reference.bonds)if(bond.alive&&bond.visible){
                         const Atom* referenceA=reference.atom(bond.atomA);const Atom* referenceB=reference.atom(bond.atomB);
                         if(!referenceA||!referenceB||!referenceA->alive||!referenceB->alive)continue;
@@ -1213,7 +1234,8 @@ EditResult EditorSession::pointerMove(Point canvasPoint, bool alt, bool, bool) {
                 references.push_back({atom.position,candidateToCanvas(atom.position),atom.id});
             const EvaluatedScene referenceScene=evaluateNodes(impl_->gesture->before,impl_->previewFrame);
             for(const auto& [id,reference]:referenceScene.molecules){
-                if(id==impl_->activeMolecule||reference.retired||!reference.visible)continue;
+                if(id==impl_->activeMolecule||reference.retired||!reference.visible||
+                   !impl_->viewportMoleculeVisible(id))continue;
                 for(const Atom& atom:reference.atoms)if(atom.alive)
                     references.push_back({impl_->worldToLocal(atom.position),impl_->viewport.modelToCanvas(atom.position),std::nullopt});
             }

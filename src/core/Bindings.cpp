@@ -7,9 +7,11 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <algorithm>
+#include <set>
 #include <stdexcept>
 
 namespace py = pybind11;
@@ -69,6 +71,8 @@ public:
     }
     void setActiveMolecule(const std::string& id) { session_.setActiveMolecule(id); }
     std::string activeMolecule() const { return session_.activeMoleculeId(); }
+    void setViewportMoleculeVisible(const std::string& id,bool visible){session_.setViewportMoleculeVisible(id,visible);}
+    bool viewportMoleculeVisible(const std::string& id)const{return session_.viewportMoleculeVisible(id);}
     void setTool(const std::string& value) { session_.setTool(core::toolFromString(value)); }
     std::string tool() const { return core::toString(session_.tool()); }
     void setElement(const std::string& value) { session_.setElement(value); }
@@ -137,18 +141,40 @@ public:
     bool updateScene(const std::string& value){return session_.updateScene(value);}
     bool updateStyle(const std::string& value){return session_.updateStyle(value);}
     int endFrame()const{return core::nodeSequenceEndFrame(session_.project());}
-    py::dict evaluatedMolecules(int frame)const{py::dict result;for(const auto& [id,molecule]:core::evaluateNodes(session_.project(),frame).molecules){py::dict item;const auto coordinate=molecule.coordinate();item["exists"]=!molecule.retired;item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;}return result;}
+    py::dict evaluatedMolecules(int frame)const{
+        const core::Project& project=session_.project();
+        const auto timings=core::compileNodeTimings(project);
+        std::set<std::string> explicitCreates,startedCreates;
+        for(std::size_t index=0;index<project.nodes.size();++index){
+            const core::ScriptNode& node=project.nodes[index];
+            if(!node.enabled||node.type!="molecule_create")continue;
+            try{
+                const nlohmann::json params=nlohmann::json::parse(node.paramsJson);
+                const std::string target=params.value("target",params.value("molecule",std::string{}));
+                if(target.empty())continue;
+                explicitCreates.insert(target);
+                if(index<timings.size()&&frame>=timings[index].startFrame)startedCreates.insert(target);
+            }catch(...){}
+        }
+        py::dict result;
+        for(const auto& [id,molecule]:core::evaluateNodes(project,frame).molecules){
+            py::dict item;const auto coordinate=molecule.coordinate();
+            item["exists"]=(!explicitCreates.contains(id)||startedCreates.contains(id))&&!molecule.retired;
+            item["visible"]=molecule.visible;item["x"]=coordinate?coordinate->x:0.0;item["y"]=coordinate?coordinate->y:0.0;item["has_coordinate"]=coordinate.has_value();item["scale_x"]=molecule.scaleX;item["scale_y"]=molecule.scaleY;item["rotation"]=molecule.rotation;item["alpha"]=molecule.alpha;item["r"]=molecule.color.red;item["g"]=molecule.color.green;item["b"]=molecule.color.blue;item["layer"]=molecule.layer;result[py::str(id)]=item;
+        }
+        return result;
+    }
     py::dict evaluatedArrows(int frame)const{py::dict result;for(const auto& [id,arrow]:core::evaluateNodes(session_.project(),frame).arrows){py::dict item;item["exists"]=arrow.exists;item["visible"]=arrow.visible;item["position"]=point(arrow.position);item["start"]=point(arrow.start);item["control1"]=point(arrow.control1);item["control2"]=point(arrow.control2);item["end"]=point(arrow.end);item["progress"]=arrow.progress;item["alpha"]=arrow.alpha;item["width"]=arrow.width;item["scale_x"]=arrow.scaleX;item["scale_y"]=arrow.scaleY;item["r"]=arrow.red;item["g"]=arrow.green;item["b"]=arrow.blue;result[py::str(id)]=item;}return result;}
     py::list diagnostics(int frame)const{py::list values;for(const auto& diagnostic:core::evaluateNodes(session_.project(),frame).diagnostics){py::dict item;item["node_id"]=diagnostic.nodeId;item["severity"]=diagnostic.severity;item["message"]=diagnostic.message;values.append(item);}return values;}
     py::object evaluatedProject(int frame)const{core::Project value=session_.project();value.molecules.clear();for(const auto& [_,molecule]:core::evaluateNodes(session_.project(),frame).molecules)value.molecules.push_back(molecule);value.nodes.clear();return jsonObject(core::toJson(value));}
 
     py::dict depict(bool finalEffect) {
-        if(!finalEffect&&session_.canEditStructure()&&[&]{
+        if(!finalEffect&&session_.canEditStructure()&&(session_.hasHiddenViewportMolecules()||[&]{
             const core::EvaluatedScene scene=core::evaluateNodes(session_.project(),session_.previewFrame());
             return std::any_of(scene.molecules.begin(),scene.molecules.end(),[&](const auto& item){
                 return item.first!=session_.activeMoleculeId()&&!item.second.retired&&item.second.visible;
             });
-        }()){
+        }())){
             core::EvaluatedScene evaluated=core::evaluateNodes(session_.project(),session_.previewFrame());
             evaluated.molecules[session_.activeMoleculeId()]=session_.displayMolecule();
             core::DepictionResult composite;composite.width=session_.viewport().width;composite.height=session_.viewport().height;
@@ -161,7 +187,7 @@ public:
             });
             py::list referenceAtoms;
             for(const auto& [id,molecule]:ordered){
-                if(molecule->retired||!molecule->visible)continue;
+                if(molecule->retired||!molecule->visible||!session_.viewportMoleculeVisible(id))continue;
                 const core::DepictionResult depiction=depiction_.depict(*molecule,session_.project().style,session_.viewport());
                 const std::size_t root=depiction.svg.find("<svg"),start=root==std::string::npos?std::string::npos:depiction.svg.find('>',root),end=depiction.svg.rfind("</svg>");
                 if(start!=std::string::npos&&end!=std::string::npos){
@@ -223,7 +249,7 @@ public:
         });
         for(const auto& [id,moleculePointer]:ordered){
             const core::Molecule& molecule=*moleculePointer;
-            if(!molecule.visible||molecule.retired)continue;
+            if(!molecule.visible||molecule.retired||!session_.viewportMoleculeVisible(id))continue;
             core::Molecule depictedMolecule=molecule;
             core::Viewport depictionViewport=session_.viewport();
             std::string outerTransform;
@@ -288,8 +314,10 @@ public:
                     const double targetWidth=finalEffect?depictionViewport.width:composite.width;
                     const double targetHeight=finalEffect?depictionViewport.height:composite.height;
                     const double sx=targetWidth/viewWidth,sy=targetHeight/viewHeight;
-                    if(finalEffect)composite.svg.append("<g transform='"+outerTransform+"'>\n");
-                    composite.svg.append("<g transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
+                    if(finalEffect)composite.svg.append("<g data-molecule='"+id+"' transform='"+outerTransform+"'>\n");
+                    composite.svg.append("<g");
+                    if(!finalEffect)composite.svg.append(" data-molecule='"+id+"'");
+                    composite.svg.append(" transform='matrix("+std::to_string(sx)+" 0 0 "+std::to_string(sy)+" "+std::to_string(-depiction.viewBox.left*sx)+" "+std::to_string(-depiction.viewBox.top*sy)+")'>\n");
                     composite.svg.append(depiction.svg.substr(start+1,end-start-1));
                     composite.svg.append("\n</g>\n");
                     if(finalEffect)composite.svg.append("</g>\n");
@@ -326,6 +354,8 @@ PYBIND11_MODULE(chemanim_core, module) {
         .def("replace_json", &CoreSession::replaceJson).def("generate_lua", &CoreSession::generateLua).def("write_mod", &CoreSession::writeMod)
         .def("add_blank_molecule", &CoreSession::addBlankMolecule, py::arg("name")="",py::arg("insertion_index")=-1)
         .def("import_smiles", &CoreSession::importSmiles,py::arg("name"),py::arg("smiles"),py::arg("insertion_index")=-1).def("set_active_molecule", &CoreSession::setActiveMolecule)
+        .def("set_viewport_molecule_visible", &CoreSession::setViewportMoleculeVisible)
+        .def("viewport_molecule_visible", &CoreSession::viewportMoleculeVisible)
         .def_property_readonly("active_molecule", &CoreSession::activeMolecule).def("set_tool", &CoreSession::setTool)
         .def_property_readonly("tool", &CoreSession::tool).def_property_readonly("element", &CoreSession::element).def("set_element", &CoreSession::setElement)
         .def("set_viewport", &CoreSession::setViewport).def("hit_test", &CoreSession::hitTest)

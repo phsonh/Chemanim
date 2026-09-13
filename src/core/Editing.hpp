@@ -99,6 +99,9 @@ public:
     void replaceProject(Project project);
     void setActiveMolecule(const std::string& stableId);
     [[nodiscard]] std::string activeMoleculeId() const;
+    void setViewportMoleculeVisible(const std::string& stableId, bool visible);
+    [[nodiscard]] bool viewportMoleculeVisible(const std::string& stableId) const;
+    [[nodiscard]] bool hasHiddenViewportMolecules() const;
     void setTool(Tool tool);
     [[nodiscard]] Tool tool() const;
     void setElement(std::string element);

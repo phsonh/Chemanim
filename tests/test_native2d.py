@@ -24,6 +24,50 @@ def session() -> CoreSession:
     return result
 
 
+def test_viewport_molecule_visibility_is_ephemeral_and_tracks_creation():
+    core = CoreSession()
+    core.set_viewport(960, 540, 1, 0, 0)
+    first = core.add_blank_molecule("first")
+    authorize_structure(core)
+    gesture(core, "single_bond", (400, 270), (432, 270))
+    core.add_node("wait", json.dumps({"frames": 20}))
+    second = core.add_blank_molecule("future")
+    authorize_structure(core)
+    gesture(core, "single_bond", (520, 270), (552, 270))
+
+    at_start = core.evaluated_molecules(0)
+    at_creation = core.evaluated_molecules(20)
+    assert at_start[first]["exists"]
+    assert not at_start[second]["exists"]
+    assert at_creation[first]["exists"] and at_creation[second]["exists"]
+
+    before = core.json()
+    core.set_viewport_molecule_visible(second, False)
+    assert not core.viewport_molecule_visible(second)
+    hidden = core.depict_at(20, False)["svg"]
+    assert f"data-molecule='{first}'" in hidden
+    assert f"data-molecule='{second}'" not in hidden
+    assert core.json() == before
+
+    core.set_viewport_molecule_visible(second, True)
+    shown = core.depict_at(20, False)["svg"]
+    assert f"data-molecule='{second}'" in shown
+    restored = CoreSession()
+    restored.replace_json(core.json())
+    assert restored.viewport_molecule_visible(second)
+
+    core.set_active_molecule(first)
+    late = core.add_node("molecule_set_structure", json.dumps({"target": first}))
+    core.edit_node(late)
+    editable = core.depict(False)
+    assert len(editable["reference_atoms"]) == 2
+    active_center = editable["atoms"][0]["center"]
+    core.set_viewport_molecule_visible(second, False)
+    assert core.depict(False)["reference_atoms"] == []
+    core.set_viewport_molecule_visible(first, False)
+    assert core.hit_test(active_center["x"], active_center["y"])["kind"] == "none"
+
+
 def authorize_structure(core: CoreSession):
     node = next((item for item in reversed(core.project()["nodes"])
                  if item["type"] == "molecule_set_structure" and

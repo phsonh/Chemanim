@@ -103,6 +103,45 @@ def test_preferences_restore_button_restores_every_default(tmp_path:Path):
     dialog.close()
 
 
+def test_fixed_molecule_panel_tracks_lifecycle_and_only_changes_viewport():
+    value = window()
+    first = value.session.active_molecule
+    value._add_node("wait", {"frames": 20}, False)
+    second = value.session.add_blank_molecule("future")
+    value.refresh_all()
+
+    value._preview_frame(0)
+    value.canvas.molecule_panel.sync(0)
+    assert value.canvas.molecule_panel.molecule_ids() == [first]
+
+    value._preview_frame(20)
+    value.canvas.molecule_panel.sync(20)
+    assert value.canvas.molecule_panel.molecule_ids() == [first, second]
+    assert value.canvas.molecule_panel.pos() == QPoint(12, 12)
+    QApplication.processEvents()
+
+    before = value.session.json()
+    dirty = value.dirty
+    checkbox = value.canvas.molecule_panel.checkboxes[second]
+    assert checkbox.isVisible()
+    QTest.mouseClick(checkbox, Qt.MouseButton.LeftButton)
+    QTest.qWait(30)
+    assert not value.session.viewport_molecule_visible(second)
+    assert value.session.json() == before and value.dirty == dirty
+
+    value.canvas.pan = QPointF(180, -90)
+    value.canvas.view_scale *= 1.3
+    value.resize(1500, 900)
+    QApplication.processEvents()
+    assert value.canvas.molecule_panel.pos() == QPoint(12, 12)
+
+    QTest.mouseClick(checkbox, Qt.MouseButton.LeftButton)
+    QTest.qWait(30)
+    assert value.session.viewport_molecule_visible(second)
+    value.close()
+    QApplication.processEvents()
+
+
 def test_wheel_zoom_keeps_world_point_under_same_pixel():
     value=window();canvas=value.canvas;mouse=QPointF(canvas.width()*.71,canvas.height()*.37);before=canvas.screen_to_world(mouse)
     event=QWheelEvent(mouse,QPointF(canvas.mapToGlobal(mouse.toPoint())),QPoint(),QPoint(0,120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.ScrollUpdate,False)
