@@ -28,22 +28,20 @@ def main() -> None:
     raw = json.loads(session.json())
     raw["mod"] = "multi_structure_acceptance"
     session.replace_json(json.dumps(raw, ensure_ascii=False))
-    mod = ROOT / "mod" / raw["mod"]
     output = ROOT / "media" / "multi_structure_acceptance"
-    mod.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
-    session.save(str(mod / "multi_structure_acceptance.cmm"))
-    session.write_mod(str(ROOT))
+    project_path=output/"multi_structure_acceptance.cmm"
+    session.save(str(project_path))
 
     scene = session.project()["scene"]
     session.set_viewport(scene["width"], scene["height"], 2.0, 0.0, 0.0)
     executable = ROOT / "build" / "release" / "chemanim.exe"
     comparisons = {}
     for frame in (0, 15, 30):
-        run = subprocess.run([str(executable), raw["mod"], "--frame", str(frame), "--no-open"], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        run = subprocess.run([str(executable), str(project_path), "--frame", str(frame), "--no-open"], cwd=ROOT, capture_output=True, text=True, timeout=120)
         if run.returncode:
             raise RuntimeError(run.stdout + "\n" + run.stderr)
-        engine_source = ROOT / "media" / raw["mod"] / f'{raw["mod"]}_frame_{frame}.png'
+        engine_source = output / f'{raw["mod"]}_frame_{frame}.png'
         engine_path = output / f"engine-{frame:03d}.png"
         shutil.copy2(engine_source, engine_path)
         drawing = session.depict_at(frame, True)
@@ -54,7 +52,7 @@ def main() -> None:
         stats = ImageStat.Stat(difference)
         comparisons[str(frame)] = {"bbox": difference.getbbox(), "mean": stats.mean, "rms": stats.rms, "max_rms": max(stats.rms)}
     report = {"frames": comparisons, "lua_has_parallel_structure_tracks": session.generate_lua().count("LerpStructure(") >= 2, "saved_reopened": False}
-    reopened = CoreSession();reopened.load(str(mod / "multi_structure_acceptance.cmm"))
+    reopened = CoreSession();reopened.load(str(project_path))
     report["saved_reopened"] = reopened.evaluated_project(30) == session.evaluated_project(30)
     (output / "acceptance.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))

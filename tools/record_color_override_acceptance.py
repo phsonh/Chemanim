@@ -32,9 +32,7 @@ def dominant_pixels(path: Path) -> dict[str, int]:
 def main() -> None:
     module = "color_override_acceptance"
     output = ROOT / "media" / module
-    mod = ROOT / "mod" / module
     output.mkdir(parents=True, exist_ok=True)
-    mod.mkdir(parents=True, exist_ok=True)
 
     session = CoreSession()
     molecule = session.import_smiles("colored", "c1ccccc1")
@@ -75,9 +73,8 @@ def main() -> None:
     raw = session.project()
     raw["mod"] = module
     session.replace_json(json.dumps(raw, ensure_ascii=False))
-    project_path = mod / f"{module}.cmm"
+    project_path = output / f"{module}.cmm"
     session.save(str(project_path))
-    session.write_mod(str(ROOT))
     reopened = CoreSession()
     reopened.load(str(project_path))
     assert reopened.evaluated_project(20) == session.evaluated_project(20)
@@ -100,7 +97,7 @@ def main() -> None:
     executable = ROOT / "build" / "release" / "chemanim.exe"
     comparison: dict[str, object] = {}
     for frame in (0, 10, 20):
-        run = subprocess.run([str(executable), module, "--frame", str(frame), "--no-open"],
+        run = subprocess.run([str(executable), str(project_path), "--frame", str(frame), "--no-open"],
                              cwd=ROOT, capture_output=True, text=True, timeout=120)
         if run.returncode:
             raise RuntimeError(run.stdout + "\n" + run.stderr)

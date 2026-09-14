@@ -33,8 +33,8 @@ def capture(window:MainWindow,path:Path)->None:
 
 def main()->None:
     app=QApplication.instance() or QApplication(sys.argv);app.setQuitOnLastWindowClosed(False)
-    media=ROOT/"media"/"benzene_acylium_acceptance";mod=ROOT/"mod"/"benzene_acylium_acceptance"
-    media.mkdir(parents=True,exist_ok=True);mod.mkdir(parents=True,exist_ok=True)
+    media=ROOT/"media"/"benzene_acylium_acceptance"
+    media.mkdir(parents=True,exist_ok=True)
     window=MainWindow(ROOT);window.resize(1900,1120);window.show();window.session.new_project()
 
     # The colour overrides intentionally precede the objects.  This is the
@@ -103,7 +103,7 @@ def main()->None:
     window.refresh_all(gradient_id);window._node_selected(gradient_id);window.canvas.fit_all();capture(window,media/"01-merged-gradient-endpoint.png")
 
     raw=json.loads(window.session.json());raw["mod"]="benzene_acylium_acceptance";window.session.replace_json(json.dumps(raw,ensure_ascii=False))
-    project_path=mod/"benzene_acylium_acceptance.cmm";window.session.save(str(project_path));window.session.write_mod(str(ROOT))
+    project_path=media/"benzene_acylium_acceptance.cmm";window.session.save(str(project_path))
     reopened=CoreSession();reopened.load(str(project_path))
     if reopened.evaluated_project(45)!=window.session.evaluated_project(45):raise RuntimeError("save/reopen mismatch")
 
@@ -111,7 +111,7 @@ def main()->None:
     executable=ROOT/"build"/"release"/"chemanim.exe";comparison={}
     for label,frame in (("reactants",30),("middle",45),("product",60)):
         window._preview_frame(frame);capture(window,media/f"editor-{label}.png")
-        run=subprocess.run([str(executable),raw["mod"],"--frame",str(frame),"--no-open"],cwd=ROOT,capture_output=True,text=True,timeout=120)
+        run=subprocess.run([str(executable),str(project_path),"--frame",str(frame),"--no-open"],cwd=ROOT,capture_output=True,text=True,timeout=120)
         if run.returncode:raise RuntimeError(run.stdout+"\n"+run.stderr)
         engine=media/f"engine-{label}.png";shutil.copy2(media/f'{raw["mod"]}_frame_{frame}.png',engine)
         window.session.set_viewport(scene["width"],scene["height"],scene["width"]/scene["logic_width"],0.0,0.0)
@@ -119,7 +119,7 @@ def main()->None:
         diff=ImageChops.difference(Image.open(core).convert("RGBA"),Image.open(engine).convert("RGBA"));stats=ImageStat.Stat(diff)
         comparison[label]={"frame":frame,"max_rms":max(stats.rms),"bbox":diff.getbbox()}
 
-    before=set(media.glob(f'{raw["mod"]}_*.mp4'));run=subprocess.run([str(executable),raw["mod"],"--no-open"],cwd=ROOT,capture_output=True,text=True,timeout=240)
+    before=set(media.glob(f'{raw["mod"]}_*.mp4'));run=subprocess.run([str(executable),str(project_path),"--no-open"],cwd=ROOT,capture_output=True,text=True,timeout=240)
     if run.returncode:raise RuntimeError(run.stdout+"\n"+run.stderr)
     created=sorted(set(media.glob(f'{raw["mod"]}_*.mp4'))-before,key=lambda value:value.stat().st_mtime)
     if not created:raise RuntimeError("engine did not create MP4")

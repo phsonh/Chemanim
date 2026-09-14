@@ -61,7 +61,6 @@ public:
     py::object project() const { return jsonObject(json()); }
     void replaceJson(const std::string& source) { session_.replaceProject(core::fromJson(source)); }
     std::string generateLua() const { return core::compileLua(session_.project()); }
-    std::string writeMod(const std::string& root) const { return core::writeMod(session_.project(), std::filesystem::path(root)).string(); }
 
     std::string addBlankMolecule(const std::string& name, int insertionIndex) {
         return session_.createBlankMolecule(name,insertionIndex<0?std::nullopt:std::optional<std::size_t>(static_cast<std::size_t>(insertionIndex)));
@@ -377,7 +376,7 @@ PYBIND11_MODULE(chemanim_core, module) {
     py::class_<CoreSession>(module, "CoreSession")
         .def(py::init<>()).def("new_project", &CoreSession::newProject).def("load", &CoreSession::load)
         .def("save", &CoreSession::save).def("json", &CoreSession::json).def("project", &CoreSession::project)
-        .def("replace_json", &CoreSession::replaceJson).def("generate_lua", &CoreSession::generateLua).def("write_mod", &CoreSession::writeMod)
+        .def("replace_json", &CoreSession::replaceJson).def("generate_lua", &CoreSession::generateLua)
         .def("add_blank_molecule", &CoreSession::addBlankMolecule, py::arg("name")="",py::arg("insertion_index")=-1)
         .def("import_smiles", &CoreSession::importSmiles,py::arg("name"),py::arg("smiles"),py::arg("insertion_index")=-1).def("set_active_molecule", &CoreSession::setActiveMolecule)
         .def("set_viewport_molecule_visible", &CoreSession::setViewportMoleculeVisible)

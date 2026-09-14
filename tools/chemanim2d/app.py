@@ -110,10 +110,10 @@ class MainWindow(QMainWindow):
         return action
 
     def _build_actions(self):
-        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"lua":self._action("生成 Lua",self.generate_lua,"F6"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M"),"repair_anchor":self._action("重新居中对象锚点并保持画面",self._repair_active_anchor),"preferences":self._action("编辑首选项…",self.edit_preferences)}
+        self.actions={"new":self._action("新建",self.new_project,QKeySequence.StandardKey.New),"open":self._action("打开",self.open_project,QKeySequence.StandardKey.Open),"save":self._action("保存",self.save,QKeySequence.StandardKey.Save),"undo":self._action("撤销",self.undo,QKeySequence.StandardKey.Undo),"redo":self._action("重做",self.redo,QKeySequence.StandardKey.Redo),"delete":self._action("删除",self._delete_focused,QKeySequence.StandardKey.Delete),"duplicate":self._action("复制节点",self._duplicate_focused,"Ctrl+D"),"render":self._action("渲染 MP4",self.render_mp4,"F5"),"fit":self._action("适配画板",self.canvas_fit,"F"),"fit_all":self._action("适配全部内容",self.canvas_fit_all,"Shift+F"),"final":self._action("最终效果预览",self._toggle_final_effect,checkable=True),"blank":self._action("空白分子",self.add_blank,"Ctrl+Shift+M"),"smiles":self._action("SMILES 起稿",self.add_smiles,"Ctrl+M"),"repair_anchor":self._action("重新居中对象锚点并保持画面",self._repair_active_anchor),"preferences":self._action("编辑首选项…",self.edit_preferences)}
 
     def _build_menu(self):
-        file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();[file.addAction(self.actions[k]) for k in ("lua","render")]
+        file=self.menuBar().addMenu("文件");[file.addAction(self.actions[k]) for k in ("new","open","save")];file.addSeparator();file.addAction(self.actions["render"])
         edit=self.menuBar().addMenu("编辑");edit.addAction(self.actions["undo"]);edit.addAction(self.actions["redo"]);edit.addSeparator();edit.addAction(self.actions["duplicate"]);edit.addAction(self.actions["delete"])
         view=self.menuBar().addMenu("视图");[view.addAction(self.actions[k]) for k in ("fit","fit_all","final")]
         build=self.menuBar().addMenu("构建");build.addAction(self.actions["blank"]);build.addAction(self.actions["smiles"]);build.addSeparator();build.addAction(self.actions["repair_anchor"])
@@ -444,20 +444,22 @@ class MainWindow(QMainWindow):
         except Exception as error:QMessageBox.warning(self,"无法导入",str(error));return
         self.mark_dirty();self.refresh_all();self._select_default_authoring_node();self.canvas.fit_all();self.statusBar().showMessage(f"已导入 {stable_id}")
     def open_project(self):
-        name,_=QFileDialog.getOpenFileName(self,"打开工程",str(self.root/"mod"),"Chemanim (*.cmm)")
+        directory=self.path.parent if self.path else Path.home()
+        name,_=QFileDialog.getOpenFileName(self,"打开工程",str(directory),"Chemanim (*.cmm)")
         if name:self.load(Path(name))
     def load(self,path:Path):
         try:self.session.load(str(path))
         except Exception as error:QMessageBox.critical(self,"无法打开",str(error));return
-        self._stop_playback(False);self.path=path;self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
+        self._stop_playback(False);self.path=path.resolve();self.dirty=False;self.refresh_all();self._select_default_authoring_node();self.canvas.fit_artboard()
     def save(self):
         if not self.path:
-            name,_=QFileDialog.getSaveFileName(self,"保存工程",str(self.root/"mod"/"native2d.cmm"),"Chemanim (*.cmm)")
-            if not name:return
+            name,_=QFileDialog.getSaveFileName(self,"保存工程",str(Path.home()/"未命名.cmm"),"Chemanim (*.cmm)")
+            if not name:return False
             self.path=Path(name)
+            if self.path.suffix.lower()!=".cmm":self.path=self.path.with_suffix(".cmm")
         try:self.session.save(str(self.path))
-        except Exception as error:QMessageBox.critical(self,"保存失败",str(error));return
-        self.dirty=False;self._title();self.statusBar().showMessage(f"已保存 {self.path}")
+        except Exception as error:QMessageBox.critical(self,"保存失败",str(error));return False
+        self.path=self.path.resolve();self.dirty=False;self._title();self.statusBar().showMessage(f"已保存 {self.path}");return True
     def undo(self):
         node_id=self.node_list.current_id()
         if self.session.undo():
@@ -468,15 +470,26 @@ class MainWindow(QMainWindow):
         if self.session.redo():
             self.mark_dirty();self.refresh_all(node_id);current=self.node_list.current_id()
             if not current or not self._activate_node(current):self._preview_frame(self.frame_spin.value())
-    def generate_lua(self):
-        try:path=self.session.write_mod(str(self.root))
-        except Exception as error:QMessageBox.critical(self,"生成失败",str(error));return
-        self.statusBar().showMessage(f"已由线性节点生成 {path}")
     def render_mp4(self):
-        self.generate_lua();executable=self.root/"build"/"release"/"chemanim.exe"
-        if not executable.exists():QMessageBox.information(self,"尚未构建","请先运行 .\\build.ps1");return
-        try:subprocess.Popen([str(executable),self.session.project().get("mod","native2d_demo")],cwd=self.root)
+        if (self.path is None or self.dirty) and not self.save():return
+        executable=self.root/"build"/"release"/"chemanim.exe"
+        if not executable.exists():QMessageBox.information(self,"尚未构建","找不到 Release 版 chemanim.exe");return
+        try:
+            subprocess.Popen([str(executable),str(self.path)],cwd=self.path.parent)
+            self.statusBar().showMessage(f"正在渲染；MP4 将保存到 {self.path.parent}",5000)
         except Exception as error:QMessageBox.critical(self,"无法启动渲染",str(error))
+
+    def _prompt_save_changes(self):
+        message="这个新工程尚未保存。关闭前要保存吗？" if self.path is None else "工程有尚未保存的更改。关闭前要保存吗？"
+        return QMessageBox.warning(self,"保存工程",message,QMessageBox.StandardButton.Save|QMessageBox.StandardButton.Discard|QMessageBox.StandardButton.Cancel,QMessageBox.StandardButton.Save)
+
+    def closeEvent(self,event):
+        self._stop_playback(False)
+        if getattr(self,"_skip_close_prompt_for_tests",False) or (self.path is not None and not self.dirty):event.accept();return
+        choice=self._prompt_save_changes()
+        if choice==QMessageBox.StandardButton.Discard:event.accept()
+        elif choice==QMessageBox.StandardButton.Save and self.save():event.accept()
+        else:event.ignore()
 
 
 def save_window_screenshot(window:MainWindow,path:Path):

@@ -3,7 +3,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -162,13 +161,6 @@ std::string compileLua(const Project& project) {
     std::string result=out.str();
     while(result.size()>1&&result.back()=='\n'&&result[result.size()-2]=='\n')result.pop_back();
     return result;
-}
-
-std::filesystem::path writeMod(const Project& project, const std::filesystem::path& repositoryRoot) {
-    const auto destination = repositoryRoot / "mod" / project.mod / "main.lua";
-    std::filesystem::create_directories(destination.parent_path());
-    std::ofstream stream(destination, std::ios::binary | std::ios::trunc); if (!stream) throw std::runtime_error("Unable to write main.lua");
-    stream << compileLua(project); return destination;
 }
 
 }  // namespace chem::core

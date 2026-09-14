@@ -19,6 +19,6 @@
 
 ## 回归门槛
 
-`tests/test_native2d.py` 和 `tests/test_editor_ui.py` 覆盖无效上下文写入、删除/手势/撤销隔离、节点选择保留、播放与拖帧状态、Set/Lerp 直接操作、Wait/排序/重叠插值、撤销重做、保存重开、Lua 同源以及 `mod/visual_events` 的前后向求值。
+`tests/test_native2d.py` 和 `tests/test_editor_ui.py` 覆盖无效上下文写入、删除/手势/撤销隔离、节点选择保留、播放与拖帧状态、Set/Lerp 直接操作、Wait/排序/重叠插值、撤销重做、保存重开、Lua 同源以及单文件 `tests/fixtures/visual_events.cmm` 的前后向求值。
 
 如需修改冻结区域，应先提交能复现问题的回归测试，并保持编辑器预览、生成 Lua 和 C++ 最终渲染的逐帧语义一致。

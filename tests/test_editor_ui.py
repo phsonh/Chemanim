@@ -10,7 +10,7 @@ from PyQt6.QtGui import QColor, QImage, QPainter, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
                              QLabel, QLineEdit, QPlainTextEdit, QSpinBox, QToolBar, QInputDialog, QDialogButtonBox,
-                             QPushButton, QToolButton)
+                             QMessageBox, QPushButton, QToolButton)
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
@@ -30,7 +30,7 @@ def application():
 
 
 def window():
-    application(); result=MainWindow(ROOT); result.show(); QApplication.processEvents(); result.canvas.fit_artboard(); QApplication.processEvents(); return result
+    application(); result=MainWindow(ROOT); result._skip_close_prompt_for_tests=True; result.show(); QApplication.processEvents(); result.canvas.fit_artboard(); QApplication.processEvents(); return result
 
 
 def enable_structure(value):
@@ -68,7 +68,7 @@ def test_scene_is_single_core_state_and_artboard_updates():
 
 def test_preferences_dialog_applies_drawing_values_and_new_project_dimensions(tmp_path:Path):
     application();settings=QSettings(str(tmp_path/"preferences.ini"),QSettings.Format.IniFormat);store=PreferenceStore(settings)
-    value=MainWindow(ROOT,store);value.show();QApplication.processEvents()
+    value=MainWindow(ROOT,store);value._skip_close_prompt_for_tests=True;value.show();QApplication.processEvents()
     original_scene=dict(value.session.project()["scene"])
 
     def fill_and_accept():
@@ -92,6 +92,35 @@ def test_preferences_dialog_applies_drawing_values_and_new_project_dimensions(tm
     assert project["style"]["charge_adornment_distance"]==28.0
     assert not value.dirty
     value.close()
+
+
+def test_render_requires_a_real_saved_cmm_and_launches_that_file(tmp_path:Path,monkeypatch):
+    value=window();value.root=tmp_path
+    executable=tmp_path/"build"/"release"/"chemanim.exe";executable.parent.mkdir(parents=True);executable.touch()
+    launched=[];monkeypatch.setattr(subprocess,"Popen",lambda args,cwd:launched.append((args,cwd)))
+    monkeypatch.setattr(value,"save",lambda:False)
+    value.path=None;value.render_mp4();assert launched==[]
+
+    document=tmp_path/"reaction.cmm";value.path=document;value.dirty=True
+    monkeypatch.setattr(value,"save",lambda:(value.session.save(str(document)) or setattr(value,"dirty",False) or True))
+    value.render_mp4()
+    assert document.is_file()
+    assert launched==[([str(executable),str(document)],document.parent)]
+    value.close()
+
+
+def test_close_prompts_for_new_or_dirty_documents_and_honours_cancel(monkeypatch):
+    class Event:
+        def __init__(self):self.accepted=None
+        def accept(self):self.accepted=True
+        def ignore(self):self.accepted=False
+
+    value=window();value._skip_close_prompt_for_tests=False;value.path=None;value.dirty=False
+    monkeypatch.setattr(value,"_prompt_save_changes",lambda:QMessageBox.StandardButton.Cancel)
+    event=Event();value.closeEvent(event);assert event.accepted is False
+    monkeypatch.setattr(value,"_prompt_save_changes",lambda:QMessageBox.StandardButton.Discard)
+    event=Event();value.closeEvent(event);assert event.accepted is True
+    value._skip_close_prompt_for_tests=True;value.close()
 
 
 def test_preferences_restore_button_restores_every_default(tmp_path:Path):

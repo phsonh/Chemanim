@@ -1314,7 +1314,7 @@ def test_visual_events_generate_runtime_lua_without_chemical_fields():
 
 
 def test_repository_visual_events_is_one_reversible_authoring_model():
-    core=CoreSession();core.load(str(ROOT/"mod"/"visual_events"/"visual_events.cmm"))
+    core=CoreSession();core.load(str(ROOT/"tests"/"fixtures"/"visual_events.cmm"))
     before=core.json();assert core.end_frame==120
     forward={frame:core.evaluated_molecules(frame) for frame in (0,30,52,75,120)}
     backward={frame:core.evaluated_molecules(frame) for frame in (120,75,52,30,0)}
@@ -1324,7 +1324,20 @@ def test_repository_visual_events_is_one_reversible_authoring_model():
     assert forward[52]["molecule3"]["alpha"]==130
     assert not forward[75]["molecule2"]["exists"]
     assert forward[75]["molecule3"]["alpha"]==0
-    assert core.generate_lua()==(ROOT/"mod"/"visual_events"/"main.lua").read_text(encoding="utf-8")
+    lua=core.generate_lua();restored=CoreSession();restored.load(str(ROOT/"tests"/"fixtures"/"visual_events.cmm"))
+    assert restored.generate_lua()==lua
+
+
+def test_renderer_reads_one_cmm_and_writes_mp4_beside_it(tmp_path:Path):
+    core=CoreSession();core.add_blank_molecule("single")
+    scene=core.project()["scene"];scene.update(width=320,height=180,logic_width=320,logic_height=180,fps=30)
+    assert core.update_scene(json.dumps(scene))
+    document=tmp_path/"single.cmm";core.save(str(document))
+    executable=ROOT/"build"/"release"/"chemanim.exe";assert executable.is_file()
+    result=subprocess.run([str(executable),str(document),"--no-open"],cwd=ROOT,capture_output=True,text=True,timeout=60)
+    assert result.returncode==0,result.stdout+result.stderr
+    videos=list(tmp_path.glob("single_*.mp4"));assert len(videos)==1 and videos[0].stat().st_size>0
+    assert not (ROOT/"media"/"single").exists()
 
 
 def test_node_registry_exposes_explicit_four_scope_metadata():

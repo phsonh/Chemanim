@@ -534,8 +534,8 @@ def render_and_verify(session: CoreSession, reaction: Reaction, stages: list[dic
         raise RuntimeError("Release engine is missing; run build.ps1 first")
     scene = session.project()["scene"]
     session.set_viewport(scene["width"], scene["height"], scene["width"] / scene["logic_width"], 0.0, 0.0)
-    engine_output = ROOT / "media" / reaction.mod
-    engine_output.mkdir(parents=True, exist_ok=True)
+    engine_output = media
+    project_path = media / f"{reaction.mod}.cmm"
     keyframes = [15, stages[max(0, len(stages) // 2 - 1)]["end"], stages[-1]["end"]]
     comparisons: dict[str, dict] = {}
     core_images: list[tuple[str, Path]] = []
@@ -544,7 +544,7 @@ def render_and_verify(session: CoreSession, reaction: Reaction, stages: list[dic
         save_rgba(session.depict_at(frame, True), core_path)
         core_images.append((label, core_path))
         run = subprocess.run(
-            [str(executable), reaction.mod, "--frame", str(frame), "--no-open"],
+            [str(executable), str(project_path), "--frame", str(frame), "--no-open"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -566,7 +566,7 @@ def render_and_verify(session: CoreSession, reaction: Reaction, stages: list[dic
 
     before = set(engine_output.glob(f"{reaction.mod}_*.mp4"))
     run = subprocess.run(
-        [str(executable), reaction.mod, "--no-open"],
+        [str(executable), str(project_path), "--no-open"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -587,9 +587,7 @@ def render_and_verify(session: CoreSession, reaction: Reaction, stages: list[dic
 
 def build_reaction(reaction: Reaction, render: bool) -> dict:
     media = ROOT / "media" / "reaction_mechanisms" / reaction.mod
-    mod = ROOT / "mod" / reaction.mod
     media.mkdir(parents=True, exist_ok=True)
-    mod.mkdir(parents=True, exist_ok=True)
     session = CoreSession()
     target, output_by_map, current = initialise_reaction(session, reaction)
     arrow_counter = [0]
@@ -603,9 +601,8 @@ def build_reaction(reaction: Reaction, render: bool) -> dict:
     raw["mod"] = reaction.mod
     raw["scene"]["title"] = reaction.title
     session.replace_json(json.dumps(raw, ensure_ascii=False))
-    project_path = mod / f"{reaction.mod}.cmm"
+    project_path = media / f"{reaction.mod}.cmm"
     session.save(str(project_path))
-    session.write_mod(str(ROOT))
     reopened = CoreSession()
     reopened.load(str(project_path))
     if reopened.evaluated_project(session.end_frame) != session.evaluated_project(session.end_frame):

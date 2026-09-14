@@ -109,6 +109,22 @@ void LuaRuntime::runScript(const std::filesystem::path& scriptPath) {
     engine_->scene.endFrame = std::max({engine_->scene.endFrame, cursor_, engine_->maxScheduledFrame()});
 }
 
+void LuaRuntime::runSource(const std::string& source,
+                           const std::filesystem::path& sourceDirectory,
+                           const std::string& chunkName) {
+    engine_->scriptDirectory = std::filesystem::absolute(sourceDirectory);
+    lua_pushcfunction(state_, traceback);
+    const int handler = lua_gettop(state_);
+    if (luaL_loadbuffer(state_, source.data(), source.size(), chunkName.c_str()) != LUA_OK ||
+        lua_pcall(state_, 0, 0, handler) != LUA_OK) {
+        const std::string message = lua_tostring(state_, -1) ? lua_tostring(state_, -1) : "unknown Lua error";
+        lua_settop(state_, 0);
+        throw std::runtime_error(message);
+    }
+    lua_settop(state_, 0);
+    engine_->scene.endFrame = std::max({engine_->scene.endFrame, cursor_, engine_->maxScheduledFrame()});
+}
+
 void LuaRuntime::setDefaultNumber(int tableIndex, const char* key, double value) {
     tableIndex = lua_absindex(state_, tableIndex);
     lua_pushnumber(state_, value);

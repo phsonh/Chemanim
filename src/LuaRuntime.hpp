@@ -19,6 +19,9 @@ public:
     LuaRuntime& operator=(const LuaRuntime&) = delete;
 
     void runScript(const std::filesystem::path& scriptPath);
+    void runSource(const std::string& source,
+                   const std::filesystem::path& sourceDirectory,
+                   const std::string& chunkName = "project.cmm");
     [[nodiscard]] Engine& engine() { return *engine_; }
     [[nodiscard]] const Engine& engine() const { return *engine_; }
 

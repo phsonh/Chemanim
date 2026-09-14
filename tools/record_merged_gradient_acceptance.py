@@ -38,9 +38,7 @@ def main() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     output = ROOT / "media" / "merged_gradient_acceptance"
-    mod = ROOT / "mod" / "merged_gradient_acceptance"
     output.mkdir(parents=True, exist_ok=True)
-    mod.mkdir(parents=True, exist_ok=True)
 
     window = MainWindow(ROOT)
     window.resize(1900, 1120)
@@ -164,9 +162,8 @@ def main() -> None:
     raw = json.loads(window.session.json())
     raw["mod"] = "merged_gradient_acceptance"
     window.session.replace_json(json.dumps(raw, ensure_ascii=False))
-    project_path = mod / "merged_gradient_acceptance.cmm"
+    project_path = output / "merged_gradient_acceptance.cmm"
     window.session.save(str(project_path))
-    window.session.write_mod(str(ROOT))
     reopened = CoreSession()
     reopened.load(str(project_path))
     if reopened.evaluated_project(15) != window.session.evaluated_project(15):
@@ -180,7 +177,7 @@ def main() -> None:
     for phase, frame in (("start", 0), ("middle", 15), ("end", 30)):
         window._preview_frame(frame)
         capture(window, output / f"04-editor-{phase}.png")
-        run = subprocess.run([str(executable), raw["mod"], "--frame", str(frame), "--no-open"],
+        run = subprocess.run([str(executable), str(project_path), "--frame", str(frame), "--no-open"],
                              cwd=ROOT, capture_output=True, text=True, timeout=120)
         if run.returncode:
             raise RuntimeError(run.stdout + "\n" + run.stderr)
@@ -205,7 +202,7 @@ def main() -> None:
                               "max_rms": max(stats.rms)}
 
     before = set(output.glob(f'{raw["mod"]}_*.mp4'))
-    run = subprocess.run([str(executable), raw["mod"], "--no-open"], cwd=ROOT,
+    run = subprocess.run([str(executable), str(project_path), "--no-open"], cwd=ROOT,
                          capture_output=True, text=True, timeout=240)
     if run.returncode:
         raise RuntimeError(run.stdout + "\n" + run.stderr)
